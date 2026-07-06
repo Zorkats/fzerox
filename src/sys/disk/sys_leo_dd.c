@@ -949,7 +949,16 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
         SLLeoReadWrite_DATA(&D_800E32E8, OS_READ, (u32) D_34E + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
         osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
         osWritebackDCacheAll();
+#ifdef PORT
+        /* Port: template-copy destination LBA. The retail value (3062, the
+           Mario Artist template layout target) made the port's skip-the-A-press
+           format path loop forever on errorType 6/10; 1442 was determined
+           empirically to satisfy MFS validation on the SDK-format .ndd. Kept
+           port-only so hardware builds retain retail behavior. */
+        SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, 1442 + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
+#else
         SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, 3062 + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
+#endif
         osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
     }
     osWritebackDCacheAll();

@@ -60,6 +60,27 @@
 
 #else /* _LANGUAGE_C */
 
+#ifdef PORT
+/* On the 64-bit port these macros are applied directly to real host pointers
+   (e.g. K0_TO_PHYS(gGfxPool->unk_20308) in course_model.c's course-preview draw
+   and course_gadgets.c's decoration/gadget matrix loads) — NOT to genuine N64
+   KSEG0/KSEG1 virtual addresses. The original `& 0x1FFFFFFF` mask discards the
+   top 3 bits of the pointer's low 32 bits in addition to the high 32 bits that
+   a plain (u32) cast already drops. That is strictly worse than the
+   already-fixed OS_K0_TO_PHYSICAL wraparound (os_convert.h, PORT branch): the
+   gfx bridge's resolver can reconstruct a full host pointer from an intact
+   low32 via registered host ranges / module windows, but cannot recover 3
+   additionally-masked bits, so the reconstruction fails and the matrix/texture
+   command reads zero/garbage — producing degenerate (e.g. w<=0) transforms.
+   Preserve the low32 intact instead, matching the OS_K0_TO_PHYSICAL PORT fix. */
+#define	K0_TO_K1(x)	((u32)(uintptr_t)(x))	/* kseg0 to kseg1 (PORT: passthrough) */
+#define	K1_TO_K0(x)	((u32)(uintptr_t)(x))	/* kseg1 to kseg0 (PORT: passthrough) */
+#define	K0_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* kseg0 to physical (PORT: passthrough) */
+#define	K1_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* kseg1 to physical (PORT: passthrough) */
+#define	KDM_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* direct mapped to physical (PORT: passthrough) */
+#define	PHYS_TO_K0(x)	((u32)(uintptr_t)(x))	/* physical to kseg0 (PORT: passthrough) */
+#define	PHYS_TO_K1(x)	((u32)(uintptr_t)(x))	/* physical to kseg1 (PORT: passthrough) */
+#else
 #define	K0_TO_K1(x)	((u32)(x)|0xA0000000)	/* kseg0 to kseg1 */
 #define	K1_TO_K0(x)	((u32)(x)&0x9FFFFFFF)	/* kseg1 to kseg0 */
 #define	K0_TO_PHYS(x)	((u32)(x)&0x1FFFFFFF)	/* kseg0 to physical */
@@ -67,6 +88,7 @@
 #define	KDM_TO_PHYS(x)	((u32)(x)&0x1FFFFFFF)	/* direct mapped to physical */
 #define	PHYS_TO_K0(x)	((u32)(x)|0x80000000)	/* physical to kseg0 */
 #define	PHYS_TO_K1(x)	((u32)(x)|0xA0000000)	/* physical to kseg1 */
+#endif	/* PORT */
 
 #endif	/* _LANGUAGE_ASSEMBLY */
 

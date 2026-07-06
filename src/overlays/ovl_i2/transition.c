@@ -198,6 +198,22 @@ void Transition_AppearSet(void) {
             Transition_SetArgument(TRANSITION_TYPE_FADE, 60);
             Transition_Queue(TRANSITION_APPEAR, TRANSITION_TYPE_FADE);
             break;
+#ifdef PORT
+        // PORT: the machine-settings (top-speed/acceleration) screen has no
+        // explicit appear case, so on N64 it falls through to the random
+        // selection below. The random framebuffer-capturing effects (small/large
+        // tiles, whirl, spiral) build a textured background display list from a
+        // per-transition ALLOC_BACK buffer; in this port that path is unstable
+        // and intermittently crashes the interpreter (the transition "changes
+        // between runs" then faults). Match the hide side (STATIC_FADE) with a
+        // deterministic, buffer-less appear so the vehicle-select -> settings
+        // transition is stable and consistent.
+        case GAMEMODE_MACHINE_SETTINGS:
+        case GAMEMODE_LX_MACHINE_SETTINGS:
+        case GAMEMODE_LX_GP_RACE_NEXT_MACHINE_SETTINGS:
+            Transition_Queue(TRANSITION_APPEAR, TRANSITION_TYPE_STATIC_FADE);
+            break;
+#endif
         default:
             Transition_QueueRandom(TRANSITION_APPEAR, true);
             break;
@@ -516,6 +532,9 @@ void Transition_SetBackgroundBuffer(void) {
     u16* frameBufferPtr;
     u16* backgroundBufferPtr;
     Transition* transition = &sTransition;
+#ifdef PORT
+    extern void gdx_set_native_rgba16_texture_range(void* ptr, size_t size, s32 enabled);
+#endif
 
     if (!(transition->flags & TRANSITION_FLAG_SET_BACKGROUND_BUFFER)) {
         return;
@@ -528,6 +547,13 @@ void Transition_SetBackgroundBuffer(void) {
     } else {
         var_v0 = D_800DCD00;
     }
+
+#ifdef PORT
+    {
+        extern s32 gdx_read_current_framebuffer(void* rgba16Buffer, u32 width, u32 height);
+        gdx_read_current_framebuffer(gFrameBuffers[var_v0], SCREEN_WIDTH, SCREEN_HEIGHT);
+    }
+#endif
 
     osInvalDCache(gFrameBuffers[var_v0], SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(u16));
 
@@ -552,6 +578,12 @@ void Transition_SetBackgroundBuffer(void) {
         func_8007EFBC(transition->backgroundBuffer, sTransitionPalettePtr,
                       TRANSITION_BACKGROUND_WIDTH * TRANSITION_BACKGROUND_HEIGHT * sizeof(u16));
     }
+#ifdef PORT
+    gdx_set_native_rgba16_texture_range(
+        transition->backgroundBuffer,
+        TRANSITION_BACKGROUND_WIDTH * TRANSITION_BACKGROUND_HEIGHT * sizeof(u16),
+        !(transition->flags & TRANSITION_FLAG_CONVERT_TO_PALETTE));
+#endif
 }
 
 void Transition_SmallTilesInit(Transition* transition) {
@@ -706,7 +738,7 @@ Gfx* Transition_SmallTilesDraw(Gfx* gfx, Transition* transition) {
     s32 groupedHiddenTileCount;
     s32 column;
     s32 tileIndex;
-    s32 hiddenTileColumnStart;
+    s32 hiddenTileColumnStart = 0;
     s32 row;
     s32 tileLeft;
 
@@ -715,6 +747,7 @@ Gfx* Transition_SmallTilesDraw(Gfx* gfx, Transition* transition) {
 
     for (row = 0; row < SMALL_TILES_ROWS; row++) {
         groupedHiddenTileCount = 0;
+        hiddenTileColumnStart = 0;
         for (column = 0; column < SMALL_TILES_COLUMNS; column++, tileIndex++) {
             if (transition->appearType != TRANSITION_HIDE) {
                 if (Transition_SmallTilesGetTileState(transition, tileIndex) != SMALL_TILES_TILE_UNSET) {

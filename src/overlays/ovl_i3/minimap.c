@@ -53,6 +53,12 @@ void Minimap_InitCourseMinimap(void) {
 
     courseInfo = gCurrentCourseInfo;
 
+#ifdef PORT
+    { extern void gdx_ck(const char*); extern void gdx_ckp(const char*, void*);
+      gdx_ck("[mmap] A_courseInfo");
+      gdx_ckp("[mmap] courseInfo", (void*)courseInfo); }
+#endif
+
     if (gNumPlayers == 1) {
         scale = 1;
     } else {
@@ -62,14 +68,34 @@ void Minimap_InitCourseMinimap(void) {
     for (i = 0; i < MINIMAP_MAX_SIZE; i++) {
         sCourseMinimapTex[i] = MINIMAP_PALETTE_CLEAR;
     }
+#ifdef PORT
+    { extern void gdx_ck(const char*); gdx_ck("[mmap] B_pre_segments"); }
+#endif
     segment = courseInfo->courseSegments;
+#ifdef PORT
+    { extern void gdx_ck(const char*); extern void gdx_ckp(const char*, void*);
+      gdx_ck("[mmap] C_post_segments");
+      gdx_ckp("[mmap] segment", (void*)segment); }
+#endif
     t = 0.0f;
     minimapDimension = MINIMAP_MAX_DIMENSION * scale;
 
     startSegment = segment;
 
+#ifdef PORT
+    { extern void gdx_cki(const char*, int); extern void gdx_ckp(const char*, void*);
+      gdx_cki("[mmap] segmentCount", courseInfo->segmentCount);
+      gdx_ckp("[mmap] seg->next", (void*)segment->next); }
+#endif
+
     while (true) {
+#ifdef PORT
+        { extern void gdx_ck(const char*); gdx_ck("[mmap] D_pre_tangent"); }
+#endif
         forwardMagnitude = Course_SplineGetTangent(segment, t, &tangent);
+#ifdef PORT
+        { extern void gdx_ck(const char*); gdx_ck("[mmap] E_post_tangent"); }
+#endif
         Course_SplineGetPosition(segment, t, &pos);
         column = Math_Round(((pos.x * MINIMAP_MAX_DIMENSION * scale) / MINIMAP_WORLD_DIMENSION) + minimapDimension) / 2;
         row = Math_Round(((pos.z * MINIMAP_MAX_DIMENSION * scale) / MINIMAP_WORLD_DIMENSION) + minimapDimension);

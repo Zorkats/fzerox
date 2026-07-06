@@ -3,12 +3,86 @@
 #include "fzx_object.h"
 #include "segment_symbols.h"
 
+/* ROM data is big-endian N64. On little-endian x86 hosts, *(s32*) reads bytes reversed.
+ * GDX_IS_MIO0 checks bytes individually — works on both big- and little-endian. */
+#ifdef PORT
+#define GDX_IS_MIO0(p) \
+    (((const u8*)(p))[0] == 0x4Du && ((const u8*)(p))[1] == 0x49u && \
+     ((const u8*)(p))[2] == 0x4Fu && ((const u8*)(p))[3] == 0x30u)
+/* Read a big-endian u32 from any byte address (safe on little-endian hosts). */
+#define GDX_READ_BE_U32(p) \
+    (((u32)((const u8*)(p))[0] << 24) | ((u32)((const u8*)(p))[1] << 16) | \
+     ((u32)((const u8*)(p))[2] << 8)  |  (u32)((const u8*)(p))[3])
+#else
+#define GDX_IS_MIO0(p) (*(s32*)(p) == (s32)'MIO0')
+#endif
+
 unk_800E33E0 D_800E33E0[200];
 s32 D_800E3A20;
 Object gObjects[32];
 unk_800E3F28 D_800E3F28[16];
 unk_800E4068 D_800E4068[16];
 
+#ifdef PORT
+/* PORT: func_80077CF0 reads MIO0-compressed common assets from gdx_rom_buffer.
+ * On N64, segAddr is a 32-bit segmented address (0x0F??????) and SEGMENT_OFFSET()
+ * extracts the byte offset. On a 64-bit host, unk_04 is a full host pointer to a
+ * 1-byte stub in AssetBindings.c — it must NOT be truncated to s32. We use void*
+ * as the parameter type (64-bit on x64) and look up the correct ROM offset via the
+ * generated table in AssetBindings.c. */
+extern unsigned char* gdx_rom_buffer;
+extern size_t         gdx_rom_size;
+extern unsigned int gdx_lookup_common_asset_rom_offset(unsigned long long sym_addr);
+extern const char* gdx_lookup_common_asset_o2r_key(unsigned long long sym_addr);
+extern int GDiffuser_LoadAssetBytes(const char* key, void* out, size_t outSize, size_t* copiedSize);
+extern void GDiffuser_RegisterLoadedAssetBuffer(const void* buffer, size_t size, const char* key);
+
+static int GDX_TryLoadCommonAssetO2R(void* segAddr, size_t size, u8* startAddr) {
+    size_t copiedSize = 0;
+    const char* o2rKey = gdx_lookup_common_asset_o2r_key((unsigned long long)segAddr);
+    if (o2rKey == NULL) {
+        return 0;
+    }
+    if (GDiffuser_LoadAssetBytes(o2rKey, startAddr, size, &copiedSize)) {
+        GDiffuser_RegisterLoadedAssetBuffer(startAddr, size, o2rKey);
+        static int sO2RLoadPrints = 0;
+        if (sO2RLoadPrints < 32) {
+            gdx_ck("[o2r] common asset fast path");
+            gdx_cki("[o2r]  copied", (int)copiedSize);
+            gdx_cki("[o2r]  capacity", (int)size);
+            sO2RLoadPrints++;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+void func_80077CF0(void* segAddr, size_t size, u8* startAddr) {
+    if (GDX_TryLoadCommonAssetO2R(segAddr, size, startAddr)) {
+        return;
+    }
+
+    unsigned int romOffset = gdx_lookup_common_asset_rom_offset((unsigned long long)segAddr);
+    if (romOffset != 0) {
+        /* Verify ROM is loaded and range is in bounds before memcpy. */
+        if (gdx_rom_buffer == NULL) {
+            gdx_ck("[rom] FATAL: gdx_rom_buffer is NULL — no ROM loaded! Set FZEROX_ROM env var.");
+            memset(startAddr, 0, size);
+            return;
+        }
+        if (romOffset + size > gdx_rom_size) {
+            gdx_ck("[rom] WARN: read past end of ROM — clamping");
+            gdx_cki("[rom]  romOffset", (int)romOffset);
+            gdx_cki("[rom]  size", (int)size);
+            gdx_cki("[rom]  rom_size", (int)gdx_rom_size);
+            size = gdx_rom_size - romOffset;
+        }
+        memcpy(startAddr, gdx_rom_buffer + romOffset, size);
+    } else {
+        memset(startAddr, 0, size);
+    }
+}
+#else
 void func_80077CF0(s32 segAddr, size_t size, u8* startAddr) {
     CLEAR_DATA_CACHE(startAddr, size);
 #ifndef EXPANSION_KIT
@@ -17,6 +91,7 @@ void func_80077CF0(s32 segAddr, size_t size, u8* startAddr) {
     Dma_LoadAssets(gRomSegmentPairs[4][0] + SEGMENT_OFFSET(segAddr), startAddr, size);
 #endif
 }
+#endif
 
 void func_80077D44(void) {
     D_800E3A20 = 0;
@@ -61,6 +136,11 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
                     }
                     textureSize = arg0->height * alignedWidth;
                     var_s4 = Arena_Allocate(ALLOC_FRONT, textureSize);
+#ifdef PORT
+                    if (GDX_TryLoadCommonAssetO2R(arg0->unk_04, textureSize, var_s4)) {
+                        break;
+                    }
+#endif
                     func_80077CF0(arg0->unk_04, textureSize, var_s4);
                     break;
                 case 20:
@@ -78,11 +158,31 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
                         var_s2 = 0x400;
                     }
                     var_s4 = Arena_Allocate(ALLOC_FRONT, textureSize);
+#ifdef PORT
+                    if (GDX_TryLoadCommonAssetO2R(arg0->unk_04, textureSize, var_s4)) {
+                        break;
+                    }
+#endif
                     header = Arena_Allocate(ALLOC_PEEK, var_s2);
                     CLEAR_DATA_CACHE(header, var_s2);
                     func_80077CF0(arg0->unk_04, var_s2, header);
-                    if (*(s32*) header == (s32) 'MIO0') {
+                    if (GDX_IS_MIO0(header)) {
+#ifdef PORT
+                        {
+                            u32 mioDestSize = GDX_READ_BE_U32((const u8*)header + 4);
+                            u32 allocSize   = (u32)textureSize;
+                            if (mioDestSize > allocSize) {
+                                gdx_ck("[mio0] OVERFLOW PREVENTED in case20/21");
+                                gdx_cki("[mio0]  dest_size", (int)mioDestSize);
+                                gdx_cki("[mio0]  alloc_size", (int)allocSize);
+                                bzero(var_s4, allocSize);
+                            } else {
+                                mio0Decode(header, var_s4);
+                            }
+                        }
+#else
                         mio0Decode(header, var_s4);
+#endif
                     } else {
                         bzero(var_s4, (arg0->height * alignedWidth) / 2);
                     }
@@ -96,11 +196,35 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
                     }
 
                     var_s4 = Arena_Allocate(ALLOC_FRONT, arg0->height * arg0->width * 2);
+#ifdef PORT
+                    if (GDX_TryLoadCommonAssetO2R(arg0->unk_04, arg0->height * arg0->width * 2, var_s4)) {
+                        break;
+                    }
+#endif
                     header = Arena_Allocate(ALLOC_PEEK, var_s0);
                     CLEAR_DATA_CACHE(header, var_s0);
                     func_80077CF0(arg0->unk_04, var_s0, header);
-                    if (*(s32*) header == (s32) 'MIO0') {
+                    if (GDX_IS_MIO0(header)) {
+#ifdef PORT
+                        {
+                            /* MIO0 header bytes 4-7 (big-endian) = decompressed size.
+                             * Overflow into the heap if dest_size > alloc prevents crash. */
+                            u32 mioDestSize = GDX_READ_BE_U32((const u8*)header + 4);
+                            u32 allocSize   = (u32)(arg0->height * arg0->width * 2);
+                            if (mioDestSize > allocSize) {
+                                gdx_ck("[mio0] OVERFLOW PREVENTED in case17/18");
+                                gdx_cki("[mio0]  dest_size", (int)mioDestSize);
+                                gdx_cki("[mio0]  alloc_size", (int)allocSize);
+                                gdx_cki("[mio0]  w", arg0->width);
+                                gdx_cki("[mio0]  h", arg0->height);
+                                bzero(var_s4, allocSize);
+                            } else {
+                                mio0Decode(header, var_s4);
+                            }
+                        }
+#else
                         mio0Decode(header, var_s4);
+#endif
                     } else {
                         bzero(var_s4, arg0->height * arg0->width * 2);
                     }
@@ -116,7 +240,7 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
                 var_s7 = true;
             }
             var_s8[D_800E3A20].unk_00 = arg0->unk_04;
-            var_s8[D_800E3A20].unk_04 = (s32) var_s4;
+            var_s8[D_800E3A20].unk_04 = var_s4;
             D_800E3A20++;
         }
 
@@ -169,7 +293,7 @@ u8* func_i2_800AE578(unk_80077D50* arg0, bool arg1) {
                     header = Arena_Allocate(ALLOC_PEEK, var_s0);
                     CLEAR_DATA_CACHE(header, var_s0);
                     bcopy(arg0->unk_04, header, var_s0);
-                    if (*(s32*) header == (s32) 'MIO0') {
+                    if (GDX_IS_MIO0(header)) {
                         mio0Decode(header, var_s3);
                     } else {
                         bzero(var_s3, arg0->height * arg0->width * 2);
@@ -244,7 +368,7 @@ void* func_80078104(void* arg0, s32 textureSize, s32 arg2, s32 arg3, bool arg4) 
 
             CLEAR_DATA_CACHE(var_a2, textureSize);
             func_80077CF0(arg0, textureSize, var_a2);
-            if (*(s32*) var_a2 == (s32) 'MIO0') {
+            if (GDX_IS_MIO0(var_a2)) {
                 mio0Decode(var_a2, var_s0);
             } else {
                 bzero(var_s0, var_a3);
@@ -516,6 +640,7 @@ void func_800790A4(unk_80077D50* arg0, TexturePtr arg1) {
     }
     var_v0->unk_00 = arg0;
     var_v0->unk_04 = arg1;
+    (var_v0 + 1)->unk_00 = NULL;
 }
 
 void func_800790D4(void) {
@@ -550,9 +675,36 @@ void func_800790D4(void) {
                     header = Arena_Allocate(ALLOC_PEEK, size);
                     CLEAR_DATA_CACHE(header, size);
                     func_80077CF0(temp_s1->unk_04, size, header);
-                    if (*(s32*) header == (s32) 'MIO0') {
+                    if (GDX_IS_MIO0(header)) {
+#ifdef PORT
+                        /* Mirrors the overflow guard added to func_80077D50_impl's
+                         * case 17/18 -- this deferred-decode path (used by the
+                         * portrait/name-card ping-pong cache via func_800793E8)
+                         * was missing the same protection + diagnostics, so a
+                         * bad ROM-offset lookup here silently produced garbage
+                         * or a blank buffer with no trace in the log. */
+                        {
+                            u32 mioDestSize = GDX_READ_BE_U32((const u8*)header + 4);
+                            u32 allocSize   = (u32)(temp_s1->height * temp_s1->width * 2);
+                            if (mioDestSize > allocSize) {
+                                gdx_ck("[mio0] OVERFLOW PREVENTED in func_800790D4 case17/18");
+                                gdx_cki("[mio0]  sym_low32", (int)(uintptr_t) temp_s1->unk_04);
+                                gdx_cki("[mio0]  dest_size", (int) mioDestSize);
+                                gdx_cki("[mio0]  alloc_size", (int) allocSize);
+                                bzero(var_s3->unk_04, allocSize);
+                            } else {
+                                mio0Decode(header, var_s3->unk_04);
+                            }
+                        }
+#else
                         mio0Decode(header, var_s3->unk_04);
+#endif
                     } else {
+#ifdef PORT
+                        gdx_ck("[mio0] MAGIC MISMATCH in func_800790D4 case17/18 -- blanking texture");
+                        gdx_cki("[mio0]  sym_low32", (int)(uintptr_t) temp_s1->unk_04);
+                        gdx_cki("[mio0]  header[0..3]", *(int*) header);
+#endif
                         bzero(var_s3->unk_04, temp_s1->height * temp_s1->width * 2);
                     }
                     break;
@@ -604,7 +756,7 @@ s32 func_800792D8(unk_800792D8* arg0) {
 
 void func_800793E8(s32 arg0, s32 arg1, unk_800792D8* arg2) {
     unk_800E3F28* sp1C;
-    s32 temp_a3;
+    unk_80077D50* temp_a3;
 
     D_800E3F28[arg0].unk_04 = arg1;
     D_800E3F28[arg0].unk_00 = arg2;

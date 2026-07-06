@@ -3,6 +3,13 @@
 #include "fzx_game.h"
 #include "fzx_thread.h"
 
+#ifdef PORT
+extern void gdx_ck(const char* s);
+#define GDX_CK(n) gdx_ck("[game] ck" #n)
+#else
+#define GDX_CK(n)
+#endif
+
 GfxPool* gGfxPool;
 OSTask* sGfxTask;
 Gfx* gMasterDisp;
@@ -179,14 +186,22 @@ extern OSMesgQueue D_800DCAC8;
 extern FrameBuffer* gFrameBuffers[];
 
 void func_80067D64(void) {
+    GDX_CK(H1_67D64_wait_vi);
     osRecvMesg(&D_800DCAB0, &D_800DCD10, OS_MESG_BLOCK);
+    GDX_CK(H2_67D64_got_vi);
     Audio_Update();
     Gfx_InitBuffer();
+    GDX_CK(H3_67D64_pre_gamemode);
     func_800690FC();
+    GDX_CK(H4_67D64_post_gamemode);
     Gfx_LoadSegments();
+    GDX_CK(H5_67D64_pre_draw);
     gMasterDisp = func_80069698(gMasterDisp);
+    GDX_CK(H6_67D64_post_draw);
     Gfx_FullSync();
+    GDX_CK(H7_67D64_wait_dp);
     osRecvMesg(&D_800DCAC8, &D_800DCD10, OS_MESG_BLOCK);
+    GDX_CK(H8_67D64_got_dp);
 
     while (osDpGetStatus() &
            (DPC_STATUS_DMA_BUSY | DPC_STATUS_CMD_BUSY | DPC_STATUS_PIPE_BUSY | DPC_STATUS_TMEM_BUSY)) {}
@@ -194,10 +209,13 @@ void func_80067D64(void) {
     Segment_LoadAssets();
     Transition_SetBackgroundBuffer();
     osViSwapBuffer(gFrameBuffers[D_800DCD00]);
+    GDX_CK(H9_67D64_wait_fb);
 
     while (osViGetCurrentFramebuffer() != gFrameBuffers[D_800DCD00]) {}
 
+    GDX_CK(HA_67D64_set_task);
     Gfx_SetTask(sGfxTask);
+    GDX_CK(HB_67D64_done);
 }
 
 void func_80067E98(void) {
@@ -242,8 +260,11 @@ void Game_ThreadEntry(void* entry) {
     OSMesg msgBuf[1];
 
     startTime = osGetTime();
+    GDX_CK(G1_game_entry);
     Audio_GuitarSeqStart();
+    GDX_CK(G2_guitar_seq_start);
     osRecvMesg(&D_800DCAB0, msgBuf, OS_MESG_BLOCK);
+    GDX_CK(G3_first_vi_handshake);
 
     // Segment Start and End Pairs
     gMainVramStart = osVirtualToPhysical(SEGMENT_VRAM_START(main));
@@ -296,6 +317,30 @@ void Game_ThreadEntry(void* entry) {
     gSegment17B960VramStart = gSegment17B1E0VramEnd;
     gSegment17B960VramEnd = gSegment17B960VramStart + (size_t) SEGMENT_VRAM_SIZE(machine_custom_gfx);
 
+#ifdef PORT
+    {
+        /* Allocate proper RDRAM backing for race GFX segments.
+         * On PORT, SEGMENT_DATA_SIZE_CONST and SEGMENT_VRAM_END return BSS stub
+         * values (garbage physical addresses), so we must carve real RDRAM here
+         * BEFORE Segment_SetAddress() uses these variables. */
+        extern unsigned char* gdx_rdram;
+        extern void* gdx_rdram_alloc_raw(size_t size, size_t align);
+        void* seg8  = gdx_rdram_alloc_raw(PORT_course_track_gfx_DECODED_SIZE, 16u);
+        void* seg3  = gdx_rdram_alloc_raw(
+            (size_t)(PORT_setup_gfx_ROM_END - PORT_setup_gfx_ROM_START), 16u);
+        void* seg3b = gdx_rdram_alloc_raw(
+            (size_t)(PORT_machine_custom_gfx_ROM_END - PORT_machine_custom_gfx_ROM_START), 16u);
+        gSegment16C8A0VramStart = (uintptr_t)((unsigned char*)seg8  - gdx_rdram);
+        gSegment16C8A0VramEnd   = gSegment16C8A0VramStart + PORT_course_track_gfx_DECODED_SIZE;
+        gSegment17B1E0VramStart = (uintptr_t)((unsigned char*)seg3  - gdx_rdram);
+        gSegment17B1E0VramEnd   = gSegment17B1E0VramStart +
+            (size_t)(PORT_setup_gfx_ROM_END - PORT_setup_gfx_ROM_START);
+        gSegment17B960VramStart = (uintptr_t)((unsigned char*)seg3b - gdx_rdram);
+        gSegment17B960VramEnd   = gSegment17B960VramStart +
+            (size_t)(PORT_machine_custom_gfx_ROM_END - PORT_machine_custom_gfx_ROM_START);
+    }
+#endif /* PORT */
+
     gSegment1B8550VramStart = gSegment17B960VramEnd;
     gSegment1B8550VramEnd = gSegment1B8550VramStart + (size_t) SEGMENT_VRAM_SIZE(hud_gfx);
 
@@ -337,6 +382,7 @@ void Game_ThreadEntry(void* entry) {
     gOvlMachineCreateVramEnd = osVirtualToPhysical(SEGMENT_VRAM_END(machine_create));
 #endif
 
+    GDX_CK(G4_segments_computed);
     // Setup memory
     Segment_SetAddress(0, 0);
     Segment_SetAddress(2, gUnkBssVramStart);
@@ -348,10 +394,16 @@ void Game_ThreadEntry(void* entry) {
     Controller_Init();
 #endif
 
+    GDX_CK(G5_pre_arena_init);
     Arena_DefaultStartInit();
     Arena_EndInit();
+    GDX_CK(G6_post_arena_init);
 
-#ifdef EXPANSION_KIT
+#if defined(EXPANSION_KIT) && !defined(PORT)
+    /* Wait for the EK audio system to finish loading the BGM bank from disk.
+       PORT: the audio thread is short-circuited (sys_audio.c), so these load
+       states never advance past 1 — spinning here deadlocks the cooperative
+       scheduler. Skipped until the audio slice lands. */
     while (func_80742790() != 2) {}
     while (func_807424CC() != 0) {}
 #endif
@@ -435,7 +487,12 @@ void Game_ThreadEntry(void* entry) {
     D_8076CB40 = -1;
     func_i10_8012B904();
 #endif
+    GDX_CK(G7_overlays_done);
 
+#ifndef PORT
+    // These DMA calls load track/race assets into N64 VRAM addresses.
+    // On host the destination pointers are invalid (N64 physical addrs, not host heap).
+    // Guarded until proper segment memory management is in place (S6+).
     CLEAR_DATA_CACHE(osPhysicalToVirtual(gSegment16C8A0VramStart), SEGMENT_DATA_SIZE_CONST(course_track_gfx));
 #ifndef EXPANSION_KIT
     Dma_LoadAssets(SEGMENT_ROM_START(course_track_gfx),
@@ -465,6 +522,21 @@ void Game_ThreadEntry(void* entry) {
     Dma_LoadAssets(gRomSegmentPairs[10][0], (uintptr_t) osPhysicalToVirtual(gSegment17B960VramStart),
                    SEGMENT_VRAM_SIZE(machine_custom_gfx));
 #endif
+#else /* PORT */
+    {
+        /* Load race geometry segments directly from ROM into the RDRAM regions
+         * carved above. course_track_gfx is MIO0-compressed; the others are raw. */
+        extern unsigned char* gdx_rom_buffer;
+        mio0Decode(gdx_rom_buffer + PORT_course_track_gfx_ROM_START,
+                   osPhysicalToVirtual((u32)gSegment16C8A0VramStart));
+        Dma_LoadAssets(SEGMENT_ROM_START(setup_gfx),
+                       osPhysicalToVirtual((u32)gSegment17B1E0VramStart),
+                       SEGMENT_ROM_SIZE(setup_gfx));
+        Dma_LoadAssets(SEGMENT_ROM_START(machine_custom_gfx),
+                       osPhysicalToVirtual((u32)gSegment17B960VramStart),
+                       SEGMENT_ROM_SIZE(machine_custom_gfx));
+    }
+#endif /* PORT */
 
 #ifdef EXPANSION_KIT
     if ((gLeoDriveConnectionState != 0) && gRamDDCompatible) {
@@ -476,6 +548,7 @@ void Game_ThreadEntry(void* entry) {
     }
 #endif
 
+    GDX_CK(G8_assets_done);
     // FrameBuffer Indexes
     D_800DCCFC = 0;
     D_800DCD00 = 1;
@@ -493,22 +566,29 @@ void Game_ThreadEntry(void* entry) {
 
     Math_Rand1Init(osGetTime(), osGetTime() + osGetTime());
 
+    GDX_CK(G9_pre_controller_init);
 #ifndef EXPANSION_KIT
     Controller_Init();
 #endif
+    GDX_CK(GA_post_controller_init);
 
+    GDX_CK(GB_pre_i10_init);
     func_i10_80115DF0();
+    GDX_CK(GC_post_i10_init);
     if (gSettingSoundMode == 0) {
         Audio_SetOutMode(SOUNDMODE_SURROUND);
     } else {
         Audio_SetOutMode(SOUNDMODE_MONO);
     }
 
+#ifndef PORT
     while (true) {
         if (OS_CYCLES_TO_NSEC(osGetTime() - startTime) * 6e-8 > 230.0) {
             break;
         }
     }
+#endif
+    GDX_CK(GD_post_timer_wait);
 
     Math_Rand2Init(osGetTime() + osGetTime(), osGetTime());
     osSetTime(0);
@@ -520,7 +600,9 @@ void Game_ThreadEntry(void* entry) {
     gDPFullSync(gMasterDisp++);
     gSPEndDisplayList(gMasterDisp++);
 
+    GDX_CK(GE_pre_gfx_task);
     Gfx_SetTask(sGfxTask);
+    GDX_CK(GF_post_gfx_task);
     Game_Init();
     gGameFrameCount = 0;
 

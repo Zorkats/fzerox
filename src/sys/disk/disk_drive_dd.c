@@ -15,10 +15,12 @@ void func_807038B0(void) {
 
     func_8070F8A4(-1, 6);
     sp24 = osRecvMesg(&gSerialEventQueue, NULL, OS_MESG_NOBLOCK);
+    /* 
     do {
         osContStartReadData(&gSerialEventQueue);
         Controller_UpdateInputs();
     } while (!(gSharedController.buttonPressed & BTN_A));
+    */
     if (sp24 != -1) {
         osContStartReadData(&gSerialEventQueue);
     }
@@ -30,10 +32,12 @@ void func_80703948(void) {
 
     func_8070F8A4(-1, 7);
     sp24 = osRecvMesg(&gSerialEventQueue, NULL, OS_MESG_NOBLOCK);
+    /*
     do {
         osContStartReadData(&gSerialEventQueue);
         Controller_UpdateInputs();
     } while (!(gSharedController.buttonPressed & BTN_A));
+    */
     if (sp24 != -1) {
         osContStartReadData(&gSerialEventQueue);
     }
@@ -84,6 +88,44 @@ s32 DiskDrive_LoadData(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
     s32 nBytes;
     LEOCmd cmdBlock;
 
+#ifdef PORT
+    /* The runtime .ndd is a physical/zoned dump; the leo LBA->byte path below is
+       LOGICAL and drifts from the physical file across zone boundaries, so it is
+       never used on the port. Instead startLba is a tagged handle from
+       SEGMENT_DISK_START (see port_disk_segments.h); serve the request directly
+       from the physical disk buffer, and fail safe (zero-fill) for anything not
+       yet mapped so no path reads garbage or deadlocks. */
+    {
+        extern unsigned char* gdx_disk_buffer;
+        extern unsigned int gdx_disk_size;
+        extern void gdx_cki(const char* s, int v);
+        u32 handle = (u32) startLba;
+        u32 phys = 0;
+        s32 mapped = 0;
+
+        if ((handle >> 24) == (u32) GDX_DISK_TAG) {
+            u32 table = (handle >> 16) & 0xFF;
+            u32 record = handle & 0xFFFF;
+            if (table == GDX_DTAB_DDCOURSE && record < GDX_DDCOURSE_COUNT) {
+                phys = GDX_DDCOURSE_BASE + record * GDX_DDCOURSE_STRIDE;
+                mapped = 1;
+            }
+        }
+
+        if (mapped && gdx_disk_buffer != NULL &&
+            (unsigned long long) phys + (u32) diskSize <= (unsigned long long) gdx_disk_size) {
+            bcopy(gdx_disk_buffer + phys, vram, diskSize);
+            gdx_cki("[dd] served phys", (s32) phys);
+        } else {
+            bzero(vram, diskSize);
+            gdx_cki("[dd] zero-filled handle", startLba);
+        }
+        if (bssSize > 0) {
+            bzero((unsigned char*) vram + diskSize, bssSize);
+        }
+        return 0;
+    }
+#else
     nBytes = 0;
     LeoByteToLBA(startLba, diskSize, &lbaCount);
     osVirtualToPhysical(vram);
@@ -109,9 +151,17 @@ s32 DiskDrive_LoadData(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
     bcopy(D_i1_80415190, osPhysicalToVirtual((uintptr_t) vram + nBytes), diskSize);
     bzero((uintptr_t) vram + nBytes + diskSize, bssSize);
     return sp58;
+#endif
 }
 
 s32 DiskDrive_LoadOverlay(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
+#ifdef PORT
+    // Overlays are statically compiled into the binary (mirrors Dma_LoadOverlay's
+    // PORT path). The vram/bss linker markers are 1-byte host stubs — writing
+    // the disk payload through them would corrupt adjacent memory.
+    (void)startLba; (void)vram; (void)diskSize; (void)bssSize;
+    return 0;
+#else
     void* bssStart;
     s32 sp58;
     s32 lbaCount;
@@ -143,11 +193,17 @@ s32 DiskDrive_LoadOverlay(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
     bcopy(&D_i1_80415190, osPhysicalToVirtual((uintptr_t) vram + nBytes), diskSize);
     bzero((uintptr_t) vram + nBytes + diskSize, bssSize);
     return sp58;
+#endif /* PORT */
 }
 
 extern s32 D_800CCFB0;
 
 s32 DiskDrive_LoadOverlayProgressBar(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
+#ifdef PORT
+    // Same as DiskDrive_LoadOverlay: compiled-in overlays, stub markers.
+    (void)startLba; (void)vram; (void)diskSize; (void)bssSize;
+    return 0;
+#else
     void* bssStart;
     s32 sp70;
     s32 lbaCount;
@@ -185,11 +241,60 @@ s32 DiskDrive_LoadOverlayProgressBar(s32 startLba, void* vram, s32 diskSize, s32
     }
     bzero(bssStart, bssSize);
     return sp70;
+#endif /* PORT */
 }
 
 void DiskDrive_InitRomSegmentPairs(void) {
+#ifdef PORT
+    /* On hardware the 64DD IPL fills osAppNMIBuffer with the cartridge_offsets
+       segment range (and the non-EK build mirrors it in ovl_i11/524920.c). The
+       port bypasses both the IPL and ovl_i11 (excluded from the EK build), so
+       osAppNMIBuffer stays zero and the Dma_ClearRomCopy below would copy zero
+       bytes, leaving gRomSegmentPairs all zeros — every EK asset load
+       (course data, venue textures, audio) would then DMA from ROM offset 0 and
+       crash. Populate it directly from the port ROM segment symbols instead;
+       this is the exact table the base build compiles into cartridge_offsets.c,
+       and each PORT_*_ROM_START is the offset the port DMA already resolves. */
+    static const RomOffset kRomSegmentPairs[29][2] = {
+        { (RomOffset)SEGMENT_ROM_START(audio_bank),                  (RomOffset)SEGMENT_ROM_END(audio_bank) },
+        { (RomOffset)SEGMENT_ROM_START(audio_table),                 (RomOffset)SEGMENT_ROM_END(audio_table) },
+        { (RomOffset)SEGMENT_ROM_START(audio_seq),                   (RomOffset)SEGMENT_ROM_END(audio_seq) },
+        { (RomOffset)SEGMENT_ROM_START(boot_textures),               (RomOffset)SEGMENT_ROM_END(boot_textures) },
+        { (RomOffset)SEGMENT_ROM_START(common_assets_compressed),    (RomOffset)SEGMENT_ROM_END(common_assets_compressed) },
+        { (RomOffset)SEGMENT_ROM_START(course_data),                 (RomOffset)SEGMENT_ROM_END(course_data) },
+        { (RomOffset)SEGMENT_ROM_START(super_textures),              (RomOffset)SEGMENT_ROM_END(super_textures) },
+        { (RomOffset)SEGMENT_ROM_START(setup_gfx),                   (RomOffset)SEGMENT_ROM_END(setup_gfx) },
+        { (RomOffset)SEGMENT_ROM_START(hud_gfx),                     (RomOffset)SEGMENT_ROM_END(hud_gfx) },
+        { (RomOffset)SEGMENT_ROM_START(machine_global_gfx),          (RomOffset)SEGMENT_ROM_END(machine_global_gfx) },
+        { (RomOffset)SEGMENT_ROM_START(machine_custom_gfx),          (RomOffset)SEGMENT_ROM_END(machine_custom_gfx) },
+        { (RomOffset)SEGMENT_ROM_START(expansion_kit_textures_beta), (RomOffset)SEGMENT_ROM_END(expansion_kit_textures_beta) },
+        { (RomOffset)SEGMENT_ROM_START(course_edit_textures_beta),   (RomOffset)SEGMENT_ROM_END(course_edit_textures_beta) },
+        { (RomOffset)SEGMENT_ROM_START(staff_ghost_records),         (RomOffset)SEGMENT_ROM_END(staff_ghost_records) },
+        { (RomOffset)SEGMENT_ROM_START(machine_models),              (RomOffset)SEGMENT_ROM_END(machine_models) },
+        { (RomOffset)SEGMENT_ROM_START(course_track_gfx),            (RomOffset)SEGMENT_ROM_END(course_track_gfx) },
+        { (RomOffset)SEGMENT_ROM_START(mute_city_textures),          (RomOffset)SEGMENT_ROM_END(mute_city_textures) },
+        { (RomOffset)SEGMENT_ROM_START(port_town_textures),          (RomOffset)SEGMENT_ROM_END(port_town_textures) },
+        { (RomOffset)SEGMENT_ROM_START(big_blue_textures),           (RomOffset)SEGMENT_ROM_END(big_blue_textures) },
+        { (RomOffset)SEGMENT_ROM_START(sand_ocean_textures),         (RomOffset)SEGMENT_ROM_END(sand_ocean_textures) },
+        { (RomOffset)SEGMENT_ROM_START(devils_forest_textures),      (RomOffset)SEGMENT_ROM_END(devils_forest_textures) },
+        { (RomOffset)SEGMENT_ROM_START(white_land_textures),         (RomOffset)SEGMENT_ROM_END(white_land_textures) },
+        { (RomOffset)SEGMENT_ROM_START(sector_textures),             (RomOffset)SEGMENT_ROM_END(sector_textures) },
+        { (RomOffset)SEGMENT_ROM_START(red_canyon_textures),         (RomOffset)SEGMENT_ROM_END(red_canyon_textures) },
+        { (RomOffset)SEGMENT_ROM_START(fire_field_textures),         (RomOffset)SEGMENT_ROM_END(fire_field_textures) },
+        { (RomOffset)SEGMENT_ROM_START(silence_textures),            (RomOffset)SEGMENT_ROM_END(silence_textures) },
+        { (RomOffset)SEGMENT_ROM_START(ending_venue_textures),       (RomOffset)SEGMENT_ROM_END(ending_venue_textures) },
+        { (RomOffset)SEGMENT_ROM_START(podium_gfx),                  (RomOffset)SEGMENT_ROM_END(podium_gfx) },
+        { (RomOffset)SEGMENT_ROM_START(create_machine_textures),     (RomOffset)SEGMENT_ROM_END(create_machine_textures) },
+    };
+    s32 i;
+    for (i = 0; i < 29; i++) {
+        gRomSegmentPairs[i][0] = kRomSegmentPairs[i][0];
+        gRomSegmentPairs[i][1] = kRomSegmentPairs[i][1];
+    }
+#else
     size_t size = osAppNMIBuffer[1] - osAppNMIBuffer[0];
     Dma_ClearRomCopy(osAppNMIBuffer[0], gRomSegmentPairs, size);
+#endif
 }
 
 extern FrameBuffer* gFrameBuffers[];

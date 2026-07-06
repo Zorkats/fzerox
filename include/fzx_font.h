@@ -37,21 +37,21 @@ typedef enum FontChar {
 } FontChar;
 
 // FONT_SET_5 special strings
-#define FONT_STR_ST "Ｓ"
-#define FONT_STR_ND "Ｎ"
-#define FONT_STR_RD "Ｒ"
-#define FONT_STR_TH "Ｔ"
-#define FONT_STR_PLAYER "Ｐ"
-#define FONT_STR_COMPUTER "Ａ"
-#define FONT_STR_SELECT_COURSE "Ｃ"
-#define FONT_STR_QUIT "Ｅ"
-#define FONT_STR_UP_ARROW "Ｕ"
-#define FONT_STR_DOWN_ARROW "Ｄ"
-#define FONT_STR_SIDE_ARROW "Ｍ"
+#define FONT_STR_ST "\243\323"
+#define FONT_STR_ND "\243\316"
+#define FONT_STR_RD "\243\322"
+#define FONT_STR_TH "\243\324"
+#define FONT_STR_PLAYER "\243\320"
+#define FONT_STR_COMPUTER "\243\301"
+#define FONT_STR_SELECT_COURSE "\243\303"
+#define FONT_STR_QUIT "\243\305"
+#define FONT_STR_UP_ARROW "\243\325"
+#define FONT_STR_DOWN_ARROW "\243\304"
+#define FONT_STR_SIDE_ARROW "\243\315"
 
 // FONT_SET_6 special strings
-#define FONT_STR_ALPHA "Ａ"
-#define FONT_STR_BETA "Ｂ"
+#define FONT_STR_ALPHA "\243\301"
+#define FONT_STR_BETA "\243\302"
 
 void Font_IntToString(s32 num, s8* str);
 s32 Font_GetCharIndex(s8* str, s32 fontSetLowercase);

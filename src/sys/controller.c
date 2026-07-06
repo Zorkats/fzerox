@@ -14,6 +14,14 @@ s16 D_800CD16C = false;
 
 void Controller_Reset(void) {
     s32 i;
+#ifdef PORT
+    // LUS ControlDeck handles input; N64 SI/rumble stop not needed on host.
+    for (i = 0; i < MAXCONTROLLERS; i++) {
+        gControllers[i].unk_74 = 0;
+        gControllers[i].unk_72 = gControllers[i].unk_76 = 0;
+    }
+    return;
+#endif
 
     if (gControllerReadDataStarted) {
         Controller_UpdateInputs();
@@ -199,6 +207,10 @@ void Controller_UpdateInputs(void) {
 }
 
 void Controller_Init(void) {
+#ifdef PORT
+    // LUS ControlDeck handles input. N64 SI init + rumble init not needed on host.
+    return;
+#endif
     s32 i;
     u8 sp53;
 

@@ -1,6 +1,10 @@
 #include "PR/os_internal.h"
 #include "PR/rcp.h"
 #include "PR/piint.h"
+#ifdef PORT
+#include <stddef.h>
+#include <string.h>
+#endif
 
 void __osDevMgrMain(void* args) {
     OSIoMesg* mb;
@@ -17,6 +21,7 @@ void __osDevMgrMain(void* args) {
     while (TRUE) {
         osRecvMesg(dm->cmdQueue, (OSMesg) &mb, OS_MESG_BLOCK);
 
+#ifndef PORT
         if (mb->piHandle != NULL && mb->piHandle->type == DEVICE_TYPE_64DD &&
             (mb->piHandle->transferInfo.cmdType == LEO_CMD_TYPE_0 ||
              mb->piHandle->transferInfo.cmdType == LEO_CMD_TYPE_1)) {
@@ -71,23 +76,71 @@ void __osDevMgrMain(void* args) {
             if (mb->piHandle->transferInfo.blockNum == 1) {
                 osYieldThread();
             }
-        } else {
+        } else
+#endif
+        {
+#ifdef PORT
+            /* PORT: bypass PI hardware for all DMA reads — copy from gdx_rom_buffer instead.
+             * Cart ROM lives at N64 physical 0x10000000; devAddr encodes the cart physical address
+             * (possibly with KSEG1 bits, which & 0x1FFFFFFF strips).  It can also be a raw ROM
+             * offset from the decomp's segment symbols, so accept both cart-domain addresses and
+             * raw offsets.  Zero-fill when the address is out of ROM range.  For writes, send
+             * completion immediately as a no-op — we can't write to ROM on the host.
+             * In all cases set ret = -1 so the if(ret==0) evtQueue wait below is skipped. */
+#define GDX_PI_ROM_READ(mb_, dm_)                                                    \
+    do {                                                                              \
+        extern unsigned char* gdx_rom_buffer;                                        \
+        extern size_t gdx_rom_size;                                                  \
+        unsigned int _phys = (unsigned int)(mb_)->devAddr & 0x1FFFFFFFu;            \
+        unsigned int _off  = (_phys >= 0x10000000u) ? _phys - 0x10000000u : _phys;  \
+        if (gdx_rom_buffer != NULL &&                                                \
+                (unsigned long long)_off + (mb_)->size <= (unsigned long long)gdx_rom_size) { \
+            memcpy((mb_)->dramAddr, gdx_rom_buffer + _off, (mb_)->size);            \
+        } else {                                                                     \
+            memset((mb_)->dramAddr, 0, (mb_)->size);                                \
+        }                                                                            \
+        osSendMesg((mb_)->hdr.retQueue, (mb_), OS_MESG_NOBLOCK);                   \
+        osSendMesg((dm_)->acsQueue, NULL, OS_MESG_NOBLOCK);                         \
+    } while (0)
+#endif
             switch (mb->hdr.type) {
                 case OS_MESG_TYPE_DMAREAD:
                     osRecvMesg(dm->acsQueue, &dummy, OS_MESG_BLOCK);
+#ifdef PORT
+                    GDX_PI_ROM_READ(mb, dm);
+                    ret = -1;
+#else
                     ret = dm->dma(OS_READ, mb->devAddr, mb->dramAddr, mb->size);
+#endif
                     break;
                 case OS_MESG_TYPE_DMAWRITE:
                     osRecvMesg(dm->acsQueue, &dummy, OS_MESG_BLOCK);
+#ifdef PORT
+                    osSendMesg(mb->hdr.retQueue, mb, OS_MESG_NOBLOCK);
+                    osSendMesg(dm->acsQueue, NULL, OS_MESG_NOBLOCK);
+                    ret = -1;
+#else
                     ret = dm->dma(OS_WRITE, mb->devAddr, mb->dramAddr, mb->size);
+#endif
                     break;
                 case OS_MESG_TYPE_EDMAREAD:
                     osRecvMesg(dm->acsQueue, &dummy, OS_MESG_BLOCK);
+#ifdef PORT
+                    GDX_PI_ROM_READ(mb, dm);
+                    ret = -1;
+#else
                     ret = dm->edma(mb->piHandle, OS_READ, mb->devAddr, mb->dramAddr, mb->size);
+#endif
                     break;
                 case OS_MESG_TYPE_EDMAWRITE:
                     osRecvMesg(dm->acsQueue, &dummy, OS_MESG_BLOCK);
+#ifdef PORT
+                    osSendMesg(mb->hdr.retQueue, mb, OS_MESG_NOBLOCK);
+                    osSendMesg(dm->acsQueue, NULL, OS_MESG_NOBLOCK);
+                    ret = -1;
+#else
                     ret = dm->edma(mb->piHandle, OS_WRITE, mb->devAddr, mb->dramAddr, mb->size);
+#endif
                     break;
                 case OS_MESG_TYPE_LOOPBACK:
                     osSendMesg(mb->hdr.retQueue, mb, OS_MESG_NOBLOCK);
@@ -103,6 +156,9 @@ void __osDevMgrMain(void* args) {
                 osSendMesg(mb->hdr.retQueue, mb, OS_MESG_NOBLOCK);
                 osSendMesg(dm->acsQueue, NULL, OS_MESG_NOBLOCK);
             }
+#ifdef PORT
+#undef GDX_PI_ROM_READ
+#endif
         }
     }
 }

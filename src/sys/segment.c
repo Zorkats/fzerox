@@ -70,6 +70,36 @@ extern u8 D_8023EAA0[];
 extern u8 D_8024DC80[];
 
 void Arena_StartInit(void) {
+#ifdef PORT
+    {
+        /* Do NOT touch arenas 0 and 2 — they were set up by Arena_DefaultStartInit.
+         * Only update arena 1's start to the free RDRAM boundary after the race GFX
+         * segments; in non-race mode leave arena 1 as the zero-size sentinel so that
+         * all allocations fall to the 2MB arena 0. */
+        extern unsigned char* gdx_rdram;
+        switch (gGameMode) {
+            case GAMEMODE_TIME_ATTACK:
+            case GAMEMODE_GP_RACE:
+            case GAMEMODE_PRACTICE:
+            case GAMEMODE_VS_2P:
+            case GAMEMODE_VS_3P:
+            case GAMEMODE_VS_4P:
+            case GAMEMODE_RECORDS:
+            case GAMEMODE_COURSE_EDIT:
+            case GAMEMODE_CREATE_MACHINE:
+            case GAMEMODE_GP_END_CS:
+            case GAMEMODE_DEATH_RACE:
+            case GAMEMODE_LX_MACHINE_SETTINGS:
+            case GAMEMODE_LX_GP_RACE_NEXT_MACHINE_SETTINGS:
+            case GAMEMODE_FLX_MACHINE_SELECT:
+                gArenaStartPtrs[1] = ALIGN16((uintptr_t)(gdx_rdram + gSegment17B960VramEnd));
+                break;
+            default:
+                break;
+        }
+    }
+    return;
+#endif
     uintptr_t* block1 = &gArenaStartPtrs[0];
     uintptr_t* block2 = &gArenaStartPtrs[1];
     uintptr_t* block3 = &gArenaStartPtrs[2];
@@ -108,7 +138,22 @@ void Arena_StartInit(void) {
 }
 
 void Arena_DefaultStartInit(void) {
-#ifndef EXPANSION_KIT
+#ifdef PORT
+    {
+        /* Carve a 2MB RDRAM arena for slot 0 (menus / non-race mode allocations).
+         * Slots 1 and 2 are set to zero-size sentinels here; Arena_StartInit
+         * resets slot 1's start to after the race GFX segments, making it the
+         * smallest finite arena and the preferred allocation target in race mode. */
+        extern unsigned char* gdx_rdram;
+        extern void* gdx_rdram_alloc_raw(size_t size, size_t align);
+        void* arena0 = gdx_rdram_alloc_raw(2u * 1024u * 1024u, 16u);
+        gArenaStartPtrs[0] = (uintptr_t)arena0;
+        gArenaEndPtrs[0]   = (uintptr_t)arena0 + 2u * 1024u * 1024u;
+        gArenaStartPtrs[1] = gArenaEndPtrs[1] = (uintptr_t)(gdx_rdram + 0x7F0000u);
+        gArenaStartPtrs[2] = gArenaEndPtrs[2] = (uintptr_t)(gdx_rdram + 0x7F8000u);
+    }
+    return;
+#elif !defined(EXPANSION_KIT)
     gArenaStartPtrs[0] = ALIGN16((uintptr_t) SEGMENT_VRAM_END(ovl_i10));
     gArenaStartPtrs[1] = 0x803DA800;
     gArenaStartPtrs[2] = ALIGN16((uintptr_t) D_8024DC80);
@@ -121,7 +166,9 @@ void Arena_DefaultStartInit(void) {
 }
 
 void Arena_EndInit(void) {
-#ifndef EXPANSION_KIT
+#ifdef PORT
+    return; /* end ptrs already set by Arena_DefaultStartInit PORT block */
+#elif !defined(EXPANSION_KIT)
     gArenaEndPtrs[0] = 0x801D9800;
     gArenaEndPtrs[1] = 0x803DA800;
     gArenaEndPtrs[2] = ALIGN16((uintptr_t) D_8024DC80);
@@ -221,7 +268,7 @@ uintptr_t Segment_SetPhysicalAddress(s32 segment, uintptr_t addr) {
 }
 
 uintptr_t Segment_SetAddress(s32 segment, uintptr_t addr) {
-    gSegments[segment] = addr;
+    gSegments[segment] = K0_TO_PHYS(addr);
     return gSegments[segment];
 }
 

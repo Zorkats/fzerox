@@ -61,6 +61,11 @@ extern s32 gCurrentGhostType;
 extern s32 gCourseIndex;
 
 void Race_Init(void) {
+#ifdef PORT
+#define RI_CK(n) { extern void gdx_ck(const char*); gdx_ck("[race] RI_" #n); }
+#else
+#define RI_CK(n)
+#endif
     D_800CCFE8 = D_i2_80106F10 = 3;
     gGamePaused = false;
 #ifdef EXPANSION_KIT
@@ -68,7 +73,9 @@ void Race_Init(void) {
         Save_LoadGhost(gCourseIndex);
     }
 #endif
+    RI_CK(A_pre_course_init)
     Course_Init();
+    RI_CK(B_post_course_init)
 #ifdef EXPANSION_KIT
     if ((gGameMode == GAMEMODE_TIME_ATTACK) &&
         ((gCurrentGhostType == GHOST_PLAYER) || (gCurrentGhostType == GHOST_NONE))) {
@@ -76,19 +83,34 @@ void Race_Init(void) {
     }
 #endif
     func_i3_80116C4C();
+    RI_CK(C_pre_racer_init)
     Racer_Init();
+    RI_CK(D_pre_camera_init)
     Camera_Init();
+    RI_CK(E_pre_F4E0)
     func_8007F4E0(COURSE_CONTEXT()->courseData.venue, COURSE_CONTEXT()->courseData.skybox);
+    RI_CK(F_pre_bg_init)
     Background_Init();
+    RI_CK(G_pre_effects_init)
     Effects_Init();
+    RI_CK(H_pre_landmines)
     Course_LandminesViewInteractDataInit();
+    RI_CK(I_pre_jumps)
     Course_JumpsViewInteractDataInit();
+    RI_CK(J_pre_decorations)
     Course_DecorationsViewInteractDataInit();
+    RI_CK(K_pre_effects)
     Course_EffectsViewInteractDataInit(false);
+    RI_CK(L_pre_F324)
     func_i3_8012F324();
+    RI_CK(M_pre_minimap)
     Minimap_InitCourseMinimap();
+    RI_CK(N_pre_menus)
     Menus_Init();
+    RI_CK(O_pre_hud)
     Hud_InitRacePortraits();
+    RI_CK(P_done)
+#undef RI_CK
 }
 
 s32 Race_Update(void) {

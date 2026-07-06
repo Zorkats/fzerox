@@ -8,5 +8,5 @@
 
 aCourseSilence3:
   type: FZX:COURSE
-  offset: 0x231790
+  offset: 0x230FB0
   symbol: aCourseSilence3

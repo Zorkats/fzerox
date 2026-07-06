@@ -5,6 +5,17 @@
 #include "fzx_machine.h"
 #include ASSET_HEADER(staff_ghost_records.h)
 
+#ifdef PORT
+/* R7 save-system slice: host-backed SRAM image (port/sram_buffer.cpp) replaces the
+   N64 PI/DMA path in Sram_Init/Sram_ReadWrite below. Raw extern declarations only
+   (no header include) -- decomp-target C files can't include the MSVC CRT headers
+   port/sram_buffer.cpp uses; this mirrors the existing Dma_RomCopy PORT pattern in
+   sys/dma.c (extern unsigned char* gdx_rom_buffer;). */
+extern void gdx_sram_init(void);
+extern void gdx_sram_read(unsigned int offset, void* dst, unsigned int size);
+extern void gdx_sram_write(unsigned int offset, const void* src, unsigned int size);
+#endif
+
 OSIoMesg sSramIoMesg;
 OSPiHandle sSramPiHandle;
 OSPiHandle* gSramPiHandlePtr;
@@ -1854,6 +1865,14 @@ void Save_LoadDDCups(ProfileSave* profileSaves, u8* cupCompletion, u16* staffGho
         Save_WriteSaveDDCups(profileSaves, invalidSaveIndex, Save_CalculateSaveDDCupsChecksum(profileSaves));
     }
 
+#ifdef AVOID_UB
+    //! @bug ddCups is only assigned inside the cupCompletion branch, but the
+    //! staffGhostCompletion branch below reads it — uninitialized when a
+    //! caller passes cupCompletion == NULL (tripped MSVC's runtime check on
+    //! the port's first-boot path).
+    ddCups = &profileSaves[0].ddCups;
+#endif
+
     if (NULL != cupCompletion) {
         ddCups = &profileSaves[0].ddCups;
 
@@ -1930,6 +1949,10 @@ u16 Save_CalculateCupSaveChecksum(CupSave* cupSave) {
 }
 
 OSPiHandle* Sram_Init(void) {
+#ifdef PORT
+    gdx_sram_init();
+    return NULL; /* gSramPiHandlePtr is unused on PORT -- Sram_ReadWrite below never touches PI hardware */
+#endif
     if (sSramPiHandle.baseAddress == PHYS_TO_K1(PI_DOM2_ADDR2)) {
         return &sSramPiHandle;
     }
@@ -1949,6 +1972,14 @@ OSPiHandle* Sram_Init(void) {
 extern OSMesgQueue gDmaMesgQueue;
 
 void Sram_ReadWrite(s32 direction, u32 offset, void* dramAddr, size_t size) {
+#ifdef PORT
+    if (direction == OS_READ) {
+        gdx_sram_read(offset, dramAddr, (unsigned int) size);
+    } else {
+        gdx_sram_write(offset, dramAddr, (unsigned int) size);
+    }
+    return;
+#endif
     osWritebackDCache(dramAddr, size);
     osInvalDCache(osPhysicalToVirtual((uintptr_t) dramAddr), size);
     sSramIoMesg.hdr.pri = 0;
@@ -1969,6 +2000,18 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
     GhostRecord* ghostRecord = (GhostRecord*) gSaveBuffer;
 #else
     GhostRecord* ghostRecord = &gSaveContext.ghostSave.record;
+#endif
+
+#ifdef PORT
+    /* Save-system slice (SRAM/host file) stops here: staff ghosts come from the
+       cart ROM (Save_RomCopyGhostRecord -> Dma_RomCopyAsync -> gRomSegmentPairs[13]),
+       and that EK ROM segment table isn't populated yet (separate, not-yet-done
+       slice) -- reading through it now would DMA garbage instead of real staff
+       ghost data. Keep the pre-existing safe "no record" result until it lands. */
+    (void) ghostRecord;
+    (void) ghostInfo;
+    (void) courseIndex;
+    return -1;
 #endif
 
     if (!((courseIndex >= COURSE_MUTE_CITY) && (courseIndex <= COURSE_BIG_HAND))) {

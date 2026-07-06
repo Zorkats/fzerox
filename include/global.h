@@ -14,4 +14,14 @@
 #include "leo/leo_internal.h"
 #include "sfx.h"
 
+#ifndef PORT
+#define GDX_CK(x)
+#else
+extern void *memset(void *, int, unsigned long long);
+extern void gdx_ck(const char* s);
+extern void gdx_cki(const char* s, int v);
+extern void gdx_ckp(const char* s, void* p);
+#define GDX_CK(x) gdx_ck(#x)
+#endif
+
 #endif // GLOBAL_H

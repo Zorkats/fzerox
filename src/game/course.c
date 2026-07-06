@@ -18,7 +18,7 @@
 #endif
 
 typedef struct unk_800CF528 {
-    s32 texture;
+    void* texture; // PORT: was s32; pointer so array asset symbols are valid static initializers (and avoid 64-bit truncation)
     f32 textureScale;
     s32 width;
     s32 tile;

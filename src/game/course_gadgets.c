@@ -613,6 +613,57 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
         }
 #endif
     } else {
+#ifdef PORT
+        /* GDX_DIAG_GADGET: race gadgets (start gate, signs, buildings) render
+           invisible on PORT. Course_GadgetsDraw only draws a decorational
+           feature when decoration->loadChunk->drawState != 0 (course_gadgets.c
+           above). Three independent producers feed that condition: the
+           feature list itself (Course_FeaturesInit, at Course_Init time), the
+           per-decoration closest-chunk pointer + LookAt matrix (Course_
+           DecorationsViewInteractDataInit, at Race_Init time), and the
+           per-frame camera-frustum visibility flag (Course_Draw, every frame,
+           just before this function runs). Log all three once so the next
+           run tells us which producer is empty/zero instead of guessing. */
+        {
+            static int sGdxGadgetDiagCount = 0;
+            extern int gGdxRaceActive;
+            if (gGdxRaceActive && (sGdxGadgetDiagCount < 4)) {
+                extern void gdx_cki(const char*, int);
+                extern s32 gSegmentChunkCount;
+                CourseFeature* diagFeature;
+                CourseFeature* diagFeaturesEnd = featuresInfo->features + featuresInfo->featureCount;
+                CourseDecoration* diagDecoration = gCourseDecorations;
+                Mtx* diagMtx = D_80225800.decorationMtx;
+                s32 diagDecorationalCount = 0;
+                s32 diagDrawableCount = 0;
+                s32 diagNonZeroMtxCount = 0;
+                MtxF diagMtxF;
+
+                gdx_cki("[gadget] featureCount", featuresInfo->featureCount);
+                gdx_cki("[gadget] gSegmentChunkCount", gSegmentChunkCount);
+
+                for (diagFeature = featuresInfo->features; diagFeature < diagFeaturesEnd; diagFeature++) {
+                    if (!Course_FeatureIsDecorational(diagFeature->featureType)) {
+                        continue;
+                    }
+                    diagDecorationalCount++;
+                    if ((diagDecoration->loadChunk != NULL) && (diagDecoration->loadChunk->drawState != 0)) {
+                        diagDrawableCount++;
+                    }
+                    Matrix_FromMtx(diagMtx, &diagMtxF);
+                    if ((diagMtxF.m[3][0] != 0.0f) || (diagMtxF.m[3][1] != 0.0f) || (diagMtxF.m[3][2] != 0.0f)) {
+                        diagNonZeroMtxCount++;
+                    }
+                    diagDecoration++;
+                    diagMtx++;
+                }
+                gdx_cki("[gadget] decorationalCount", diagDecorationalCount);
+                gdx_cki("[gadget] drawableThisFrame", diagDrawableCount);
+                gdx_cki("[gadget] nonZeroMtxCount", diagNonZeroMtxCount);
+                sGdxGadgetDiagCount++;
+            }
+        }
+#endif
         featuresEnd = featuresInfo->features + featuresInfo->featureCount;
         decorationMtx = D_80225800.decorationMtx;
         for (feature = featuresInfo->features; feature < featuresEnd; feature++) {
@@ -3719,6 +3770,13 @@ extern OSIoMesg gDmaIOMsg;
 extern OSPiHandle* gCartRomHandle;
 
 void Dma_ClearRomCopy(void* romAddr, void* ramAddr, size_t size) {
+#ifdef PORT
+    // R6 EXPLORE PASS: skip ROM DMA (no cartridge handle / resource system yet). Piece 5.
+    (void) romAddr;
+    (void) ramAddr;
+    (void) size;
+    return;
+#endif
     osInvalDCache(osPhysicalToVirtual(ramAddr), size);
     gDmaIOMsg.hdr.pri = OS_MESG_PRI_NORMAL;
     gDmaIOMsg.hdr.retQueue = &gDmaMesgQueue;
@@ -3731,6 +3789,12 @@ void Dma_ClearRomCopy(void* romAddr, void* ramAddr, size_t size) {
 }
 
 void Dma_RomCopyAsync(void* romAddr, void* ramAddr, size_t size) {
+#ifdef PORT
+    // The PORT Dma_RomCopy resolves raw N64 physical addresses and truncated low-32
+    // asset/segment pointers before touching host memory.
+    Dma_RomCopy(romAddr, ramAddr, size);
+    return;
+#endif
     OSMesg sp20[8];
 
     if (gDmaMesgQueue.validCount >= gDmaMesgQueue.msgCount) {
@@ -3818,6 +3882,34 @@ extern s32 D_xk2_800F7404;
 
 UNUSED s32 D_800CD21C = 0;
 
+#ifdef PORT
+// ROM data is big-endian (.z64). Byte-swap only the multi-byte fields that were
+// DMA'd into the host struct via memcpy. Single-byte fields (s8/u8/char) are fine.
+static void Gdx_SwapU16InPlace(void* p) {
+    u8* b = (u8*)p;
+    u8 t = b[0]; b[0] = b[1]; b[1] = t;
+}
+static void Gdx_SwapU32InPlace(void* p) {
+    u8* b = (u8*)p;
+    u8 t0 = b[0], t1 = b[1]; b[0] = b[3]; b[1] = b[2]; b[2] = t1; b[3] = t0;
+}
+static void CourseData_FromRom(CourseData* cd) {
+    s32 i;
+    Gdx_SwapU32InPlace(&cd->checksum);
+    for (i = 0; i < 64; i++) {
+        Gdx_SwapU32InPlace(&cd->controlPoint[i].pos.x);
+        Gdx_SwapU32InPlace(&cd->controlPoint[i].pos.y);
+        Gdx_SwapU32InPlace(&cd->controlPoint[i].pos.z);
+        Gdx_SwapU16InPlace(&cd->controlPoint[i].radiusLeft);
+        Gdx_SwapU16InPlace(&cd->controlPoint[i].radiusRight);
+        Gdx_SwapU32InPlace(&cd->controlPoint[i].trackSegmentInfo);
+    }
+    for (i = 0; i < 64; i++) {
+        Gdx_SwapU16InPlace(&cd->bankAngle[i]);
+    }
+}
+#endif
+
 void Course_Load(s32 courseIndex) {
     s32 pad;
     s32 diskCourseIndex;
@@ -3837,7 +3929,12 @@ void Course_Load(s32 courseIndex) {
 #else
         romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseData);
 #endif
-        Dma_LoadAssetsAsync(romAddr, osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#ifdef PORT
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#else
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#endif
         if ((gPlayer1OverallPosition >= 4) && (courseIndex == COURSE_ENDING)) {
             COURSE_CONTEXT()->courseData.skybox = SKYBOX_BLUE;
         }
@@ -3884,6 +3981,11 @@ void Course_Load(s32 courseIndex) {
             func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
             DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex, &COURSE_CONTEXT()->courseData,
                                sizeof(CourseData), 0);
+#ifdef PORT
+            /* Disk CourseData is big-endian; swap on the little-endian port
+               (the ROM course path does this via CourseData_FromRom above). */
+            CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#endif
             if ((Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) ||
                 (COURSE_CONTEXT()->courseData.creatorId != CREATOR_NINTENDO) ||
                 (COURSE_CONTEXT()->courseData.bgm > BGM_NEW_04)) {
@@ -3916,6 +4018,9 @@ void Course_Load(s32 courseIndex) {
                         func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
                         DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex,
                                            &COURSE_CONTEXT()->courseData, sizeof(CourseData), 0);
+#ifdef PORT
+                        CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#endif
                         if ((Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) ||
                             (COURSE_CONTEXT()->courseData.creatorId != CREATOR_NINTENDO) ||
                             (COURSE_CONTEXT()->courseData.bgm > BGM_NEW_04)) {
@@ -3950,7 +4055,13 @@ void Course_Load(s32 courseIndex) {
         romAddr = gRomSegmentPairs[5][0] + courseIndex * sizeof(CourseData);
 #endif
         PRINTF("UNPACK\n");
-        Dma_LoadAssetsAsync(romAddr, osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#ifdef PORT
+        PRINTF("Course_Load PORT: passing ramAddr=%p\n", (u8*)&COURSE_CONTEXT()->courseData);
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#else
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#endif
         PRINTF("UNPACK OK\n");
 
 #ifdef EXPANSION_KIT
@@ -3981,7 +4092,14 @@ void func_80702448(s32 courseIndex) {
     DDSave_ClearCachedGhostSaves();
     if (courseIndex >= COURSE_DEATH_RACE) {
         romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseData);
-        Dma_LoadAssetsAsync(romAddr, osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#ifdef PORT
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        /* ROM CourseData is big-endian; without this swap the course-select
+           preview mesh is built from garbage control points. */
+        CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#else
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#endif
         if ((gPlayer1OverallPosition >= 4) && (courseIndex == COURSE_ENDING)) {
             COURSE_CONTEXT()->courseData.skybox = SKYBOX_BLUE;
         }
@@ -4023,6 +4141,11 @@ void func_80702448(s32 courseIndex) {
             func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
             DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex, &COURSE_CONTEXT()->courseData,
                                sizeof(CourseData), 0);
+#ifdef PORT
+            /* Disk CourseData is big-endian; swap on the little-endian port
+               (the ROM course path does this via CourseData_FromRom above). */
+            CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#endif
             if ((Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) ||
                 (COURSE_CONTEXT()->courseData.creatorId != CREATOR_NINTENDO) ||
                 (COURSE_CONTEXT()->courseData.bgm > BGM_NEW_04)) {
@@ -4057,6 +4180,9 @@ void func_80702448(s32 courseIndex) {
                         func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
                         DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex,
                                            &COURSE_CONTEXT()->courseData, sizeof(CourseData), 0);
+#ifdef PORT
+                        CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#endif
                         if ((Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) ||
                             (COURSE_CONTEXT()->courseData.creatorId != CREATOR_NINTENDO) ||
                             (COURSE_CONTEXT()->courseData.bgm > BGM_NEW_04)) {
@@ -4075,13 +4201,33 @@ void func_80702448(s32 courseIndex) {
     } else {
         romAddr = gRomSegmentPairs[5][0] + courseIndex * sizeof(CourseData);
 
-        Dma_LoadAssetsAsync(romAddr, osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#ifdef PORT
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        /* ROM CourseData is big-endian; without this swap the course-select
+           preview mesh is built from garbage control points. */
+        CourseData_FromRom(&COURSE_CONTEXT()->courseData);
+#else
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+#endif
         // Patch Out Red Canyon 2 Dirt
         if (gInCourseEditor && courseIndex == COURSE_RED_CANYON_2) {
             COURSE_CONTEXT()->courseData.dirt[21] = DIRT_NONE;
             COURSE_CONTEXT()->courseData.checksum = Course_CalculateChecksum();
         }
     }
+
+#ifdef PORT
+    /* Course-select preview textures: this loader only runs from the course
+       model preview (course_model.c). Menus never pass through the race-mode
+       Segment_LoadAssets venue load, leaving segment 0x0A empty (invisible
+       preview) — load the highlighted course's venue bank here. */
+    {
+        extern int gdx_load_venue_texture_segment(int venue);
+        if (!gdx_load_venue_texture_segment(COURSE_CONTEXT()->courseData.venue)) {
+            PRINTF("preview venue texture load failed\n");
+        }
+    }
+#endif
 }
 #endif
 
@@ -4119,7 +4265,9 @@ extern CourseData D_8010CF50;
 void func_800742FC(void) {
     s32 i;
 
+#ifndef PORT
     bzero(SEGMENT_VRAM_START(game_context), SEGMENT_BSS_SIZE(game_context));
+#endif
 #ifdef EXPANSION_KIT
     D_80030060[0] = '\0';
 #endif

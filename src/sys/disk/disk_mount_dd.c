@@ -11,9 +11,15 @@ void DiskMount_Init(void) {
     LEODiskTime diskTime = LEO_DISK_TIME(19, 99, 12, 31, 23, 59, 59);
 
     func_80762330(&diskTime);
+    GDX_CK(DM1_time_set);
     Mfs_SetGameCode("01", "EFZJ");
+    GDX_CK(DM2_gamecode_set);
     SLMFSCreateManager(LEO_MANAGER_REGION_NONE);
+    GDX_CK(DM3_mfs_manager);
     func_8070481C();
+    GDX_CK(DM4_8070481C);
     SLLeoReadDiskID(&D_800CD2B0);
+    GDX_CK(DM5_diskid_read);
     SLLeoModeSelectAsync(0, 0);
+    GDX_CK(DM6_modeselect);
 }

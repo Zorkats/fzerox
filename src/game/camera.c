@@ -990,8 +990,12 @@ void Camera_MatrixToMtx(MtxF* mtxF, Mtx* mtx2) {
                 longValue = temp_fv0 + 0.5f;
             }
 
-            mtx->u.i[i][j] = longValue >> 0x10;
-            mtx->u.f[i][j] = longValue & 0xFFFF;
+            // libultraship's GfxSpMatrix expects Big-Endian packed words.
+            // On a Little-Endian host, writing u16 array elements sequentially
+            // swaps the 16-bit halves when read back as 32-bit integers.
+            // Swap columns j and j^1 so they read correctly on Little-Endian.
+            mtx->u.i[i][j ^ 1] = longValue >> 0x10;
+            mtx->u.f[i][j ^ 1] = longValue & 0xFFFF;
         }
     }
 }
@@ -2315,61 +2319,68 @@ void Camera_InitViewport(Camera* camera) {
     s32 scissorBoxType = scissorBoxTypes[camera->id];
     Vp* vp;
     ScissorBox* scissorBox;
+#ifdef PORT
+    extern void* gdx_segmented_to_host_pointer(uintptr_t segmentedAddr);
+#define GDX_SEGMENTED_TO_HOST(addr) gdx_segmented_to_host_pointer((uintptr_t)(addr))
+#else
+#define GDX_SEGMENTED_TO_HOST(addr) Segment_SegmentedToVirtual((uintptr_t)(addr))
+#endif
 
     switch (scissorBoxType) {
         case SCISSOR_BOX_FULL_SCREEN:
-            vp = Segment_SegmentedToVirtual(&aVpFullScreen);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpFullScreen);
             scissorBox = &gScissorBoxFullScreen;
             break;
         case SCISSOR_BOX_TOP_HALF:
-            vp = Segment_SegmentedToVirtual(&aVpTopHalf);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpTopHalf);
             scissorBox = &gScissorBoxTopHalf;
             break;
         case SCISSOR_BOX_BOTTOM_HALF:
-            vp = Segment_SegmentedToVirtual(&aVpBottomHalf);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpBottomHalf);
             scissorBox = &gScissorBoxBottomHalf;
             break;
         case SCISSOR_BOX_LEFT_HALF:
-            vp = Segment_SegmentedToVirtual(&aVpLeftHalf);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpLeftHalf);
             scissorBox = &gScissorBoxLeftHalf;
             break;
         case SCISSOR_BOX_RIGHT_HALF:
-            vp = Segment_SegmentedToVirtual(&aVpRightHalf);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpRightHalf);
             scissorBox = &gScissorBoxRightHalf;
             break;
         case SCISSOR_BOX_TOP_LEFT_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpTopLeftQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpTopLeftQuarter);
             scissorBox = &gScissorBoxTopLeftQuarter;
             break;
         case SCISSOR_BOX_TOP_RIGHT_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpTopRightQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpTopRightQuarter);
             scissorBox = &gScissorBoxTopRightQuarter;
             break;
         case SCISSOR_BOX_BOTTOM_LEFT_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpBottomLeftQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpBottomLeftQuarter);
             scissorBox = &gScissorBoxBottomLeftQuarter;
             break;
         case SCISSOR_BOX_BOTTOM_RIGHT_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpBottomRightQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpBottomRightQuarter);
             scissorBox = &gScissorBoxBottomRightQuarter;
             break;
         case SCISSOR_BOX_TOP_CENTER_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpTopCenterQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpTopCenterQuarter);
             scissorBox = &gScissorBoxTopCenterQuarter;
             break;
         case SCISSOR_BOX_BOTTOM_CENTER_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpBottomCenterQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpBottomCenterQuarter);
             scissorBox = &gScissorBoxBottomCenterQuarter;
             break;
         case SCISSOR_BOX_LEFT_CENTER_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpLeftCenterQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpLeftCenterQuarter);
             scissorBox = &gScissorBoxLeftCenterQuarter;
             break;
         case SCISSOR_BOX_RIGHT_CENTER_QUARTER:
-            vp = Segment_SegmentedToVirtual(&aVpRightCenterQuarter);
+            vp = GDX_SEGMENTED_TO_HOST(&aVpRightCenterQuarter);
             scissorBox = &gScissorBoxRightCenterQuarter;
             break;
     }
+#undef GDX_SEGMENTED_TO_HOST
 
     camera->currentVpScaleX = camera->startVpScaleX = camera->endVpScaleX = vp->vp.vscale[0] * 0.25f;
     camera->currentVpScaleY = camera->startVpScaleY = camera->endVpScaleY = vp->vp.vscale[1] * 0.25f;

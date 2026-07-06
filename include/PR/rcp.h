@@ -833,8 +833,21 @@
  * Common macros
  */
 #if defined(_LANGUAGE_C) || defined(_LANGUAGE_C_PLUS_PLUS)
+#ifdef PORT
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern u32 gdx_io_read(u32 addr);
+extern void gdx_io_write(u32 addr, u32 data);
+#ifdef __cplusplus
+}
+#endif
+#define IO_READ(addr)       gdx_io_read((u32)(addr))
+#define IO_WRITE(addr,data) gdx_io_write((u32)(addr), (u32)(data))
+#else
 #define	IO_READ(addr)       (*(vu32*)PHYS_TO_K1(addr))
 #define	IO_WRITE(addr,data) (*(vu32*)PHYS_TO_K1(addr)=(u32)(data))
+#endif
 #define RCP_STAT_PRINT                                              \
     rmonPrintf("current=%x start=%x end=%x dpstat=%x spstat=%x\n",	\
         IO_READ(DPC_CURRENT_REG),                                   \

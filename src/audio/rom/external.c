@@ -528,7 +528,7 @@ void func_800B84B8(void) {
     SequenceLayer* layer;
     Note* note;
 
-    if ((sActiveBgm == BGM_TITLE) && (IS_SEQUENCE_CHANNEL_VALID(gSeqPlayers[0].channels[0]))) {
+    if ((sActiveBgm == BGM_TITLE) && (gSeqPlayers[0].channels[0] != NULL) && (IS_SEQUENCE_CHANNEL_VALID(gSeqPlayers[0].channels[0]))) {
         layer = gSeqPlayers[0].channels[0]->layers[0];
         if (layer != NULL) {
             note = layer->note;
@@ -1121,6 +1121,9 @@ void Audio_UpdateImpl(void) {
 }
 
 void Audio_Update(void) {
+#ifdef PORT
+    return; // R6 EXPLORE PASS: audio not initialized — skip per-frame audio update.
+#endif
     Audio_UpdateImpl();
     AudioThread_ScheduleProcessCmds();
 }
@@ -1236,6 +1239,10 @@ void Audio_Init(void) {
 
 // Na_SetOutMode
 void Audio_SetOutMode(u8 soundMode) {
+#ifdef PORT
+    (void) soundMode;
+    return; // R6 EXPLORE PASS: audio not initialized.
+#endif
     AUDIOCMD_GLOBAL_SET_SOUND_MODE(soundMode);
 }
 
@@ -1814,6 +1821,9 @@ void Audio_DisablePlayerSE(void) {
 
 // Na_Guitor_Start
 void Audio_GuitarSeqStart(void) {
+#ifdef PORT
+    return; // R6 EXPLORE PASS: audio not initialized (Audio_Init skipped) — would crash.
+#endif
     PRINTF("Na_Guitor_Start Called\n");
     PRINTF("Na_Guitor_Start for ROM Called\n");
     AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, SEQ_GUITAR, 0, 0);

@@ -1,6 +1,12 @@
 #include "global.h"
 #include "leo/leo_internal.h"
 
+#ifdef PORT
+/* Untruncated host pointer for the glyph buffer (D_xk1_8003A488 is an s32 and
+   truncates the 64-bit Arena pointer). Glyph fills copy through this. */
+static u8* sGdxGlyphBufferHost;
+#endif
+
 OSIoMesg D_xk1_8003A470;
 s32 D_xk1_8003A488;
 UNUSED s32 D_xk1_8003A48C;
@@ -145,7 +151,20 @@ void func_xk1_80025F98(void) {
     D_xk1_8003A54C = Arena_Allocate(ALLOC_FRONT, D_xk1_80030080 * sizeof(u16));
     D_xk1_8003A548 = Arena_Allocate(ALLOC_FRONT, D_xk1_80030080 * sizeof(s32));
     D_xk1_8003A494 = func_xk1_80025DE4();
+#ifdef PORT
+    {
+        /* Keep the full pointer for glyph fills (assignment below truncates to
+           s32) and clear the storage — Arena memory is not zeroed on the port
+           and the hardware DMA that would overwrite it is replaced by direct
+           copies from the IPL ROM image. */
+        void* buf = (void*)Arena_Allocate(ALLOC_FRONT, (D_xk1_8003A494 << 7) + 0xE00);
+        sGdxGlyphBufferHost = (u8*)buf;
+        bzero(buf, (D_xk1_8003A494 << 7) + 0xE00);
+        D_xk1_8003A488 = (s32)(uintptr_t)buf;
+    }
+#else
     D_xk1_8003A488 = Arena_Allocate(ALLOC_FRONT, (D_xk1_8003A494 << 7) + 0xE00);
+#endif
     D_xk1_8003A490 += 0xE00;
     func_xk1_800267C4(D_xk1_8003A54C);
     D_xk1_80030080 = 0;
@@ -184,9 +203,29 @@ Gfx* func_xk1_800260F0(Gfx* gfx, s32 arg1, s32 arg2, s32 code) {
     D_xk1_8003A470.dramAddr = D_xk1_8003A488 + D_xk1_8003A490;
     D_xk1_8003A470.devAddr = fontAddr;
     D_xk1_8003A470.size = 0x80;
+#ifndef PORT
     gDriveRomHandle->transferInfo.cmdType = LEO_CMD_TYPE_2;
     func_80768B88(gDriveRomHandle, &D_xk1_8003A470, OS_READ);
     osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
+#else
+    /* Glyphs live in the 64DD drive's internal ROM; copy from the
+       user-supplied IPL ROM image (port/disk_buffer.cpp). Invalid codes
+       (LeoGetKAdr < 0 => fontAddr < DDROM_FONT_START) fall back to a blank
+       glyph. */
+    {
+        extern unsigned char* gdx_ddipl_buffer;
+        extern unsigned int gdx_ddipl_size;
+        u8* dst = sGdxGlyphBufferHost + D_xk1_8003A490;
+        if (sGdxGlyphBufferHost == NULL) {
+            /* glyph buffer not allocated yet; nothing to fill */
+        } else if (gdx_ddipl_buffer != NULL && fontAddr >= DDROM_FONT_START &&
+                   (u32)fontAddr + 0x80 <= gdx_ddipl_size) {
+            bcopy(gdx_ddipl_buffer + fontAddr, dst, 0x80);
+        } else {
+            bzero(dst, 0x80);
+        }
+    }
+#endif
 
     gDPLoadTextureBlock_4b(gfx++, D_xk1_8003A488 + D_xk1_8003A490, G_IM_FMT_I, 16, 16, 0, G_TX_NOMIRROR | G_TX_CLAMP,
                            G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
@@ -313,9 +352,26 @@ void func_xk1_8002671C(s32 code) {
     D_xk1_8003A470.dramAddr = D_xk1_8003A488 + D_xk1_8003A490;
     D_xk1_8003A470.devAddr = fontAddr;
     D_xk1_8003A470.size = 0x80;
+#ifndef PORT
     gDriveRomHandle->transferInfo.cmdType = LEO_CMD_TYPE_2;
     func_80768B88(gDriveRomHandle, &D_xk1_8003A470, OS_READ);
     osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
+#else
+    /* Same as func_xk1_800260F0: serve the glyph from the IPL ROM image. */
+    {
+        extern unsigned char* gdx_ddipl_buffer;
+        extern unsigned int gdx_ddipl_size;
+        u8* dst = sGdxGlyphBufferHost + D_xk1_8003A490;
+        if (sGdxGlyphBufferHost == NULL) {
+            /* glyph buffer not allocated yet; nothing to fill */
+        } else if (gdx_ddipl_buffer != NULL && fontAddr >= DDROM_FONT_START &&
+                   (u32)fontAddr + 0x80 <= gdx_ddipl_size) {
+            bcopy(gdx_ddipl_buffer + fontAddr, dst, 0x80);
+        } else {
+            bzero(dst, 0x80);
+        }
+    }
+#endif
     D_xk1_8003A490 += 0x80;
 }
 

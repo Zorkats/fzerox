@@ -74,6 +74,7 @@ s32 Math_VectorSetScale(Vec3f* vec, f32 scale);
 void Course_SegmentsInit(void);
 void Dma_ClearRomCopy(void* romAddr, void* ramAddr, size_t size);
 void Dma_RomCopyAsync(void* romAddr, void* ramAddr, size_t size);
+void Dma_RomCopy(u8* romAddr, u8* ramAddr, size_t size);
 void Dma_LoadAssetsAsync(u8* romAddr, u8* ramAddr, size_t size);
 void Course_Load(s32 courseIndex);
 void Course_GadgetsInit(s32 courseIndex);
@@ -134,7 +135,11 @@ void Segment_LoadOverlays(void);
 void Segment_LoadAssets(void);
 void func_80077AD8(s32 venue);
 
+#ifdef PORT
+void func_80077CF0(void* segAddr, size_t size, u8* startAddr);
+#else
 void func_80077CF0(s32 segAddr, size_t size, u8* startAddr);
+#endif
 
 #ifndef EXPANSION_KIT
 #define func_80077D50_impl(arg0, arg1, arg2) func_80077D50(arg0, arg1)

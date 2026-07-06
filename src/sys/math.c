@@ -416,7 +416,11 @@ void func_8006B18C(LookAt* lookAt, s32* arg1, MtxF* mtxF, f32 arg3, f32 arg4, f3
 }
 
 #define FTO32(x) (long) ((x) *65536.0f)
+#if defined(GDIFFUSER_PORT)
+#define MTXTOMTXF(mtx, i1, i2) ((((s16) mtx->u.i[(i1)][(i2) ^ 1] << 0x10) | mtx->u.f[(i1)][(i2) ^ 1]) / 65536.0f)
+#else
 #define MTXTOMTXF(mtx, i1, i2) ((((s16) mtx->u.i[(i1)][(i2)] << 0x10) | mtx->u.f[(i1)][(i2)]) / 65536.0f)
+#endif
 
 void Matrix_Interpolate(Mtx* src, Mtx* target, Mtx* dest, f32 t) {
     f32 temp_fa0;
@@ -566,7 +570,11 @@ void Matrix_FromMtx(Mtx* src2, MtxF* dest) {
 
     for (i = 3; i >= 0; i--) {
         for (j = 3; j >= 0; j--) {
+#if defined(GDIFFUSER_PORT)
+            dest->m[i][j] = (((s16) src->u.i[i][j ^ 1] << 0x10) | (src->u.f[i][j ^ 1])) / 65536.0f;
+#else
             dest->m[i][j] = (((s16) src->u.i[i][j] << 0x10) | (src->u.f[i][j])) / 65536.0f;
+#endif
         }
     }
 }
@@ -587,8 +595,13 @@ void Matrix_ToMtx(MtxF* src, Mtx* dest2) {
             } else {
                 intValue = temp_fv0 + 0.5f;
             }
+#if defined(GDIFFUSER_PORT)
+            dest->u.i[i][j ^ 1] = intValue >> 0x10;
+            dest->u.f[i][j ^ 1] = intValue;
+#else
             dest->u.i[i][j] = intValue >> 0x10;
             dest->u.f[i][j] = intValue;
+#endif
         }
     }
 }

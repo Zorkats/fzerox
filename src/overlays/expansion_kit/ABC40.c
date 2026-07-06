@@ -340,6 +340,11 @@ void func_xk1_8002FA50(void) {
 
     for (i = 0; i < 20; i++) {
         D_8003BBB0[i] = (D_xk1_80033808[i * 2] << 8) + D_xk1_80033808[i * 2 + 1];
+#ifndef PORT
+        /* PORT: glyphs come from the 64DD drive's internal ROM via
+           gDriveRomHandle — no drive ROM on PC (see LeoFault_LoadFontSet).
+           The Arena allocations above stay: zeroed glyphs render blank. */
         LeoFault_CopyFontToRam(D_8003BBB0[i], gExpansionKitFontPtr + i * 0x80);
+#endif
     };
 }

@@ -4,6 +4,18 @@
 #include "PR/viint.h"
 #include "PR/leo.h"
 
+#ifdef PORT
+// R6 diagnostic checkpoints. Can't include <stdio.h> here — the decomp's libc/stdint.h defines
+// uintptr_t as u32, which clashes with the system headers. Log via a port helper (n64_sched.c).
+extern void gdx_ck(const char* s);
+extern void gdx_cki(const char* s, int v);
+#define GDX_CK(n) gdx_ck("[main] ck" #n)
+#define GDX_CKI(n, v) gdx_cki("[main] " #n, (int) (v))
+#else
+#define GDX_CK(n)
+#define GDX_CKI(n, v)
+#endif
+
 char sBootThreadStack[0x200];
 char sIdleThreadStack[0x200];
 char sMainThreadStack[0x400];
@@ -173,8 +185,17 @@ void Main_ThreadEntry(void* arg0) {
     osViSetEvent(&gMainThreadMesgQueue, (OSMesg) EVENT_MESG_VI, 1);
     gResetStarted = false;
 
+#ifdef PORT
+    // S3: pre-seed D_800DCAC8 with one DP-done message so the first call to func_80067D64
+    // does not stall on osRecvMesg(&D_800DCAC8, BLOCK) before any GFX task has run.
+    // On N64 the boot frame's DP interrupt would have populated this queue; on host it is empty.
+    osSendMesg(&D_800DCAC8, (OSMesg)(uintptr_t)0x2A, OS_MESG_NOBLOCK);
+#endif
+
 #ifndef EXPANSION_KIT
+    GDX_CK(1_queues_events_done);
     gLeoDriveConnectionState = LeoDD_CheckPresence();
+    GDX_CK(2_leo_checked);
     var_v1 = (u64*) gFrameBuffers[0];
 
     // clang-format off
@@ -182,14 +203,19 @@ void Main_ThreadEntry(void* arg0) {
         var_v1[var_a0] = 1;
     }
     // clang-format on
+    GDX_CK(3_fb0_cleared);
 
     func_80069F5C(gFrameBuffers[1]);
     func_80069F5C(gFrameBuffers[2]);
+    GDX_CK(4_fb12_cleared);
     osViSwapBuffer(gFrameBuffers[0]);
+    GDX_CK(5_swapped);
 
     while (osViGetCurrentFramebuffer() != gFrameBuffers[0]) {}
+    GDX_CK(6_vi_synced);
 
     osViBlack(false);
+    GDX_CK(6a_post_viblack);
 
     if (osAppNMIBuffer[15] != 0x20DE1529) {
         // More than 8MB Ram available, n64dd compatible
@@ -202,6 +228,7 @@ void Main_ThreadEntry(void* arg0) {
     } else {
         gRamDDCompatible = osAppNMIBuffer[14];
     }
+    GDX_CKI(6b_ramdd, gRamDDCompatible);
 
     if (gRamDDCompatible) {
         Dma_ClearRomCopy(SEGMENT_ROM_START(leo), SEGMENT_VRAM_START(leo), SEGMENT_ROM_SIZE(leo));
@@ -220,6 +247,7 @@ void Main_ThreadEntry(void* arg0) {
     }
 #else
     DiskDrive_InitRomSegmentPairs();
+    GDX_CKI(EK1_reset_type, osResetType);
 
     switch (osResetType) {
         case OS_TV_PAL:
@@ -230,14 +258,18 @@ void Main_ThreadEntry(void* arg0) {
             gRamDDCompatible = true;
             break;
     }
+    GDX_CKI(EK2_ramdd, gRamDDCompatible);
 
     if (gRamDDCompatible) {
         gLeoDriveConnectionState = LeoDriveExist();
+        GDX_CKI(EK3_drive_state, gLeoDriveConnectionState);
         gDriveRomHandle = osDriveRomInit();
         if (gLeoDriveConnectionState != 0) {
             LeoFault_LoadFontSet();
+            GDX_CK(EK4_fontset_loaded);
         }
         func_80704DB0("01", leoBootID.gameName);
+        GDX_CK(EK5_bootid_checked);
 
         for (i = 0; i < 3; i++) {
             var_v1 = &gFrameBuffers[i]->buffer[19199];
@@ -252,11 +284,14 @@ void Main_ThreadEntry(void* arg0) {
         while (osViGetCurrentFramebuffer() != gFrameBuffers[0]) {}
 
         osViBlack(false);
+        GDX_CK(EK6_pre_diskmount);
 
         DiskMount_Init();
+        GDX_CK(EK7_diskmount_done);
     }
 #endif
 
+    GDX_CK(7_pre_reset_thread);
     osCreateThread(&sResetThread, THREAD_ID_RESET, Reset_ThreadEntry, NULL,
                    sResetThreadStack + sizeof(sResetThreadStack), 100);
     osStartThread(&sResetThread);
@@ -274,6 +309,7 @@ void Main_ThreadEntry(void* arg0) {
 
     while (osViGetCurrentFramebuffer() != gFrameBuffers[1]) {}
 
+    GDX_CK(8_pre_f5c_fb0);
 #ifndef EXPANSION_KIT
     func_80069F5C(gFrameBuffers[0]);
 #else
@@ -304,7 +340,9 @@ void Main_ThreadEntry(void* arg0) {
     }
 #endif
 
+    GDX_CK(9_pre_gamethread_setup);
     func_80075230(&sGameThread);
+    GDX_CK(A_post_gamethread_setup);
 
 #ifdef EXPANSION_KIT
     AudioLoad_SetDmaHandler(func_80768C08);
@@ -390,6 +428,19 @@ void Idle_ThreadEntry(void* arg0) {
     gFrameBuffers[0] = &gFrameBuffer1;
     gFrameBuffers[1] = &gFrameBuffer2;
     gFrameBuffers[2] = &gFrameBuffer3;
+#ifdef GDIFFUSER_PORT
+    extern void gdx_register_n64_framebuffer(void* cpuAddr, unsigned int width, unsigned int height);
+    /* Also register as generic resolvable host ranges: gN64Framebuffers only
+       feeds the CPU mirror-back path, while SETCIMG/SETZIMG raw32 values must
+       also be recoverable by TryResolveAddress's registered-range splice. */
+    extern void gdx_register_host_range(void* ptr, size_t size);
+    gdx_register_n64_framebuffer(&gFrameBuffer1, SCREEN_WIDTH, SCREEN_HEIGHT);
+    gdx_register_n64_framebuffer(&gFrameBuffer2, SCREEN_WIDTH, SCREEN_HEIGHT);
+    gdx_register_n64_framebuffer(&gFrameBuffer3, SCREEN_WIDTH, SCREEN_HEIGHT);
+    gdx_register_host_range(&gFrameBuffer1, sizeof(FrameBuffer));
+    gdx_register_host_range(&gFrameBuffer2, sizeof(FrameBuffer));
+    gdx_register_host_range(&gFrameBuffer3, sizeof(FrameBuffer));
+#endif
     osCreateViManager(OS_PRIORITY_VIMGR);
     if (osTvType == OS_TV_TYPE_NTSC) {
         osViSetMode(&osViModeNtscLan1);
@@ -415,7 +466,18 @@ void Idle_ThreadEntry(void* arg0) {
     }
     osSetThreadPri(NULL, OS_PRIORITY_IDLE);
 
+#ifdef PORT
+    // R6 cooperative fiber scheduler: the idle thread's busy-spin means "CPU is idle" — yield to
+    // the host loop so it can pump a window frame and post VI/SP/DP events, then resume.
+    {
+        extern void gdx_yield_to_host(void);
+        while (true) {
+            gdx_yield_to_host();
+        }
+    }
+#else
     while (true) {}
+#endif
 }
 
 void LeoReset(void);

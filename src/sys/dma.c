@@ -1,5 +1,10 @@
 #include "global.h"
 #include "fzx_thread.h"
+#ifdef PORT
+extern unsigned char* gdx_rdram;
+#define GDX_DMA_RDRAM_SIZE ((size_t)0x1000000u)  /* must match GDX_RDRAM_SIZE in n64_rdram.h */
+extern void gdx_record_dma_load(unsigned int rdram_phys, unsigned int rom_offset, unsigned int size);
+#endif
 
 void func_80076490(void) {
 }
@@ -8,9 +13,63 @@ extern OSMesgQueue gDmaMesgQueue;
 extern OSIoMesg gDmaIOMsg;
 extern OSPiHandle* gCartRomHandle;
 
+#ifdef PORT
+extern void* gdx_resolve_registered_host_address(unsigned int addr);
+
+static size_t Dma_PortRomOffset(u8* romAddr) {
+    unsigned int phys = (unsigned int)(unsigned long long)romAddr & 0x1FFFFFFFu;
+    return (phys >= 0x10000000u) ? (size_t)(phys - 0x10000000u) : (size_t)phys;
+}
+
+static u8* Dma_PortRamPointer(u8* ramAddr) {
+    unsigned long long full = (unsigned long long)ramAddr;
+    unsigned int low = (unsigned int)full;
+
+    /* Physical RDRAM offset (< 16MB): direct mapping. */
+    if (full < (unsigned long long)GDX_DMA_RDRAM_SIZE) {
+        return gdx_rdram + (size_t)full;
+    }
+
+    /* KSEG0 / KSEG1 virtual addresses (0x80000000–0xBFFFFFFF): strip the top bits
+       to get the physical RDRAM offset.  Game model-load DMA calls pass KSEG0
+       pointers; without this the memcpy is skipped and gdx_rdram stays empty. */
+    if ((low & 0xE0000000u) == 0x80000000u) {
+        unsigned int phys = low & 0x1FFFFFFFu;
+        if (phys < (unsigned int)GDX_DMA_RDRAM_SIZE) {
+            return gdx_rdram + phys;
+        }
+    }
+
+    if (full <= 0xFFFFFFFFull) {
+        return (u8*)gdx_resolve_registered_host_address(low);
+    }
+
+    return ramAddr;
+}
+#endif
+
 void Dma_RomCopy(u8* romAddr, u8* ramAddr, size_t size) {
     OSMesg msgBuf[7];
 
+#ifdef PORT
+    {
+        extern unsigned char* gdx_rom_buffer;
+        extern size_t         gdx_rom_size;
+        size_t romOffset = Dma_PortRomOffset(romAddr);
+        u8* dst = Dma_PortRamPointer(ramAddr);
+        if (dst == NULL) {
+            return;
+        }
+        if (gdx_rom_buffer == NULL || romOffset + size > gdx_rom_size) {
+            memset(dst, 0, size);
+            return;
+        }
+        memcpy(dst, gdx_rom_buffer + romOffset, size);
+        if (dst >= gdx_rdram && dst < gdx_rdram + GDX_DMA_RDRAM_SIZE)
+            gdx_record_dma_load((unsigned int)(size_t)(dst - gdx_rdram), (unsigned int)romOffset, (unsigned int)size);
+        return;
+    }
+#endif
     gDmaIOMsg.hdr.pri = OS_MESG_PRI_NORMAL;
     gDmaIOMsg.hdr.retQueue = &gDmaMesgQueue;
     gDmaIOMsg.dramAddr = osPhysicalToVirtual(ramAddr);
@@ -28,6 +87,27 @@ void Dma_RomCopy(u8* romAddr, u8* ramAddr, size_t size) {
 void Dma_RomCopyWithBssInit(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr, size_t bssSize) {
     OSMesg msgBuf[7];
 
+#ifdef PORT
+    {
+        extern unsigned char* gdx_rom_buffer;
+        extern size_t         gdx_rom_size;
+        size_t romOffset = Dma_PortRomOffset(romAddr);
+        u8* dst = Dma_PortRamPointer(ramAddr);
+        if (dst == NULL) {
+            bzero(bssAddr, bssSize);
+            return;
+        }
+        if (gdx_rom_buffer == NULL || romOffset + size > gdx_rom_size) {
+            memset(dst, 0, size);
+        } else {
+            memcpy(dst, gdx_rom_buffer + romOffset, size);
+            if (dst >= gdx_rdram && dst < gdx_rdram + GDX_DMA_RDRAM_SIZE)
+                gdx_record_dma_load((unsigned int)(size_t)(dst - gdx_rdram), (unsigned int)romOffset, (unsigned int)size);
+        }
+        bzero(bssAddr, bssSize);
+        return;
+    }
+#endif
     gDmaIOMsg.hdr.pri = OS_MESG_PRI_NORMAL;
     gDmaIOMsg.hdr.retQueue = &gDmaMesgQueue;
     gDmaIOMsg.dramAddr = osPhysicalToVirtual(ramAddr);
@@ -61,6 +141,12 @@ void Dma_LoadAssets(u8* romAddr, u8* ramAddr, size_t size) {
 }
 
 void Dma_LoadOverlay(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr, size_t bssSize) {
+#ifdef PORT
+    // Overlays are statically compiled into the binary. Code+data live at their native host
+    // addresses; BSS is zero-initialised by the host loader. Nothing to load or clear.
+    (void)romAddr; (void)ramAddr; (void)size; (void)bssAddr; (void)bssSize;
+    return;
+#endif
     s32 remainder;
     s32 i;
     s32 numBlocks;

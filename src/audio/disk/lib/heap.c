@@ -170,9 +170,34 @@ void* AudioHeap_Alloc(AudioAllocPool* pool, size_t size) {
 }
 
 void AudioHeap_InitPool(AudioAllocPool* pool, void* ramAddr, size_t size) {
+#ifdef PORT
+    /* Callers pass AudioHeap_Alloc results straight in without NULL checks
+       (e.g. AudioHeap_InitSessionPools). A NULL base with a nonzero size makes
+       this pool hand out near-NULL pointers on its second allocation and the
+       allocator's zeroing loop faults. Make failed carves inert instead. */
+    if (ramAddr == NULL) {
+        pool->curRamAddr = pool->startRamAddr = NULL;
+        pool->size = 0;
+        pool->numEntries = 0;
+        return;
+    }
+#endif
+#ifdef PORT
+    /* The decomp's stdint.h typedefs uintptr_t as u32 (N64), so casting a host
+       pointer through it TRUNCATES to 32 bits. Audio heap pointers are
+       dereferenced directly by the CPU (no bridge resolver in this path), so
+       truncation here crashed AudioLoad_Init the moment the audio thread was
+       enabled (proven by disassembly: pool base 0x08BA1060 = low32 of
+       gAudioHeap's host address). Align with full 64-bit arithmetic. */
+    pool->curRamAddr = pool->startRamAddr =
+        (u8*) (((unsigned long long) ramAddr + 0xFULL) & ~0xFULL);
+    pool->size = size - (size_t) ((unsigned long long) ramAddr & 0xFULL);
+    pool->numEntries = 0;
+#else
     pool->curRamAddr = pool->startRamAddr = (u8*) ALIGN16((uintptr_t) ramAddr);
     pool->size = size - ((uintptr_t) ramAddr & 0xF);
     pool->numEntries = 0;
+#endif
 }
 
 void AudioHeap_InitPersistentCache(AudioPersistentCache* persistent) {

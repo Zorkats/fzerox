@@ -784,8 +784,26 @@ void Audio_RomBgmStart(u8 bgm) {
     }
     switch (bgm) {
         case BGM_TITLE:
+#ifdef PORT
+            /* Diagnostic for engram slice/audio-synthesis follow-up (fork F1/F2
+               boundary): proves Audio_RomBgmStart(BGM_TITLE) is reached and that the
+               AUDIOCMD_GLOBAL_INIT_SEQPLAYER macro actually advances the thread-cmd
+               ring (threadCmdWritePos), i.e. the command is genuinely queued. If this
+               fires but the sequencer never enables (load.c seqPlayer ENABLED line
+               never logs), the block is downstream of the queue (F2: never drained). */
+            {
+                extern void gdx_cki(const char* s, int v);
+                gdx_cki("[audio-diag] Audio_RomBgmStart BGM_TITLE writePosBefore", (int) gAudioCtx.threadCmdWritePos);
+            }
+#endif
             AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, bgm + SEQ_DDBGM_MUTE_CITY, 0, 0);
+#ifdef PORT
+            {
+                extern void gdx_cki(const char* s, int v);
+                gdx_cki("[audio-diag] Audio_RomBgmStart BGM_TITLE writePosAfter", (int) gAudioCtx.threadCmdWritePos);
+            }
+#endif
             break;
         case BGM_SELECT:
         case BGM_OPTION:
@@ -1930,7 +1948,7 @@ void func_807442E4(void) {
     SequenceLayer* layer;
     Note* note;
 
-    if ((sActiveBgm == BGM_TITLE) && (IS_SEQUENCE_CHANNEL_VALID(gAudioCtx.seqPlayers[1].channels[0]))) {
+    if ((sActiveBgm == BGM_TITLE) && (gAudioCtx.seqPlayers[1].channels[0] != NULL) && (IS_SEQUENCE_CHANNEL_VALID(gAudioCtx.seqPlayers[1].channels[0]))) {
         layer = gAudioCtx.seqPlayers[1].channels[0]->layers[0];
         if (layer != NULL) {
             note = layer->note;

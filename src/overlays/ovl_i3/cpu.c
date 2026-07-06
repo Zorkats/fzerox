@@ -1129,7 +1129,7 @@ extern s32 gPlayerReverseTimer[];
 void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
     f32 spBC;
     s32 temps;
-    f32 spB4;
+    f32 spB4 = 0.0f;
     s32 sp7C;
     f32 temp_fa0;
     f32 temp_fa1;

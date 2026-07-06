@@ -10,8 +10,8 @@ void func_xk2_800F6290(void) {
     func_80078104(aMenuTextTLUT, 0x200, 0, 0, 0);
     func_80078104(aMenuQuitTex, 0x200, 0, 1, 0);
     func_80078104(aMenuContinueTex, 0x400, 0, 1, 0);
-    Font_LoadString("Ｍ", 5);
-    Font_LoadString("ABCDEFGHIJKLMNOPQRSTUVWXYZＡＢ23", 6);
+    Font_LoadString("\243\315", 5);
+    Font_LoadString("ABCDEFGHIJKLMNOPQRSTUVWXYZ\243\301\243\30223", 6);
     Font_LoadString("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 3);
 }
 
@@ -51,7 +51,7 @@ Gfx* func_xk2_800F634C(Gfx* gfx) {
     gDPPipeSync(gfx++);
     gDPSetTextureLUT(gfx++, G_TT_NONE);
     gfx = func_8007DB28(gfx, 0);
-    gfx = Font_DrawScaledString(gfx, 0x7D, (D_xk2_8013A7E0 * 0xF) + 0x61, "Ｍ", 1, 5, 0, 0.8f, 0.8f);
+    gfx = Font_DrawScaledString(gfx, 0x7D, (D_xk2_8013A7E0 * 0xF) + 0x61, "\243\315", 1, 5, 0, 0.8f, 0.8f);
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 128, 128, 128, 255);
     gfx = Font_DrawString(gfx, 0xA6 - (Font_GetStringWidth("PAUSE", 6, 1) / 2), 0x4E, "PAUSE", 1, 6, 0);

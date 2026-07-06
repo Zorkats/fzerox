@@ -39,9 +39,19 @@ void func_i10_80115E30(SaveContext* saveContext) {
     s32 sp34;
     ProfileSave* var_s1;
 
+#ifdef PORT
+    { extern void gdx_ckp(const char*, void*);
+      gdx_ckp("[i10] saveContext", (void*)saveContext); }
+#endif
+
     Sram_ReadWrite(OS_READ, 0, saveContext, sizeof(SaveContext));
 
     for (var_s2 = 0, i = 0, var_s1 = saveContext->profileSaves; i < 2; var_s2++, i++, var_s1++) {
+#ifdef PORT
+        { extern void gdx_ckp(const char*, void*);
+          gdx_ckp("[i10] var_s1", (void*)var_s1);
+          gdx_ckp("[i10] fileName", (void*)var_s1->saveSettings.fileName); }
+#endif
         if (!func_i10_80115EE8(var_s1->saveSettings.fileName)) {
             break;
         }

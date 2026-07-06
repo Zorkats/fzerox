@@ -655,12 +655,31 @@ typedef struct AudioPreloadReq {
 typedef struct AudioCmd {
     /* 0x0 */ union{
         u32 opArgs;
+#ifdef PORT
+        /* engram slice/audio-synthesis: AUDIO_MK_CMD packs opArgs as
+           (op<<24)|(arg0<<16)|(arg1<<8)|arg2 -- MSB-first, matching real N64's
+           big-endian memory layout where the bitfield-style struct below (declared
+           op-first) naturally aliases byte0=op, byte1=arg0, byte2=arg1, byte3=arg2.
+           On a little-endian host the SAME u32 store places the packed bytes in
+           the OPPOSITE order in memory (byte0=arg2 ... byte3=op), so the fields
+           must be declared in REVERSE order here to alias the correct byte.
+           Confirmed at runtime: AUDIOCMD_GLOBAL_INIT_SEQPLAYER(seqPlayerIndex,
+           seqId, 0, 0) always packs arg2==0, and the drained cmd->op read back
+           as 0 (byte0) instead of the real opcode (byte3) before this fix. */
+        struct {
+            u8 arg2;
+            u8 arg1;
+            u8 arg0;
+            u8 op;
+        };
+#else
         struct {
             u8 op;
             u8 arg0;
             u8 arg1;
             u8 arg2;
         };
+#endif
     };
     /* 0x4 */ union {
         void* data;
@@ -1248,7 +1267,14 @@ extern AudioHeapInitSizes gAudioHeapInitSizes;
 
 extern s16 D_80771228[];
 
+#ifdef PORT
+/* Enlarged on host builds: N64-tuned pool splits overflow the retail heap
+   once structs carry 64-bit pointers (see audio_heap.c). Declared size must
+   match — init_data.c derives the heap init size from sizeof(gAudioHeap). */
+extern u8 gAudioHeap[0x2ECA00 * 4];
+#else
 extern u8 gAudioHeap[0x2ECA00];
+#endif
 
 // Unknown Section:
 

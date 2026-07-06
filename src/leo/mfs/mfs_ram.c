@@ -385,8 +385,22 @@ s32 Mfs_ValidateRamVolume(void) {
     }
 
     if (j != 0) {
+#ifdef PORT
+        /* Port: an unformatted/foreign RAM area would normally raise
+           N64DD_MEDIA_NOT_INIT and route through the interactive format
+           prompt, which the port cannot present. Auto-format instead so the
+           EK boots on disks with a blank MFS RAM area. Port-only: hardware
+           builds keep the retail error path. */
+#if MFS_VERSION == MFS_VERSION_A
+        Mfs_InitRamArea(1);
+#else
+        Mfs_InitRamArea(1, 0, NULL);
+#endif
+        return 0;
+#else
         gMfsError = N64DD_MEDIA_NOT_INIT;
         return -1;
+#endif
     }
     return 0;
 }

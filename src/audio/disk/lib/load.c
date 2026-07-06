@@ -473,6 +473,17 @@ s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
     s32 index;
     s32 numFonts;
     s32 fontId;
+#ifdef PORT
+    /* Diagnostic for engram slice/audio-synthesis follow-up: PRINTF is a compiled-out
+       no-op in this build (macros.h), so the original "==BANDO==" traces never fire.
+       gdx_cki/gdx_ck are the port's existing PORT-only log shims for decomp .c files
+       that can't include <stdio.h>/<windows.h> (see port/n64_sched.c) -- reused here,
+       not new infrastructure. This traces whether the sequencer ever actually enables
+       a seqPlayer (and with which seqId), or whether every BGM-start request silently
+       fails at the disk sequence load (seqData == NULL), which would explain
+       persistent all-zero audio output with zero interpreter-side errors. */
+    extern void gdx_cki(const char* s, int v);
+#endif
 
     AudioSeq_SequencePlayerDisable(seqPlayer);
 
@@ -488,6 +499,9 @@ s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
 
     seqData = AudioLoad_SyncLoadSeq(seqId);
     if (seqData == NULL) {
+#ifdef PORT
+        gdx_cki("[audio-diag] AudioLoad_SyncLoadSeq FAILED (seqData=NULL) seqId", seqId);
+#endif
         return 0;
     }
 
@@ -501,6 +515,9 @@ s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
     seqPlayer->delay = 0;
     seqPlayer->finished = false;
     seqPlayer->playerIdx = playerIdx;
+#ifdef PORT
+    gdx_cki("[audio-diag] seqPlayer ENABLED playerIdx*1000+seqId", playerIdx * 1000 + seqId);
+#endif
     AudioSeq_SkipForwardSequence(seqPlayer);
     //! @bug Missing return.
 }
@@ -678,6 +695,17 @@ void* AudioLoad_SyncLoad(u32 tableType, u32 id, bool* didAllocate) {
 s32 AudioLoad_GetLoadTableIndex(s32 tableType, u32 entryId) {
     AudioTable* table = AudioLoad_GetLoadTable(tableType);
 
+#ifdef PORT
+    /* Stability guard: the DD BGM check (Audio_CheckBgmLoad -> IsSeqLoadComplete)
+       can reach here with a not-yet-initialized table or an out-of-range id,
+       faulting on table->entries[entryId]. Callers only use the return value to
+       index the fixed load-status arrays, so returning the id unchanged is safe
+       and just reports "not loaded" instead of crashing the race. */
+    if (table == NULL || (s16) table->header.numEntries <= 0 ||
+        entryId >= (u32) (s16) table->header.numEntries) {
+        return (s32) entryId;
+    }
+#endif
     if (table->entries[entryId].size == 0) {
         entryId = table->entries[entryId].romAddr;
     }

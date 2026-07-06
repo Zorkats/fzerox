@@ -55,7 +55,19 @@
     COMP_TEX_INFO(type, texture, TEX_COMPRESSED_SIZE(texture))
 
 #define PHYS_TO_K1ROM(x) (((u32) (x) | 0xB0000000))
+#ifdef PORT
+#include "PR/ultratypes.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern u32 gdx_rom_read32(u32 addr);
+#ifdef __cplusplus
+}
+#endif
+#define ROM_READ(addr) gdx_rom_read32((u32)(addr))
+#else
 #define ROM_READ(addr) (*(vu32*) PHYS_TO_K1ROM(addr))
+#endif
 
 /* 
  * Macros for asset includes

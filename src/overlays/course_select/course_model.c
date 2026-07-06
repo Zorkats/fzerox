@@ -17,6 +17,12 @@ extern s8 D_i5_8007B9EC[];
 extern s32 D_8076CB44;
 extern u8 D_80794E14;
 
+#ifdef EXPANSION_KIT
+static s32 sCourseModelLoadPending = 0;
+static s32 sCourseModelLoadingCup = 0;
+static s32 sCourseModelLoadingCourseNo = 0;
+#endif
+
 void func_i5_80115DF0(void) {
 #ifdef EXPANSION_KIT
     D_i5_801197D0 = Arena_Allocate(ALLOC_FRONT, 0x3600 * sizeof(Vtx));
@@ -33,41 +39,54 @@ void func_i5_80115E10(void) {
         D_i5_801190B4--;
     }
 #else
-    static s32 D_i5_8007B07C = 0;
     GhostSave* ghostSave = COURSE_CONTEXT()->ghostSave;
     SaveCourseRecords* courseRecords = &COURSE_CONTEXT()->saveCourseRecord;
+    s32 courseIndex;
     s32 i;
     bool var_a3;
 
-    if ((D_i5_801190B4 > 0) && (D_i5_801190B4 < 7) && (D_i5_8007B07C == 0)) {
+    if ((D_i5_801190B4 > 0) && (D_i5_801190B4 < 7) && (sCourseModelLoadPending == 0)) {
         if (gCourseModelCupType >= 4) {
             D_8076CB44 = 1;
         } else {
             D_8076CB44 = 0;
         }
-        D_i5_8007B07C = 1;
+        sCourseModelLoadingCup = gCourseModelCupType;
+        sCourseModelLoadingCourseNo = gCourseModelCupCourseNo;
+        sCourseModelLoadPending = 1;
         func_80704050(true);
-        func_80702448(gCourseModelCupType * 6 + gCourseModelCupCourseNo);
+        func_80702448(sCourseModelLoadingCup * 6 + sCourseModelLoadingCourseNo);
         func_80704050(false);
     }
 
-    if ((D_8076CB44 == 0) && (D_i5_8007B07C == 1)) {
-        D_i5_8007B07C = 0;
-        func_80074428(gCourseModelCupType * 6 + gCourseModelCupCourseNo);
-        func_80074634(&gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo]);
-        Course_SegmentLengthsInit(&gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo]);
+    if ((D_8076CB44 == 0) && (sCourseModelLoadPending == 1)) {
+        sCourseModelLoadPending = 0;
+        if ((sCourseModelLoadingCup != gCourseModelCupType) ||
+            (sCourseModelLoadingCourseNo != gCourseModelCupCourseNo)) {
+            goto course_model_update_done;
+        }
+        courseIndex = sCourseModelLoadingCup * 6 + sCourseModelLoadingCourseNo;
+        func_80074428(courseIndex);
+        func_80074634(&gCourseInfos[courseIndex]);
+        Course_SegmentLengthsInit(&gCourseInfos[courseIndex]);
         D_801197B0[gCourseModelCupCourseNo] =
-            func_800A2D2C(&gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo],
+            func_800A2D2C(&gCourseInfos[courseIndex],
                           &D_i5_801197D0[gCourseModelCupCourseNo * 0x900]);
         gCourseModelCupCourseNo++;
         D_i5_801190B4--;
     }
-    if ((D_8076CB44 == 1) && (D_i5_8007B07C == 1)) {
+    if ((D_8076CB44 == 1) && (sCourseModelLoadPending == 1)) {
         var_a3 = false;
         if (D_80794E14 == 0) {
+            sCourseModelLoadPending = 0;
+            if ((sCourseModelLoadingCup != gCourseModelCupType) ||
+                (sCourseModelLoadingCourseNo != gCourseModelCupCourseNo)) {
+                goto course_model_update_done;
+            }
+            courseIndex = sCourseModelLoadingCup * 6 + sCourseModelLoadingCourseNo;
             for (i = 0; i < 3; i++) {
                 if ((ghostSave[i].record.encodedCourseIndex !=
-                     gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo].encodedCourseIndex)) {
+                     gCourseInfos[courseIndex].encodedCourseIndex)) {
                     continue;
                 }
 
@@ -79,19 +98,19 @@ void func_i5_80115E10(void) {
                 var_a3 = true;
             }
             if (var_a3) {
-                D_i5_8007B9EC[gCourseModelCupType * 6 + gCourseModelCupCourseNo] |= 1;
+                D_i5_8007B9EC[courseIndex] |= 1;
             }
-            D_i5_8007B07C = 0;
-            func_80074428(gCourseModelCupType * 6 + gCourseModelCupCourseNo);
-            func_80074634(&gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo]);
-            Course_SegmentLengthsInit(&gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo]);
+            func_80074428(courseIndex);
+            func_80074634(&gCourseInfos[courseIndex]);
+            Course_SegmentLengthsInit(&gCourseInfos[courseIndex]);
             D_801197B0[gCourseModelCupCourseNo] =
-                func_800A2D2C(&gCourseInfos[gCourseModelCupType * 6 + gCourseModelCupCourseNo],
+                func_800A2D2C(&gCourseInfos[courseIndex],
                               &D_i5_801197D0[gCourseModelCupCourseNo * 0x900]);
             gCourseModelCupCourseNo++;
             D_i5_801190B4--;
         }
     }
+course_model_update_done:
     if (D_i5_801190B4 >= 7) {
         D_i5_801190B4--;
     }

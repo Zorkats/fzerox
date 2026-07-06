@@ -26,7 +26,14 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     s16* curAiBuffer;
     OSTask* task;
     s32 index;
+#ifdef PORT
+    /* osRecvMesg writes a full OSMesg (pointer-width on host) through &sp4C;
+       the N64's u32 local overflows the stack by 4 bytes here (RTC #2). The
+       queued values are small command tokens, truncated back at the use. */
+    OSMesg sp4C;
+#else
     u32 sp4C;
+#endif
     s32 sp48;
     s32 i;
 
@@ -94,6 +101,23 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     AudioLoad_ProcessLoads(gAudioCtx.resetStatus);
     AudioLoad_ProcessScriptLoads();
 
+#ifdef PORT
+    /* Diagnostic for engram slice/audio-synthesis follow-up (fork F2): if
+       resetStatus is ever nonzero here beyond the very first task (it should
+       drop to 0 synchronously inside AudioLoad_Init's one-shot AudioHeap_ResetStep()
+       call before any task is ever created), the thread-cmd drain further below
+       (thread.c ~141: "if (resetStatus == 0)") is permanently skipped and every
+       queued AUDIOCMD_* (including AUDIOCMD_GLOBAL_INIT_SEQPLAYER for BGM_TITLE)
+       sits in the ring forever. Capped to the first 10 tasks that reach this point. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sResetStatusLogCount = 0;
+        if (sResetStatusLogCount < 10) {
+            gdx_cki("[audio-diag] CreateTaskImpl resetStatus", (int) gAudioCtx.resetStatus);
+            sResetStatusLogCount++;
+        }
+    }
+#endif
     if (gAudioCtx.resetStatus != 0) {
         if (AudioHeap_ResetStep() == 0) {
             if (gAudioCtx.resetStatus == 0) {
@@ -133,7 +157,7 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     j = 0;
     if (gAudioCtx.resetStatus == 0) {
         while (osRecvMesg(gAudioCtx.threadCmdProcQueueP, &sp4C, OS_MESG_NOBLOCK) != -1) {
-            AudioThread_ProcessCmds(sp4C);
+            AudioThread_ProcessCmds((u32) (uintptr_t) sp4C);
             if (1) {}
             j++;
         }
@@ -449,6 +473,21 @@ void AudioThread_ProcessCmds(u32 msg) {
     static u8 sCurCmdRdPos = 0;
     AudioCmd* cmd;
     u8 endPos;
+#ifdef PORT
+    /* Diagnostic for engram slice/audio-synthesis follow-up (fork F2): this
+       function is only ever reached from AudioThread_CreateTaskImpl's drain loop,
+       itself gated on "resetStatus == 0". If ENTERED never logs, the drain gate
+       never opens (proves F2). If ENTERED logs but drainedOp never logs, the ring
+       is empty/desynced every time (readPos already == writePos), also pointing at
+       F2 upstream (queue accounting), not the RSP interpreter. */
+    extern void gdx_cki(const char* s, int v);
+    static s32 sProcessCmdsEnteredLogCount = 0;
+    static bool sDrainedOpLogged = false;
+    if (sProcessCmdsEnteredLogCount < 5) {
+        gdx_cki("[audio-diag] AudioThread_ProcessCmds ENTERED msg", (int) msg);
+        sProcessCmdsEnteredLogCount++;
+    }
+#endif
 
     if (!gAudioCtx.threadCmdQueueFinished) {
         sCurCmdRdPos = msg >> 8;
@@ -467,6 +506,12 @@ void AudioThread_ProcessCmds(u32 msg) {
             return;
         }
 
+#ifdef PORT
+        if (!sDrainedOpLogged) {
+            gdx_cki("[audio-diag] AudioThread_ProcessCmds drainedOp", (int) cmd->op);
+            sDrainedOpLogged = true;
+        }
+#endif
         AudioThread_ProcessCmd(cmd);
         cmd->op = AUDIOCMD_OP_NOOP;
     }
@@ -494,6 +539,19 @@ void Audio_GetSampleBankIdsOfFont(s32 fontId, u32* sampleBankId1, u32* sampleBan
 
 s32 AudioThread_ResetComplete(void) {
     s32 pad;
+#ifdef PORT
+    /* Same OSMesg-width overflow as AudioThread_CreateTaskImpl's sp4C: the
+       receive writes pointer-width on host; an s32 local overflows the stack. */
+    OSMesg specId;
+
+    if (osRecvMesg(gAudioCtx.audioResetQueueP, &specId, OS_MESG_NOBLOCK) == -1) {
+        return 0;
+    }
+    if ((s32) (uintptr_t) specId != gAudioCtx.specId) {
+        return -1;
+    }
+    return 1;
+#else
     s32 specId;
 
     if (osRecvMesg(gAudioCtx.audioResetQueueP, &specId, OS_MESG_NOBLOCK) == -1) {
@@ -503,6 +561,7 @@ s32 AudioThread_ResetComplete(void) {
         return -1;
     }
     return 1;
+#endif
 }
 
 void AudioThread_ClearResetQueue(void) {

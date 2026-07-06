@@ -36,9 +36,16 @@
 #define SEGMENT_VRAM_END(segment)   (segment ## _VRAM_END)
 #define SEGMENT_VRAM_SIZE(segment)  (SEGMENT_VRAM_END(segment) - SEGMENT_VRAM_START(segment))
 
+#ifdef PORT
+#include "port_segment_addrs.h"
+#define SEGMENT_ROM_START(segment) ((u8*)PORT_##segment##_ROM_START)
+#define SEGMENT_ROM_END(segment)   ((u8*)PORT_##segment##_ROM_END)
+#define SEGMENT_ROM_SIZE(segment)  (PORT_##segment##_ROM_END - PORT_##segment##_ROM_START)
+#else
 #define SEGMENT_ROM_START(segment) (segment ## _ROM_START)
 #define SEGMENT_ROM_END(segment)   (segment ## _ROM_END)
 #define SEGMENT_ROM_SIZE(segment)  (SEGMENT_ROM_END(segment) - SEGMENT_ROM_START(segment))
+#endif
 
 #define SEGMENT_TEXT_START(segment) (segment ## _TEXT_START)
 #define SEGMENT_TEXT_END(segment)   (segment ## _TEXT_END)
@@ -49,7 +56,15 @@
 #define SEGMENT_RODATA_END(segment)   (segment ## _RODATA_END)
 #define SEGMENT_DATA_SIZE(segment)  (SEGMENT_RODATA_END(segment) - SEGMENT_DATA_START(segment))
 
+// On host the _DATA_SIZE linker symbols are 1-byte stubs, so (size_t)sym gives
+// the stub's host address instead of the section size. Return 0 on PORT builds so
+// arithmetic like (gBuffersVramEnd + SEGMENT_DATA_SIZE_CONST(x)) doesn't overflow
+// into garbage values that corrupt gSegments[].
+#ifdef PORT
+#define SEGMENT_DATA_SIZE_CONST(segment) ((size_t)0)
+#else
 #define SEGMENT_DATA_SIZE_CONST(segment) (segment ## _DATA_SIZE)
+#endif
 
 #define SEGMENT_BSS_START(segment) (segment ## _BSS_START)
 #define SEGMENT_BSS_END(segment)   (segment ## _BSS_END)
@@ -114,7 +129,15 @@ DECLARE_SEGMENT(audio_table);
 DECLARE_SEGMENT(game_context);
 
 #ifdef EXPANSION_KIT
+#if defined(PORT)
+/* PORT: the disk *_ROM_START linker symbols are 1-byte host stubs (garbage as
+   disk addresses). Resolve to tagged physical-disk handles instead; see
+   port_disk_segments.h and DiskDrive_LoadData's PORT branch. */
+#include "port_disk_segments.h"
+#define SEGMENT_DISK_START(segment) (GDX_DISK_START_##segment)
+#else
 #define SEGMENT_DISK_START(segment) (segment ## _ROM_START)
+#endif
 #define SEGMENT_DISK_SIZE(segment)  (SEGMENT_BSS_START(segment) - SEGMENT_VRAM_START(segment))
 
 DECLARE_SEGMENT(course_edit_textures);

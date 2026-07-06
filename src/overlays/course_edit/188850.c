@@ -2202,8 +2202,10 @@ void func_xk2_800DCDD0(void) {
         return;
     }
 
+#ifndef AVOID_UB
     // FAKE
     if (var_v1) {}
+#endif
 
     if (((gCreateOption == CREATE_OPTION_COURSE) || (gCreateOption == CREATE_OPTION_DESIGN) ||
          (gCreateOption == CREATE_OPTION_PARTS)) &&

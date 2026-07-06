@@ -15,10 +15,10 @@
     #   range: [0x4005EA8, 0x4006CA8]
     #   mode: APPEND
     aPositionDigitTexs:
-      range: [0x4013DE0, 0x4017CE0]
+      range: [0x4013DE0, 0x40183E0]
       mode: APPEND
     aPositionOrdinalSuffixTexs:
-      range: [0x4019020, 0x4019980]
+      range: [0x4019020, 0x4019CA0]
       mode: APPEND
 
 D_4000000:
