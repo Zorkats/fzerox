@@ -407,7 +407,10 @@ void Credits_OldMachinesInit(Object* oldMachinesObj) {
     OBJECT_STATE(oldMachinesObj) = 0;
 
     //! @bug the case where func_800792D8 returns -1 is unhandled
-    D_800E3F28[OBJECT_CACHE_INDEX(oldMachinesObj)].unk_04 = -1;
+    /* AVOID_UB: -1 indexes one element before D_800E3F28 = out-of-bounds write. */
+    if (OBJECT_CACHE_INDEX(oldMachinesObj) != -1) {
+        D_800E3F28[OBJECT_CACHE_INDEX(oldMachinesObj)].unk_04 = -1;
+    }
 }
 
 void Credits_MachinesInit(Object* machinesObj) {
@@ -419,7 +422,10 @@ void Credits_MachinesInit(Object* machinesObj) {
     OBJECT_CACHE_INDEX(machinesObj) = func_800792D8(D_i6_8011E558[0]);
 
     //! @bug the case where func_800792D8 returns -1 is unhandled
-    D_800E3F28[OBJECT_CACHE_INDEX(machinesObj)].unk_04 = -1;
+    /* AVOID_UB: -1 indexes one element before D_800E3F28 = out-of-bounds write. */
+    if (OBJECT_CACHE_INDEX(machinesObj) != -1) {
+        D_800E3F28[OBJECT_CACHE_INDEX(machinesObj)].unk_04 = -1;
+    }
 }
 
 void Credits_MenuLadyInit(Object* menuLadyObj) {
@@ -450,7 +456,10 @@ void Credits_PortraitsInit(Object* portraitsObj) {
     OBJECT_CACHE_INDEX(portraitsObj) = func_800792D8(D_i6_8011EBF8[0]);
 
     //! @bug the case where func_800792D8 returns -1 is unhandled
-    D_800E3F28[OBJECT_CACHE_INDEX(portraitsObj)].unk_04 = -1;
+    /* AVOID_UB: -1 indexes one element before D_800E3F28 = out-of-bounds write. */
+    if (OBJECT_CACHE_INDEX(portraitsObj) != -1) {
+        D_800E3F28[OBJECT_CACHE_INDEX(portraitsObj)].unk_04 = -1;
+    }
 }
 
 Gfx* Credits_FadeInNameByLetter(Gfx* gfx, Object* startNameObj, bool* wordFadeInProgress, bool isRightJustified) {
@@ -524,7 +533,7 @@ Gfx* Credits_OldMachinesDraw(Gfx* gfx, Object* oldMachinesObj) {
 
 Gfx* Credits_MachinesDraw(Gfx* gfx, Object* machinesObj) {
     s32 sp154;
-    s32 row;
+    s32 row = 0; /* AVOID_UB: read before first assignment */
     s32 var_t5;
     f32 var_fv1;
     s32 left;

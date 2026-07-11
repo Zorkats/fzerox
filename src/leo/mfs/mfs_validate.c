@@ -83,7 +83,10 @@ s32 Mfs_ValidateFileSystemOperation(s32 validationFlags, u16 entryIndex, u16 sub
             //! can occur
             //       To fix, copy the section from the writing validation (potentially using FORBID_R instead also!)
             if (dirEntryIndex == MFS_ENTRY_DOES_NOT_EXIST) {
-                entryIndex = Mfs_GetDirectoryIndex(dirId);
+                /* AVOID_UB (per annotation): assigning entryIndex left
+                   dirEntryIndex = -1 for the read below = OOB directory-entry
+                   read, making save validation layout-dependent on host. */
+                dirEntryIndex = Mfs_GetDirectoryIndex(dirId);
             }
             if ((gMfsRamArea.directoryEntry[dirEntryIndex].attr & MFS_FILE_ATTR_FORBID_W)) {
                 if (Mfs_ValidateGameCode(dirEntryIndex) < 0) {

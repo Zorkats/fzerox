@@ -7,6 +7,8 @@
 s32 Mfs_UpdateEntryCreationDate(u16 entryId, MfsTimeFormat* creationDate) {
     bcopy(creationDate, &gMfsRamArea.directoryEntry[entryId].creationDate, sizeof(MfsTimeFormat));
     //! @bug bad return (return value is used)
+    /* AVOID_UB: callers consume this value; 0 = success by MFS convention. */
+    return 0;
 }
 
 s32 Mfs_UpdateFileCreationDate(u16 dirId, char* name, char* extension, MfsTimeFormat* creationDate, bool writeChanges) {

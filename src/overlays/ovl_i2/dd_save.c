@@ -12,6 +12,7 @@ char sDDSaveGhostFileName[] = "GHOST00";
 
 extern OSMesgQueue gMFSMesgQ;
 extern char gEditCupTrackNames[][9];
+extern s32 gLeoDriveConnectionState;
 
 void DDSave_LoadCourseGhostRecords(s32 courseIndex, GhostRecord* ghostRecord) {
     s32 i;
@@ -33,9 +34,20 @@ void DDSave_LoadCourseGhostRecords(s32 courseIndex, GhostRecord* ghostRecord) {
         return;
     }
     DDSave_ClearCachedGhostSaves();
-    func_807684AC(MFS_ENTRY_WORKING_DIR, sDDSaveGhostFileName, "GOST", COURSE_CONTEXT()->ghostSave,
-                  offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave) + sizeof(SaveCourseRecords));
-    osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+    /* Blocking MFS ghost-record fetch: reachable from Time Attack race init
+     * (Race_Init -> Save_LoadGhost, race.c) and the Records menu
+     * (Records_LoadGhostRaceTimes / Records_HasGhostFor, records.c) for ANY
+     * course, not just Course Edit. func_807684AC posts a request to
+     * sSys6Thread's command queue and this blocks on gMFSMesgQ, which never
+     * gets a producer without a real 64DD disk -- same
+     * gLeoDriveConnectionState gate as the Course_Load fixes (course_gadgets.c).
+     * Skipping the fetch leaves the just-cleared (empty) ghost records in
+     * place, matching the existing "no saved ghost" fallback. */
+    if (gLeoDriveConnectionState != 0) {
+        func_807684AC(MFS_ENTRY_WORKING_DIR, sDDSaveGhostFileName, "GOST", COURSE_CONTEXT()->ghostSave,
+                      offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave) + sizeof(SaveCourseRecords));
+        osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+    }
     for (i = 0; i < 3; i++, ghostRecord++, ghostSave++) {
         PRINTF("Ghost Name %s\n");
         if (ghostSave->record.checksum != Save_CalculateGhostRecordChecksum(&ghostSave->record)) {
@@ -96,9 +108,16 @@ void DDSave_LoadCourseGhostData(s32 courseIndex, s32 ghostIndex, GhostData* ghos
         return;
     }
     DDSave_ClearCachedGhostSaves();
-    func_807684AC(MFS_ENTRY_WORKING_DIR, sDDSaveGhostFileName, "GOST", COURSE_CONTEXT()->ghostSave,
-                  offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave));
-    osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+    /* Same gLeoDriveConnectionState gate as DDSave_LoadCourseGhostRecords
+     * above -- blocking MFS fetch, no producer without a real disk. In
+     * practice this is only reached for a ghost record that
+     * DDSave_LoadCourseGhostRecords already found on disk, so it's dead code
+     * without a disk; gated directly too since it has its own blocking call. */
+    if (gLeoDriveConnectionState != 0) {
+        func_807684AC(MFS_ENTRY_WORKING_DIR, sDDSaveGhostFileName, "GOST", COURSE_CONTEXT()->ghostSave,
+                      offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave));
+        osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+    }
     *ghostData = ghostSave[ghostIndex].data;
 }
 

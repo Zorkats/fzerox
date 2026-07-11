@@ -411,6 +411,8 @@ s32 func_80760A84(void) {
         gMfsError = 0x111;
         return -1;
     }
+    /* AVOID_UB: success path fell off. */
+    return 0;
 }
 #endif
 

@@ -160,6 +160,7 @@ extern u16 gInputButtonPressed;
 extern char* gCurrentTrackName;
 extern s32 gCourseIndex;
 extern s32 gTransitionState;
+extern s32 gLeoDriveConnectionState;
 
 const s32 kDefaultSubOptionLimits[] = { 2, 1, 0, 2, 0, 2, 0, 0 };
 const s32 kMaxSubOptionLimits[] = { 3, 1, 0, 2, 0, 3, 0, 0 };
@@ -212,6 +213,27 @@ s32 MainMenu_Update(void) {
                 case MODE_CREATE_MACHINE:
                     gSelectedMode = MODE_OPTIONS;
                     break;
+            }
+#else
+            /* Course Edit and Machine Create are 64DD-disk-only content: both
+             * overlays (course_edit/, machine_create/) rely on blocking MFS
+             * calls (func_8076852C/func_807683B8/... family -> osRecvMesg(
+             * &gMFSMesgQ, ..., OS_MESG_BLOCK)) that have no producer without a
+             * real disk connected (see gLeoDriveConnectionState gates in
+             * course_gadgets.c and dd_save.c). Rather than gate every MFS call
+             * site inside those overlays, refuse entry at the menu itself --
+             * same gLeoDriveConnectionState gate, same redirect targets the
+             * non-EK build already uses above -- so a no-disk EK session can't
+             * navigate into a mode that will hang on first disk access. */
+            if (gLeoDriveConnectionState == 0) {
+                switch (gSelectedMode) {
+                    case MODE_COURSE_EDIT:
+                        gSelectedMode = MODE_PRACTICE;
+                        break;
+                    case MODE_CREATE_MACHINE:
+                        gSelectedMode = MODE_OPTIONS;
+                        break;
+                }
             }
 #endif
             if (previous != gSelectedMode) {

@@ -145,4 +145,6 @@ s32 Mfs_CopyFileToDir(s32 entryId, char* name, u16 parentDirId) {
     Mfs_SetDirEntryRenewalCounter(0);
     Mfs_SetDirEntryExtension(gMfsRamArea.directoryEntry[entryId].extension);
     Mfs_CopyDirEntryToRam(nextFreeEntryId);
+    /* AVOID_UB: fell off a value-returning function. */
+    return 0;
 }

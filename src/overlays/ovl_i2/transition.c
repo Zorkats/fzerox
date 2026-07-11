@@ -575,14 +575,26 @@ void Transition_SetBackgroundBuffer(void) {
     }
     if (transition->flags & TRANSITION_FLAG_CONVERT_TO_PALETTE) {
         //! @bug passes in size of texture instead of pixel count, causing overflow read
+        /* AVOID_UB: the 2x count overread also grows the palette table past its
+           buffer when the garbage tail adds unique colors — host memory
+           corruption. Pass the true pixel count. */
         func_8007EFBC(transition->backgroundBuffer, sTransitionPalettePtr,
-                      TRANSITION_BACKGROUND_WIDTH * TRANSITION_BACKGROUND_HEIGHT * sizeof(u16));
+                      TRANSITION_BACKGROUND_WIDTH * TRANSITION_BACKGROUND_HEIGHT);
     }
 #ifdef PORT
     gdx_set_native_rgba16_texture_range(
         transition->backgroundBuffer,
         TRANSITION_BACKGROUND_WIDTH * TRANSITION_BACKGROUND_HEIGHT * sizeof(u16),
         !(transition->flags & TRANSITION_FLAG_CONVERT_TO_PALETTE));
+    /* CONVERT_TO_PALETTE turns the background into CI8 indices (endian-neutral,
+       so its native flag is correctly disabled above) but fills the palette
+       with HOST-ORDER RGBA16 values. The TLUT load reads that palette as a
+       big-endian N64 byte stream, so it needs the same native-range byte swap
+       the RGBA16 background gets — without it every paletted transition draws
+       with swapped color channels (the garbled title-screen wipe). */
+    gdx_set_native_rgba16_texture_range(
+        sTransitionPalette, sizeof(sTransitionPalette),
+        (transition->flags & TRANSITION_FLAG_CONVERT_TO_PALETTE) ? 1 : 0);
 #endif
 }
 
