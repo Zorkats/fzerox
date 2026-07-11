@@ -627,9 +627,30 @@ void func_8009DB28(CourseSegment* segment, f32* arg1, f32* arg2) {
     f64 temp_ft5_2;
     f64 temp_fv0_6;
     f64 temp_ft4;
-    CourseSegment* prevSegment = segment->prev;
-    CourseSegment* nextSegment = segment->next;
-    CourseSegment* nextNextSegment = nextSegment->next;
+    CourseSegment* prevSegment;
+    CourseSegment* nextSegment;
+    CourseSegment* nextNextSegment;
+
+#ifdef PORT
+    /* Task #20 guard: this walks segment->prev, segment->next and
+     * nextSegment->next unconditionally. The circular list is only fully
+     * linked once func_80074428()/func_i2_800B39B4() finish building it from
+     * the just-DMA'd CourseData; if a caller reaches here first (observed via
+     * the title screen's auto-triggered attract-mode race, which queues a
+     * course/mode change with no user-facing loading gate) any of these
+     * pointers can still be NULL/stale, and this then dereferences two hops
+     * deep with no caller-side check. Bail via the function's own existing
+     * "invalid" sentinel (-1.0f) instead of crashing. */
+    if (segment == NULL || segment->prev == NULL || segment->next == NULL || segment->next->next == NULL) {
+        *arg1 = -1.0f;
+        *arg2 = -1.0f;
+        return;
+    }
+#endif
+
+    prevSegment = segment->prev;
+    nextSegment = segment->next;
+    nextNextSegment = nextSegment->next;
 
     temp_ft5 = segment->pos.x - nextSegment->pos.x;
     temp_fs2 = prevSegment->pos.x - nextNextSegment->pos.x + temp_ft5;
@@ -699,8 +720,34 @@ s32 Course_SplineCalculateTensions(CourseInfo* courseInfo) {
     f32 alpha1;
     f32 alpha2;
     CourseSegment* segment = courseInfo->courseSegments;
+#ifdef PORT
+    /* Task #20 guard: courseSegments is a shared static buffer reused across
+     * course loads (func_800A4B54/func_80074428) — it is only a valid closed
+     * loop once the course's segmentCount/next/prev links have been (re)built
+     * for THIS course. A caller that reaches this before that finishes (the
+     * title screen's auto-triggered attract-mode race is the one path that
+     * queues a course change with no loading-screen wait) walks a stale or
+     * partially-linked list here, which either dereferences a NULL segment
+     * or never satisfies "segment != courseInfo->courseSegments" and walks
+     * off the end of the buffer. Bound the walk and bail (the existing -1
+     * "invalid tension" return) instead of crashing. */
+    s32 guard = 0;
+    const s32 kMaxSegments = 4096; /* generous: real courses use well under 100 */
+
+    if (segment == NULL) {
+        return -1;
+    }
+#endif
 
     do {
+#ifdef PORT
+        if (segment == NULL) {
+            return -1;
+        }
+        if (++guard > kMaxSegments) {
+            return -1;
+        }
+#endif
         func_8009DB28(segment, &alpha1, &alpha2);
         if ((alpha1 < 0.0f) || (alpha1 > 2.0f) || (alpha2 < 0.0f) || (alpha2 > 2.0f)) {
             return -1;
@@ -1295,8 +1342,30 @@ s32 func_i2_800B39B4(CourseInfo* courseInfo) {
     CourseSegment* nextSegment;
     CourseSegment* prevSegment;
     CourseSegment* segment = courseInfo->courseSegments;
+#ifdef PORT
+    /* Task #20 guard: same unguarded circular-list walk as
+     * Course_SplineCalculateTensions/func_8009DB28 above, and this is the
+     * function func_80074428() actually calls (under EXPANSION_KIT) for
+     * every course load, including the title screen's auto-triggered
+     * attract-mode race. See the comment on func_8009DB28 for the failure
+     * mode; bail the same way the function's own "nothing found" case does. */
+    s32 guard = 0;
+    const s32 kMaxSegments = 4096;
+
+    if (segment == NULL) {
+        return -1;
+    }
+#endif
 
     do {
+#ifdef PORT
+        if (segment == NULL || segment->prev == NULL || segment->next == NULL) {
+            return -1;
+        }
+        if (++guard > kMaxSegments) {
+            return -1;
+        }
+#endif
         prevSegment = segment->prev;
         nextSegment = segment->next;
         vec1.x = segment->pos.x - prevSegment->pos.x;
@@ -4739,9 +4808,29 @@ s32 func_i2_800BE8BC(CourseInfo* courseInfo) {
     f32 alpha1;
     f32 alpha2;
     CourseSegment* segment = courseInfo->courseSegments;
+#ifdef PORT
+    /* Task #20 guard: same reasoning as func_i2_800B39B4/
+     * Course_SplineCalculateTensions above — this is the second-chance path
+     * func_80074428() calls when func_i2_800B39B4() finds nothing, so it
+     * runs on every EK course load too. */
+    s32 guard = 0;
+    const s32 kMaxSegments = 4096;
+
+    if (segment == NULL) {
+        return -1;
+    }
+#endif
 
     if (1) {}
     do {
+#ifdef PORT
+        if (segment == NULL) {
+            break;
+        }
+        if (++guard > kMaxSegments) {
+            break;
+        }
+#endif
         func_8009DB28(segment, &alpha1, &alpha2);
         segment->tension = (alpha1 + alpha2) * 0.5f;
         if ((alpha1 < 0.0f) || (alpha1 > 2.0f) || (alpha2 < 0.0f) || (alpha2 > 2.0f)) {

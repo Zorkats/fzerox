@@ -1,3 +1,20 @@
+/* PORT NOTE — texture-replacement (hi-res pack) implementers, read this first.
+ *
+ * This file's blit helpers carry three shipped-on-console quirks, flagged
+ * below with //! @bug annotations:
+ *   1. gSPScisTextureRectangle s/t arguments ordered contrary to convention;
+ *   2. G_IM_SIZ_4b vs else gDPLoadTile branches swapped relative to what
+ *      `size` suggests (the 4b branch uses G_TEXTURE_IMAGE_FRAC - 1 shifts).
+ * Each quirk is internally consistent: the tile setup and the rectangle
+ * always agree, so the rasterized output is correct and identical to
+ * hardware. They must NOT be "fixed" in isolation — reordering either side
+ * alone transposes or misaligns every menu/HUD image in the game.
+ *
+ * Consequence for texture replacement: key replacements on TEXTURE DATA
+ * (load-block/load-tile payload hashes), never on the command-stream
+ * coordinate pattern. Data-keyed packs are unaffected by these quirks.
+ * Any future normalization of this file must be output-identical and must
+ * happen BEFORE a pack's hash database is frozen, or not at all. */
 #include "global.h"
 #include ASSET_HEADER(setup_gfx.h)
 

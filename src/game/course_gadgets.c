@@ -575,7 +575,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 gSPDisplayList(gfx++, D_9014C40);
             }
             if (feature->featureType <= COURSE_FEATURE_SIGN_OVERHEAD) {
+#ifdef PORT
+                /* Same K0_TO_PHYS host-pointer truncation fix as the race
+                   branch below (course-editor variant). */
+                gSPMatrix(gfx++, decorationMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#else
                 gSPMatrix(gfx++, K0_TO_PHYS(decorationMtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#endif
                 gfx = sCourseDecorationDrawFuncs[feature->featureType](gfx);
             }
             decorationMtx++;
@@ -606,7 +612,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 gSPDisplayList(gfx++, D_9014C40);
             }
             if (COURSE_FEATURE_IS_BUILDING(feature->featureType)) {
+#ifdef PORT
+                /* Same K0_TO_PHYS host-pointer truncation fix (course-editor
+                   building pass). */
+                gSPMatrix(gfx++, decorationMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#else
                 gSPMatrix(gfx++, K0_TO_PHYS(decorationMtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#endif
                 gfx = sCourseDecorationDrawFuncs[feature->featureType](gfx);
             }
             decorationMtx++;
@@ -671,7 +683,33 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 continue;
             }
             if ((decoration->loadChunk->drawState != 0) && (feature->featureType <= COURSE_FEATURE_SIGN_OVERHEAD)) {
+#ifdef PORT
+                /* K0_TO_PHYS masks a 64-bit host pointer to 29 bits; the wide
+                   gSPMatrix carries the full pointer, so the mask turned every
+                   decoration modelview into an unresolvable token (invisible
+                   decorations even when drawState passed). Same fix family as
+                   the racer.c modelview matrices. */
+                gSPMatrix(gfx++, decorationMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+                /* [deco-draw] per-site census (contract audit, 2026-07-10):
+                   every static cell of this chain verifies clean yet nothing
+                   appears on screen. Log the EXACT emitted pair (matrix host
+                   pointer + this frame's gfx cursor + feature type) for the
+                   drawable decoration so the bridge-side log lines for the
+                   same frame can be matched 1:1. Capped. */
+                {
+                    extern void gdx_ckp(const char* s, void* v);
+                    extern void gdx_cki(const char* s, int v);
+                    static int sDecoDrawLogs = 0;
+                    if (sDecoDrawLogs < 12) {
+                        sDecoDrawLogs++;
+                        gdx_cki("[deco-draw] featureType", feature->featureType);
+                        gdx_ckp("[deco-draw]  mtx", (void*) decorationMtx);
+                        gdx_ckp("[deco-draw]  gfxCursor", (void*) gfx);
+                    }
+                }
+#else
                 gSPMatrix(gfx++, K0_TO_PHYS(decorationMtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#endif
                 gfx = sCourseDecorationDrawFuncs[feature->featureType](gfx);
             }
             decorationMtx++;
@@ -694,7 +732,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
             }
 
             if ((decoration->loadChunk->drawState != 0) && COURSE_FEATURE_IS_BUILDING(feature->featureType)) {
+#ifdef PORT
+                /* Same K0_TO_PHYS host-pointer truncation fix as the
+                   gate/sign loop above. */
+                gSPMatrix(gfx++, decorationMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#else
                 gSPMatrix(gfx++, K0_TO_PHYS(decorationMtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#endif
                 gfx = sCourseDecorationDrawFuncs[feature->featureType](gfx);
             }
             decorationMtx++;
@@ -3834,21 +3878,33 @@ void Dma_LoadAssetsAsync(u8* romAddr, u8* ramAddr, size_t size) {
 }
 
 #ifdef EXPANSION_KIT
+extern s32 gLeoDriveConnectionState;
+
 void func_80701E08(void) {
 
     func_80704050(true);
 
-    switch (func_8070595C()) {
-        case 1:
-            func_8070F8A4(-1, 3);
-            break;
-        case 0:
-            func_8070F8A4(-1, 4);
-            break;
-        default:
-            break;
+    /* func_8070595C()'s "!= 2" spin below is a console-faithful "please
+     * insert the 64DD disk" wait -- on real hardware it blocks until the
+     * player physically inserts a disk. The PC port has no live disk-swap
+     * path, so with no disk connected at boot (gLeoDriveConnectionState == 0)
+     * this would busy-spin forever with no way out. Gate on
+     * gLeoDriveConnectionState, same pattern as the MFS-blocking gates
+     * elsewhere in this file (not gRamDDCompatible, which is unconditionally
+     * true in EK builds). */
+    if (gLeoDriveConnectionState != 0) {
+        switch (func_8070595C()) {
+            case 1:
+                func_8070F8A4(-1, 3);
+                break;
+            case 0:
+                func_8070F8A4(-1, 4);
+                break;
+            default:
+                break;
+        }
+        while (func_8070595C() != 2) {}
     }
-    while (func_8070595C() != 2) {}
     func_80704050(false);
 }
 #endif
@@ -3879,6 +3935,7 @@ extern OSMesgQueue* gMFSMesgQ;
 extern s8 gTitleDemoState;
 extern s32 D_8079F9B4;
 extern s32 D_xk2_800F7404;
+extern s32 gLeoDriveConnectionState;
 
 UNUSED s32 D_800CD21C = 0;
 
@@ -3969,8 +4026,16 @@ void Course_Load(s32 courseIndex) {
             ghostName[5] = (courseIndex / 10) + '0';
             ghostName[6] = (courseIndex % 10) + '0';
             Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-            func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
-            osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            /* Blocking MFS ghost fetch: same gLeoDriveConnectionState gate as the
+             * Course_Load non-edit staff-ghost fix below -- without a disk this
+             * has no sSys6Thread producer and parks the game thread forever.
+             * Course Edit's own menu entry now refuses without a disk (see
+             * main_menu.c), so this is defense-in-depth for the disk-course
+             * default-ghost path. */
+            if (gLeoDriveConnectionState != 0) {
+                func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
+                osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            }
             Course_CalculateChecksum();
             if (DDSave_ValidateCachedGhostRecords()) {
                 PRINTF("GHOST DATA WAS BROKEN\n");
@@ -3993,9 +4058,16 @@ void Course_Load(s32 courseIndex) {
                 while (true) {}
             }
         } else {
-            func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
-                          sizeof(CourseContext));
-            osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            /* Named-course MFS fetch: gate on gLeoDriveConnectionState (see
+             * pattern note above). In practice gEditCupTrackNames only holds a
+             * non-empty name when it was populated from disk, so this branch is
+             * unreachable in a no-disk session once Course Edit's menu entry is
+             * refused -- gated here too for defense-in-depth. */
+            if (gLeoDriveConnectionState != 0) {
+                func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
+                              sizeof(CourseContext));
+                osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            }
             if (D_8079F9B4 != 0) {
                 PRINTF("ENTRY CHECK BUT NONE %s (DEFAULT COURSE)\n", gEditCupTrackNames[diskCourseIndex]);
                 if (gMfsError == N64DD_NOT_FOUND) {
@@ -4005,9 +4077,13 @@ void Course_Load(s32 courseIndex) {
                         ghostName[5] = (courseIndex / 10) + '0';
                         ghostName[6] = (courseIndex % 10) + '0';
                         Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-                        func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(),
-                                      sizeof(CourseContext));
-                        osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+                        /* Same gLeoDriveConnectionState gate; nested fallback
+                           ghost fetch, unreachable without a disk in practice. */
+                        if (gLeoDriveConnectionState != 0) {
+                            func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(),
+                                          sizeof(CourseContext));
+                            osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+                        }
                         Course_CalculateChecksum();
                         if (DDSave_ValidateCachedGhostRecords()) {
                             PRINTF("GHOST DATA WAS BROKEN\n");
@@ -4043,7 +4119,21 @@ void Course_Load(s32 courseIndex) {
         ghostName[5] = (courseIndex / 10) + '0';
         ghostName[6] = (courseIndex % 10) + '0';
         Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-        if (gTitleDemoState == TITLE_DEMO_INACTIVE) {
+        /* func_8076852C -> func_80767F14 posts an MFS load request onto
+         * sSys6Thread's command queue (D_807C6E90) and this call blocks on
+         * gMFSMesgQ until sSys6Thread's SLMFSLoad (sys/disk/75000.c,
+         * sys/disk/sys_leo_dd.c) sends completion. sSys6Thread is only ever
+         * osStartThread'd when a real 64DD drive is detected
+         * (gLeoDriveConnectionState == 1, promoted to 2 -- see sys_main.c).
+         * With no disk connected this staff-ghost load has no producer and
+         * the game thread parks here forever: Course_Load(COURSE_MUTE_CITY)
+         * is called unconditionally from func_800742FC during boot, so this
+         * blocked every no-disk EK boot before the title screen. Same class
+         * of bug as the G2 guitar-seq and ovl_i10 cup-name gates elsewhere in
+         * this codebase -- gate on gLeoDriveConnectionState, not
+         * gRamDDCompatible (gRamDDCompatible is set true unconditionally in
+         * the EK build and is not a valid proxy for "disk present"). */
+        if ((gLeoDriveConnectionState != 0) && (gTitleDemoState == TITLE_DEMO_INACTIVE)) {
             func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
             osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
         }
@@ -4111,17 +4201,22 @@ void func_80702448(s32 courseIndex) {
         diskCourseIndex = courseIndex - COURSE_EDIT_1;
         PRINTF("INDEX %d\n", diskCourseIndex);
         PRINTF("ENTRY CHECK NONE(DEFAULT COURSE)\n");
-        switch (func_8070595C()) {
-            case 1:
-                func_8070F8A4(-1, 3);
-                break;
-            case 0:
-                func_8070F8A4(-1, 4);
-                break;
-            default:
-                break;
+        /* Same "please insert disk" busy-spin as func_80701E08 above -- gate on
+         * gLeoDriveConnectionState so a no-disk session falls through to the
+         * default-course path below instead of spinning forever. */
+        if (gLeoDriveConnectionState != 0) {
+            switch (func_8070595C()) {
+                case 1:
+                    func_8070F8A4(-1, 3);
+                    break;
+                case 0:
+                    func_8070F8A4(-1, 4);
+                    break;
+                default:
+                    break;
+            }
+            while (func_8070595C() != 2) {}
         }
-        while (func_8070595C() != 2) {}
         if (gEditCupTrackNames[diskCourseIndex][0] == '\0' || diskCourseIndex >= 6) {
             char ghostName[8] = { "GHOST00" };
             s32 pad;
@@ -4129,8 +4224,19 @@ void func_80702448(s32 courseIndex) {
             ghostName[5] = (courseIndex / 10) + '0';
             ghostName[6] = (courseIndex % 10) + '0';
             Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-            func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
-            osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            /* func_80702448 is the course-select preview loader (course_model.c)
+             * and is reachable while browsing the disk cup in normal course
+             * select, NOT only from inside Course Edit. Blocking MFS ghost
+             * fetch gated on gLeoDriveConnectionState (same pattern as
+             * Course_Load) -- with no disk, gEditCupTrackNames stays empty and
+             * the upstream course-select preview guard (var_v1 in
+             * course_select.c) already skips calling this for an empty disk
+             * cup slot, but gate here too since this function has no such
+             * guard of its own. */
+            if (gLeoDriveConnectionState != 0) {
+                func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
+                osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            }
             Course_CalculateChecksum();
             if (DDSave_ValidateCachedGhostRecords()) {
                 DDSave_ClearCachedGhostSaves();
@@ -4153,9 +4259,14 @@ void func_80702448(s32 courseIndex) {
                 while (true) {}
             }
         } else {
-            func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
-                          sizeof(CourseContext));
-            osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            /* Named-course MFS fetch (course-select preview path): gate on
+             * gLeoDriveConnectionState. See notes above -- unreachable in
+             * practice without a disk, gated for defense-in-depth. */
+            if (gLeoDriveConnectionState != 0) {
+                func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
+                              sizeof(CourseContext));
+                osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+            }
             PRINTF("ENTRY CHECK BUT NONE %s (DEFAULT COURSE)\n");
             if (D_8079F9B4 != 0) {
                 if (gMfsError == N64DD_NOT_FOUND) {
@@ -4167,9 +4278,13 @@ void func_80702448(s32 courseIndex) {
                         ghostName[5] = (courseIndex / 10) + '0';
                         ghostName[6] = (courseIndex % 10) + '0';
                         Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-                        func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(),
-                                      sizeof(CourseContext));
-                        osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+                        /* Same gLeoDriveConnectionState gate; nested fallback
+                           ghost fetch, unreachable without a disk in practice. */
+                        if (gLeoDriveConnectionState != 0) {
+                            func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(),
+                                          sizeof(CourseContext));
+                            osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+                        }
                         Course_CalculateChecksum();
                         if (DDSave_ValidateCachedGhostRecords()) {
                             DDSave_ClearCachedGhostSaves();

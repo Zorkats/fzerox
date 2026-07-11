@@ -37,6 +37,20 @@ extern const char* gdx_lookup_common_asset_o2r_key(unsigned long long sym_addr);
 extern int GDiffuser_LoadAssetBytes(const char* key, void* out, size_t outSize, size_t* copiedSize);
 extern void GDiffuser_RegisterLoadedAssetBuffer(const void* buffer, size_t size, const char* key);
 
+extern void gdx_record_dma_load(unsigned int rdram_phys, unsigned int rom_offset, unsigned int size);
+extern unsigned char* gdx_rdram;
+
+/* Renderer staleness tracking only sees recorded writes (HostRangeChanged,
+   n64_gfx_bridge.cpp). The per-mode arena rewind reuses destination addresses
+   across mode transitions, so every CPU asset copy into RDRAM must be
+   recorded or the renderer keeps serving the previous mode's texture bytes. */
+static void GDX_RecordAssetWrite(u8* startAddr, size_t size) {
+    if (gdx_rdram != NULL && startAddr >= gdx_rdram &&
+        startAddr < gdx_rdram + 0x1000000u /* GDX_RDRAM_SIZE */) {
+        gdx_record_dma_load((unsigned int)(size_t)(startAddr - gdx_rdram), 0u, (unsigned int)size);
+    }
+}
+
 static int GDX_TryLoadCommonAssetO2R(void* segAddr, size_t size, u8* startAddr) {
     size_t copiedSize = 0;
     const char* o2rKey = gdx_lookup_common_asset_o2r_key((unsigned long long)segAddr);
@@ -45,6 +59,7 @@ static int GDX_TryLoadCommonAssetO2R(void* segAddr, size_t size, u8* startAddr) 
     }
     if (GDiffuser_LoadAssetBytes(o2rKey, startAddr, size, &copiedSize)) {
         GDiffuser_RegisterLoadedAssetBuffer(startAddr, size, o2rKey);
+        GDX_RecordAssetWrite(startAddr, size);
         static int sO2RLoadPrints = 0;
         if (sO2RLoadPrints < 32) {
             gdx_ck("[o2r] common asset fast path");
@@ -57,11 +72,25 @@ static int GDX_TryLoadCommonAssetO2R(void* segAddr, size_t size, u8* startAddr) 
     return 0;
 }
 
+/* Raw-ROM variant for STAGED reads: callers that stage compressed bytes for a
+   later mio0Decode (func_80077D50_impl's 8-byte size probe + compressed
+   payload) must NEVER be served by the o2r fast path — o2r stores the DECODED
+   asset, so serving it into a staging buffer makes the size probe parse pixel
+   data and fails the GDX_IS_MIO0 check, whose fallback bzero()s the final
+   texture (the zero-fingerprint CI/IA sources in settimg-trace: heal strips,
+   boost plates, position gadget). This variant skips o2r and always delivers
+   raw cart bytes. */
+static void GDX_LoadRawRomAsset(void* segAddr, size_t size, u8* startAddr);
+
 void func_80077CF0(void* segAddr, size_t size, u8* startAddr) {
     if (GDX_TryLoadCommonAssetO2R(segAddr, size, startAddr)) {
         return;
     }
 
+    GDX_LoadRawRomAsset(segAddr, size, startAddr);
+}
+
+static void GDX_LoadRawRomAsset(void* segAddr, size_t size, u8* startAddr) {
     unsigned int romOffset = gdx_lookup_common_asset_rom_offset((unsigned long long)segAddr);
     if (romOffset != 0) {
         /* Verify ROM is loaded and range is in bounds before memcpy. */
@@ -78,8 +107,26 @@ void func_80077CF0(void* segAddr, size_t size, u8* startAddr) {
             size = gdx_rom_size - romOffset;
         }
         memcpy(startAddr, gdx_rom_buffer + romOffset, size);
+        GDX_RecordAssetWrite(startAddr, size);
     } else {
+        /* Symbol not in the generated common-asset binding table. This zero
+           fill is what the renderer later samples (settimg-trace fp=0 sources:
+           heal strips, boost plates, position gadget) — it must never be
+           silent. Every line here names a binding the generator must cover. */
+        {
+            extern void gdx_ck(const char*);
+            extern void gdx_ckp(const char*, void*);
+            extern void gdx_cki(const char*, int);
+            static int sAssetMissLogs = 0;
+            if (sAssetMissLogs < 32) {
+                sAssetMissLogs++;
+                gdx_ck("[asset] MISS: common-asset lookup failed; texture zero-filled");
+                gdx_ckp("[asset]  symbol", segAddr);
+                gdx_cki("[asset]  size", (int)size);
+            }
+        }
         memset(startAddr, 0, size);
+        GDX_RecordAssetWrite(startAddr, size);
     }
 }
 #else
@@ -165,7 +212,7 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
 #endif
                     header = Arena_Allocate(ALLOC_PEEK, var_s2);
                     CLEAR_DATA_CACHE(header, var_s2);
-                    func_80077CF0(arg0->unk_04, var_s2, header);
+                    GDX_LoadRawRomAsset(arg0->unk_04, var_s2, header); /* staging: raw MIO0 bytes required */
                     if (GDX_IS_MIO0(header)) {
 #ifdef PORT
                         {
@@ -203,7 +250,7 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
 #endif
                     header = Arena_Allocate(ALLOC_PEEK, var_s0);
                     CLEAR_DATA_CACHE(header, var_s0);
-                    func_80077CF0(arg0->unk_04, var_s0, header);
+                    GDX_LoadRawRomAsset(arg0->unk_04, var_s0, header); /* staging: raw MIO0 bytes required */
                     if (GDX_IS_MIO0(header)) {
 #ifdef PORT
                         {
@@ -346,7 +393,7 @@ void* func_80078104(void* arg0, s32 textureSize, s32 arg2, s32 arg3, bool arg4) 
             func_80077CF0(arg0, textureSize, var_s0);
         } else {
             var_s0 = Arena_Allocate(ALLOC_PEEK, 8);
-            func_80077CF0(arg0, 8, var_s0);
+            GDX_LoadRawRomAsset(arg0, 8, var_s0); /* staging: raw MIO0 size probe */
             var_a3 = func_800AA6BC(var_s0);
 
             if (!arg4) {
@@ -367,7 +414,7 @@ void* func_80078104(void* arg0, s32 textureSize, s32 arg2, s32 arg3, bool arg4) 
             }
 
             CLEAR_DATA_CACHE(var_a2, textureSize);
-            func_80077CF0(arg0, textureSize, var_a2);
+            GDX_LoadRawRomAsset(arg0, textureSize, var_a2); /* staging: raw MIO0 bytes required */
             if (GDX_IS_MIO0(var_a2)) {
                 mio0Decode(var_a2, var_s0);
             } else {
@@ -394,6 +441,24 @@ TexturePtr func_800783AC(void* arg0) {
             return D_800E33E0[i].unk_04;
         }
     }
+#ifdef PORT
+    /* [reg-miss] (2026-07-11 contract audit): a NULL return here becomes a
+       NULL palette in func_8007E410, which SKIPS the TLUT upload and draws
+       CI text against whatever palette was last loaded -- the pause-menu
+       stripe mechanism. Every miss names the symbol and the registry size
+       (a small size after menus registered ~30 assets = the registry was
+       cleared by func_80077D44 between registration and draw). */
+    {
+        extern void gdx_ckp(const char* s, void* v);
+        extern void gdx_cki(const char* s, int v);
+        static s32 sRegMissLogs = 0;
+        if (sRegMissLogs < 24) {
+            sRegMissLogs++;
+            gdx_ckp("[reg-miss] symbol", arg0);
+            gdx_cki("[reg-miss]  registryCount", (int) D_800E3A20);
+        }
+    }
+#endif
     return NULL;
 }
 
@@ -564,6 +629,10 @@ Gfx* func_80078DB4(Gfx* gfx, unk_80077D50* arg1, s32 left, s32 top, TexturePtr t
         case 4:
             return func_80078BF8(gfx, arg1, left, top, texture, arg8, arg9);
     }
+    /* AVOID_UB: unknown format fell off and returned a garbage Gfx* — the
+       caller keeps building the display list from that cursor (memory
+       corruption on host). No-op instead. */
+    return gfx;
 }
 
 Gfx* func_80078EA0_impl(Gfx* gfx, unk_80077D50* arg1, s32 left, s32 top, u32 arg4, s32 arg5, s32 arg6, f32 arg7,
@@ -674,7 +743,7 @@ void func_800790D4(void) {
                     }
                     header = Arena_Allocate(ALLOC_PEEK, size);
                     CLEAR_DATA_CACHE(header, size);
-                    func_80077CF0(temp_s1->unk_04, size, header);
+                    GDX_LoadRawRomAsset(temp_s1->unk_04, size, header); /* staging: raw MIO0 bytes required */
                     if (GDX_IS_MIO0(header)) {
 #ifdef PORT
                         /* Mirrors the overflow guard added to func_80077D50_impl's
@@ -1325,7 +1394,10 @@ Object* Object_Get(s32 cmdId) {
         }
         object++;
         //! @bug this allows for an iteration out of the bounds of the array
-        if (object > &gObjects[ARRAY_COUNT(gObjects)]) {
+        /* AVOID_UB: >= stops before dereferencing one element past the array
+           (a lucky cmdId match there returned an out-of-bounds Object* that
+           callers then write through). */
+        if (object >= &gObjects[ARRAY_COUNT(gObjects)]) {
             return NULL;
         }
     }

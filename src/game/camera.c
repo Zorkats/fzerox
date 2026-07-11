@@ -1559,8 +1559,8 @@ void Camera_ScriptUpdateOrbitAngledAnchorDistanceYawPitch(CameraScriptManager* s
                                                           CubicBSpline3fData* splineData) {
     s32 sp64;
     s32 temp_v0;
-    f32 sp5C;
-    f32 sp58;
+    f32 sp5C = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
+    f32 sp58 = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
     f32 temp_fv0;
     Vec3f interpData[2];
     Vec3f anchorPos;
@@ -1581,8 +1581,8 @@ void Camera_ScriptUpdateOrbitAngledAnchorDistanceYawPitchUp(CameraScriptManager*
                                                             CubicBSpline3fData* splineData) {
     s32 sp6C;
     s32 temp_v0;
-    f32 sp64;
-    f32 sp60;
+    f32 sp64 = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
+    f32 sp60 = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
     f32 temp_fv0;
     Vec3f interpData[3];
     Vec3f anchorPos;
@@ -1603,8 +1603,8 @@ void Camera_ScriptUpdateOrbitAngledAnchorDistanceYawPitchFov(CameraScriptManager
                                                              CubicBSpline331Data* splineData) {
     s32 sp64;
     s32 temp_v0;
-    f32 sp5C;
-    f32 sp58;
+    f32 sp5C = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
+    f32 sp58 = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
     f32 temp_fv0;
     InterpolateOut331Data interpData;
     Vec3f anchorPos;
@@ -1626,8 +1626,8 @@ void Camera_ScriptUpdateOrbitAngledAnchorDistanceYawPitchUpFov(CameraScriptManag
                                                                CubicBSpline3331Data* splineData) {
     s32 sp74;
     s32 temp_v0;
-    f32 sp6C;
-    f32 sp68;
+    f32 sp6C = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
+    f32 sp68 = 0; /* AVOID_UB: uninitialised angle (see @bug below) */
     f32 temp_fv0;
     InterpolateOut3331Data interpData;
     Vec3f anchorPos;

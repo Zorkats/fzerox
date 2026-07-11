@@ -151,7 +151,7 @@ extern s16 D_800CD16C;
 void Game_Init(void) {
 #ifdef PORT
     extern void gdx_ck(const char* s);
-#define GI_CK(n) gdx_ck("[game] ckGI_" #n)
+#define GI_CK(n) do { if (gdx_diag_verbose()) gdx_ck("[game] ckGI_" #n); } while (0)
 #else
 #define GI_CK(n)
 #endif
@@ -482,10 +482,11 @@ void func_800690FC(void) {
 
 #ifdef PORT
     { extern void gdx_ck(const char*); extern void gdx_cki(const char*, int);
+      if (gdx_diag_verbose()) {
       gdx_ck("[game] 690FC_entry");
       gdx_cki("[game] 690FC mode", gGameMode);
       gdx_cki("[game] 690FC queued", gQueuedGameMode);
-      gdx_cki("[game] 690FC chgstate", (int)gGameModeChangeState); }
+      gdx_cki("[game] 690FC chgstate", (int)gGameModeChangeState); } }
 #endif
 
     if (gGameMode != gQueuedGameMode) {
@@ -503,7 +504,7 @@ void func_800690FC(void) {
     gMenuChangeMode = MENU_CHANGE_INACTIVE;
 #ifdef PORT
     { extern void gdx_cki(const char*, int);
-      gdx_cki("[game] 690FC switch on", (int)gGameModeChangeState); }
+      if (gdx_diag_verbose()) gdx_cki("[game] 690FC switch on", (int)gGameModeChangeState); }
 #endif
     switch (gGameModeChangeState) {
         case GAMEMODE_CHANGE_START:
@@ -512,7 +513,7 @@ void func_800690FC(void) {
         case GAMEMODE_CHANGE_INSTANT(GAMEMODE_CHANGE_START):
 #ifdef PORT
             { extern void gdx_cki(const char*, int);
-              gdx_cki("[game] 690FC CHANGE_START mode", gGameMode); }
+              if (gdx_diag_verbose()) gdx_cki("[game] 690FC CHANGE_START mode", gGameMode); }
 #endif
             Transition_HideSet();
 #ifndef PORT
@@ -561,7 +562,10 @@ void func_800690FC(void) {
         case GAMEMODE_CHANGE_FAST(GAMEMODE_CHANGE_INIT):
         case GAMEMODE_CHANGE_INSTANT(GAMEMODE_CHANGE_INIT):
 #ifdef PORT
-            { extern void gdx_ck(const char*); gdx_ck("[game] GMI_A_pre_reset"); }
+            { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_A_pre_reset"); }
+            { extern void gdx_transition_timer_begin(const char*);
+              gdx_transition_timer_begin("mode_change_tick (GMI_A..GMI_F)"); }
+            { extern void gdx_transition_step_begin(void); gdx_transition_step_begin(); }
 #endif
             Controller_Reset();
 #ifdef EXPANSION_KIT
@@ -686,17 +690,23 @@ void func_800690FC(void) {
 #endif
             Segment_LoadOverlays();
 #ifdef PORT
-            { extern void gdx_ck(const char*); gdx_ck("[game] GMI_B_pre_obj_init"); }
+            { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_B_pre_obj_init"); }
+            { extern void gdx_transition_step_mark(const char*);
+              gdx_transition_step_mark("GMI_A..GMI_B (Controller_Reset + Segment_LoadOverlays)"); }
 #endif
             func_80079EC8();
             sp24 = GAMEMODE_UPDATE;
 #ifdef PORT
-            { extern void gdx_ck(const char*); gdx_ck("[game] GMI_C_pre_mode_init"); }
+            { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_C_pre_mode_init"); }
+            { extern void gdx_transition_step_mark(const char*);
+              gdx_transition_step_mark("GMI_B..GMI_C (func_80079EC8 / Object_ClearAll)"); }
 #endif
             sGamemodeInitFuncs[GET_MODE(gGameMode)]();
 #ifndef EXPANSION_KIT
 #ifdef PORT
-            { extern void gdx_ck(const char*); gdx_ck("[game] GMI_D_pre_bgm"); }
+            { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_D_pre_bgm"); }
+            { extern void gdx_transition_step_mark(const char*);
+              gdx_transition_step_mark("GMI_C..GMI_D (mode init: sGamemodeInitFuncs[])"); }
 #endif
             func_80068DCC();
 #endif
@@ -708,9 +718,22 @@ void func_800690FC(void) {
 #endif
 
 #ifdef PORT
-            { extern void gdx_ck(const char*); gdx_ck("[game] GMI_E_pre_load_assets"); }
+            { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_E_pre_load_assets"); }
+            { extern void gdx_transition_timer_begin(const char*);
+              gdx_transition_timer_begin("Segment_LoadAssets"); }
+            { extern void gdx_transition_step_mark(const char*);
+#ifndef EXPANSION_KIT
+              gdx_transition_step_mark("GMI_D..GMI_E (func_80068DCC bgm setup)");
+#else
+              gdx_transition_step_mark("GMI_C..GMI_E (mode init: sGamemodeInitFuncs[])");
+#endif
+            }
 #endif
             Segment_LoadAssets();
+#ifdef PORT
+            { extern void gdx_transition_timer_end(const char*);
+              gdx_transition_timer_end("Segment_LoadAssets"); }
+#endif
 
 #ifdef EXPANSION_KIT
             switch (gGameMode) {
@@ -736,9 +759,19 @@ void func_800690FC(void) {
             func_80068DCC();
 #endif
 #ifdef PORT
-            { extern void gdx_ck(const char*); gdx_ck("[game] GMI_F_pre_appear"); }
+            { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_F_pre_appear"); }
+            { extern void gdx_transition_step_mark(const char*);
+              gdx_transition_step_mark("GMI_E..GMI_F (Segment_LoadAssets + portraits/bgm)"); }
 #endif
             Transition_AppearSet();
+#ifdef PORT
+            { extern void gdx_transition_step_mark(const char*);
+              gdx_transition_step_mark("GMI_F..end (Transition_AppearSet)"); }
+            { extern void gdx_transition_step_flush(double);
+              gdx_transition_step_flush(50.0); }
+            { extern void gdx_transition_timer_end(const char*);
+              gdx_transition_timer_end("mode_change_tick (GMI_A..GMI_F)"); }
+#endif
             gGameModeChangeState = sp24;
             break;
         case GAMEMODE_CHANGE_START_RELOAD:
@@ -765,7 +798,7 @@ void func_800690FC(void) {
                 static s32 sFiredOnce = 0;
                 if (!sFiredOnce) {
                     sFiredOnce = 1;
-                    gdx_ck("[game] GAMEMODE_UPDATE reached");
+                    if (gdx_diag_verbose()) gdx_ck("[game] GAMEMODE_UPDATE reached");
                 }
             }
 #endif
@@ -780,11 +813,11 @@ void func_800690FC(void) {
     }
 #endif
 #ifdef PORT
-    { extern void gdx_ck(const char*); gdx_ck("[game] GMI_G_pre_mode_update"); }
+    { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_G_pre_mode_update"); }
 #endif
     gQueuedGameMode = sGamemodeUpdateFuncs[GET_MODE(gGameMode)]();
 #ifdef PORT
-    { extern void gdx_ck(const char*); gdx_ck("[game] GMI_H_pre_68F04"); }
+    { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_H_pre_68F04"); }
 #endif
     func_80068F04();
     switch (gGameModeChangeState) {

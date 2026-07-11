@@ -20,6 +20,37 @@ Gfx* func_8007E410(Gfx* gfx, TexturePtr texture, TexturePtr palette, s32 format,
     } else {
         //! @bug pixelSize uninitialised
     }
+#ifdef PORT
+    /* [ci-draw] per-site census (contract audit, 2026-07-10): the global
+       [tex-census] budget kept burning out before the pause menu opened, so
+       its CI evidence was misattributed twice. Log the EXACT texture/palette
+       pointers and their first 8 bytes AT THE DRAW CALL -- if palette bytes
+       are zero here, the staging delivered zeros; if nonzero here but the
+       screen garbles, the defect is bridge/interpreter-side. Capped. */
+    {
+        extern void gdx_ckp(const char* s, void* v);
+        extern void gdx_cki(const char* s, int v);
+        static int sCiDrawLogs = 0;
+        if (sCiDrawLogs < 16) {
+            sCiDrawLogs++;
+            gdx_ckp("[ci-draw] texture", (void*) texture);
+            gdx_ckp("[ci-draw]  palette", (void*) palette);
+            gdx_cki("[ci-draw]  wh", (width << 16) | (height & 0xFFFF));
+            if (texture != NULL) {
+                u32 t0 = ((u32*) texture)[0];
+                u32 t1 = ((u32*) texture)[1];
+                gdx_cki("[ci-draw]  tex0", (int) t0);
+                gdx_cki("[ci-draw]  tex1", (int) t1);
+            }
+            if (palette != NULL) {
+                u32 p0 = ((u32*) palette)[0];
+                u32 p8 = ((u32*) palette)[8];
+                gdx_cki("[ci-draw]  pal0", (int) p0);
+                gdx_cki("[ci-draw]  pal32", (int) p8);
+            }
+        }
+    }
+#endif
     blockHeight = (s32) (tmem / pixelSize) / blockWidth;
     if (unkDrawFlag & 4) {
         blockHeight = 2;

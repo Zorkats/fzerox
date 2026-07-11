@@ -4977,6 +4977,16 @@ void Racer_Update(void) {
         if (!gGamePaused) {
             if (gRaceIntroTimer == 460) {
                 func_8007E08C();
+                /* PORT NOTE (task #21 postmortem): Audio_StartDemo() -> Audio_RomBgmStart(BGM_DEMO=28)
+                   is the RACE-INTRO FANFARE, played through the SE-sequence jukebox on seqPlayer 0
+                   (Audio_SEStart(0, 28) -> channel-0 IO -> dynTable[28]). It is console-correct on EK
+                   hardware too. The earlier "Mute City ghost" this call was blamed for was actually the
+                   AudioThread_QueueCmdS8 endianness bug (thread.c): every channel-IO byte arrived as 0,
+                   so the jukebox dispatched dynTable[0] — the looping Mute City song — instead of the
+                   fanfare. With the queue fixed, the intended id 28 reaches the script and the finite
+                   fanfare plays as on hardware, so the temporary EXPANSION_KIT gate on this call is
+                   removed. The engine-sound loop below stays non-EK-only (EK starts engine sound via
+                   the NA_SE_11 handler in audio/disk/external.c). */
                 if (gTitleDemoState == TITLE_DEMO_INACTIVE) {
                     Audio_StartDemo();
                 }
@@ -6639,9 +6649,48 @@ block_115:
 #else
     if (gRaceIntroTimer != 0 && gGameMode != GAMEMODE_COURSE_EDIT) {
 #endif
+#ifdef PORT
+        {
+            /* Emission probe: proves the countdown draw commands are actually
+               generated (vs. the branch never running) -- pairs with the
+               bridge-side [seg4] translation probe. */
+            extern void gdx_cki(const char* s, int v);
+            static s32 sCountdownDrawLogs = 0;
+            if (sCountdownDrawLogs < 4) {
+                sCountdownDrawLogs++;
+                gdx_cki("[countdown] draw emitted, introTimer", (int) gRaceIntroTimer);
+                gdx_cki("[countdown] aCountdownSignDL low32", (int) (uintptr_t) aCountdownSignDL);
+            }
+            /* Arm the bridge's raw vtx/mtx trace (n64_gfx_bridge.cpp) right as this
+               draw runs, so its fixed-size trace file covers these exact frames
+               instead of filling up during the many seconds of race rendering
+               that happen before the countdown appears. */
+            {
+                extern int gGdxCountdownProbeArm;
+                gGdxCountdownProbeArm = 1;
+            }
+        }
+#endif
         gSPDisplayList(gfx++, D_400A258);
 
         gSPMatrix(gfx++, &D_1000000.unk_21988[playerIndex], G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+
+#ifdef PORT
+        {
+            /* #16 trace probe: exact raw pointers for this draw so the bridge-side
+               [rect]/[vtx-dropped]/[vtx-spike]/[mtx-dropped] probes can be grepped
+               by matching low32 -- proves whether THIS specific matrix/vertex pair
+               resolves cleanly (and, if it does, whether the resolved rect/matrix
+               values are sane) or is where the invisibility actually originates. */
+            extern void gdx_cki(const char* s, int v);
+            static s32 sCountdownPtrLogs = 0;
+            if (sCountdownPtrLogs < 4) {
+                sCountdownPtrLogs++;
+                gdx_cki("[countdown] mtx low32", (int) (uintptr_t) &D_1000000.unk_21988[playerIndex]);
+                gdx_cki("[countdown] D_400AA28 (vtx) low32", (int) (uintptr_t) D_400AA28);
+            }
+        }
+#endif
 
         gSPDisplayList(gfx++, aCountdownSignDL);
 
@@ -6705,6 +6754,37 @@ block_115:
             gDPLoadTextureBlock(gfx++, var_s2, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, 0, G_TX_MIRROR | G_TX_WRAP,
                                 G_TX_MIRROR | G_TX_WRAP, 5, 5, G_TX_NOLOD, G_TX_NOLOD);
         }
+#ifdef PORT
+        {
+            /* #16 trace probe: the digit texture actually selected this frame
+               (var_s2) plus introTimer, so the bridge's [settimg]/GDX_DIAG_SETTIMG
+               resolution of this exact low32 can be found in the same log. */
+            extern void gdx_cki(const char* s, int v);
+            static s32 sCountdownTexLogs = 0;
+            if (sCountdownTexLogs < 8) {
+                sCountdownTexLogs++;
+                gdx_cki("[countdown] introTimer", (int) gRaceIntroTimer);
+                gdx_cki("[countdown] var_s2 (tex) low32", (int) (uintptr_t) var_s2);
+            }
+        }
+#endif
+#ifdef PORT
+        {
+            /* #16 phase 3: the coarse arm (set at the top of this whole countdown
+               block) stays 1 for the rest of the process once the countdown first
+               runs, so the edge-triggered render-state probe in interpreter.cpp
+               fires on the very FIRST triangle the interpreter happens to reach
+               after that transition -- which is whatever draws first in that
+               frame's entire display list (track/background/other racers), not
+               necessarily this digit quad. Tag the digit quad's own vertex
+               pointer immediately before it is drawn so the bridge can match it
+               by raw low32 (still N64-address-shaped at translate time) and
+               hand the interpreter the RESOLVED host pointer to match against at
+               GfxSpVertex time, tightening the probe to this exact draw. */
+            extern unsigned int gGdxCountdownProbeVtxLow32;
+            gGdxCountdownProbeVtxLow32 = (unsigned int) (uintptr_t) D_400AA28;
+        }
+#endif
         gSPVertex(gfx++, D_400AA28, 4, 0);
         gSP2Triangles(gfx++, 0, 1, 2, 0, 0, 2, 3, 0);
     } else if ((gTotalRacers >= 2) && !(playerRacer->stateFlags & (RACER_STATE_FINISHED | RACER_STATE_RETIRED)) &&
