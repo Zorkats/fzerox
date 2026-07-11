@@ -751,8 +751,16 @@ typedef struct AudioTable {
 typedef struct {
     /* 0x00 */ s32 sampleBankId1;
     /* 0x04 */ s32 sampleBankId2;
+#ifdef PORT
+    /* Host sample-bank base pointers (AudioLoad_TrySyncLoadSampleBank returns
+       heap addresses). As s32 these truncated on 64-bit hosts, breaking every
+       relocated sampleAddr. */
+    u8* baseAddr1;
+    u8* baseAddr2;
+#else
     /* 0x08 */ s32 baseAddr1;
     /* 0x0C */ s32 baseAddr2;
+#endif
     /* 0x10 */ u32 medium1;
     /* 0x14 */ u32 medium2;
 } SampleBankRelocInfo; // size = 0x18
@@ -1090,6 +1098,15 @@ typedef enum HaasEffectDelaySide {
 
 #define AUDIO_MK_CMD(b0,b1,b2,b3) ((((b0) & 0xFF) << 0x18) | (((b1) & 0xFF) << 0x10) | (((b2) & 0xFF) << 0x8) | (((b3) & 0xFF) << 0))
 
+/* gSequenceFontTable stores u16 values as big-endian byte pairs (the S16()
+   macro in aseq.h). Reading them through a host-endian u16* cast breaks on
+   little-endian: S16(0x2E) reads back as 0x2E00, indexing thousands of bytes
+   past the table (the audio-thread hang on the first SYNC_LOAD_SEQ_PARTS).
+   Assemble the value from bytes explicitly — identical codegen semantics on
+   big-endian console, correct everywhere else. */
+#define AUDIO_SEQ_FONT_TABLE_U16(table, seqId) \
+    ((u16)(((table)[(seqId) * 2] << 8) | (table)[(seqId) * 2 + 1]))
+
 extern AudioContext gAudioCtx;
 
 void Audio_NoteSetResamplingRate(Note* note, f32 freqScale);
@@ -1160,7 +1177,13 @@ void AudioLoad_SyncLoadSeqParts(s32 seqId, s32 flags);
 s32 AudioLoad_SyncLoadInstrument(s32 fontId, s32 instId, s32 drumId);
 s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2);
 void* AudioLoad_TrySyncLoadSampleBank(u32 sampleBankId, u32* outMedium, bool noLoad);
+#ifdef PORT
+/* fontData is a real host pointer; the u32 parameter truncated it. */
+void AudioLoad_RelocateFontAndPreloadSamples(s32 fontId, void* fontData, SampleBankRelocInfo* sampleBankReloc,
+                                             s32 async);
+#else
 void AudioLoad_RelocateFontAndPreloadSamples(s32 fontId, u32 fontData, SampleBankRelocInfo* sampleBankReloc, s32 async);
+#endif
 void* AudioLoad_AsyncLoadInner(s32 tableType, s32 id, s32 nChunks, s32 retData, OSMesgQueue* retQueue);
 void AudioLoad_AsyncLoadSampleBank(s32 sampleBankId, s32 nChunks, s32 retData, OSMesgQueue* retQueue);
 void AudioLoad_AsyncLoadFont(s32 fontId, s32 nChunks, s32 retData, OSMesgQueue* retQueue);
@@ -1280,7 +1303,12 @@ extern u8 gAudioHeap[0x2ECA00];
 
 typedef struct LbaVaddrPair {
     s32 lba;
-    s32 vAddr;
+    /* Host pointer to the one-block staging buffer (AudioHeap_Alloc). Was s32
+       (a KSEG0 address on console): on 64-bit hosts the store truncated and
+       the read sign-extended (0x00007FF7xxxxxxxx -> 0xFFFFFFFFxxxxxxxx),
+       crashing the first sample-bank bcopy. Same fix AudioDiskInfo's
+       endRamAddr/ramAddr already received. */
+    u8* vAddr;
 } LbaVaddrPair;
 
 typedef struct AudioDiskInfo {

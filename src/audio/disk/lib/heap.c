@@ -533,8 +533,18 @@ void* AudioHeap_AllocCached(s32 tableType, ssize_t size, s32 cache, s32 id) {
                 break;
 
             case 1:
+#ifdef PORT
+                /* Same 64-bit-host truncation as AudioHeap_InitPool above: the
+                   (u32) round-trip drops the pointer's top half (crashed the
+                   first async sequence load's DMA into 0x00000000xxxxxxxx).
+                   Align down with full-width arithmetic. */
+                temporaryCache->entries[1].ramAddr =
+                    (u8*) (((unsigned long long) (temporaryPool->startRamAddr + temporaryPool->size - size)) &
+                           ~0xFULL);
+#else
                 temporaryCache->entries[1].ramAddr =
                     (u8*) ((u32) (temporaryPool->startRamAddr + temporaryPool->size - size) & ~0xF);
+#endif
                 temporaryCache->entries[1].id = id;
                 temporaryCache->entries[1].size = size;
                 if (temporaryCache->entries[0].id != -1 &&
@@ -963,6 +973,23 @@ void AudioHeap_Init(void) {
         reverb->windowSize /= reverb->downsampleRate;
         reverb->decayRatio = settings->decayRatio;
         reverb->volume = settings->volume;
+#ifdef PORT
+        /* [reverb-cfg] one-line census per reverb init: names the live decay/
+           leak/window values feeding the SFX engine-echo feedback loop (the
+           progressive race-static suspect). A decayRatio pathologically close
+           to 0x7FFF would make the loop diverge slowly even with correct op
+           semantics -- this settles that question from one run's log. */
+        {
+            extern void gdx_cki(const char* s, int v);
+            gdx_cki("[reverb-cfg] index", (int) i);
+            gdx_cki("[reverb-cfg]  downsampleRate", (int) reverb->downsampleRate);
+            gdx_cki("[reverb-cfg]  windowSize", (int) reverb->windowSize);
+            gdx_cki("[reverb-cfg]  decayRatio", (int) (u16) reverb->decayRatio);
+            gdx_cki("[reverb-cfg]  volume", (int) (u16) reverb->volume);
+            gdx_cki("[reverb-cfg]  leakRtl", (int) (u16) reverb->leakRtl);
+            gdx_cki("[reverb-cfg]  leakLtr", (int) (u16) reverb->leakLtr);
+        }
+#endif
         reverb->unk_14 = settings->unk_6 * 64;
         reverb->unk_16 = settings->unk_8;
         reverb->unk_18 = 0;
@@ -1075,6 +1102,11 @@ void* AudioHeap_AllocPermanent(s32 tableType, s32 id, size_t size) {
     gAudioCtx.permanentCache[index].tableType = tableType;
     gAudioCtx.permanentCache[index].id = id;
     gAudioCtx.permanentCache[index].size = size;
+    /* AVOID_UB: fell off the end of a non-void function. The original MIPS
+       compiler left ramAddr in the return register by accident; MSVC x64
+       returns stack garbage (0x18 reached AudioLoad_SyncLoad as the font
+       buffer and crashed the first bcopy into it). */
+    return ramAddr;
 }
 
 void* AudioHeap_AllocSampleCache(size_t size, s32 fontId, void* sampleAddr, s8 medium, s32 cache) {
@@ -1087,6 +1119,9 @@ void* AudioHeap_AllocSampleCache(size_t size, s32 fontId, void* sampleAddr, s8 m
     }
     if (entry != NULL) {
         //! @bug Should use sampleBankId, not fontId
+        /* AVOID_UB: fixed at the two offending call sites in load.c
+           (AudioLoad_GetSampleBankIdForFont) — every caller now passes a real
+           sample bank id, so this store is correct as written. */
         entry->sampleBankId = fontId;
         entry->sampleAddr = sampleAddr;
         entry->origMedium = medium;

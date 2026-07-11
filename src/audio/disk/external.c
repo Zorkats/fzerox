@@ -134,6 +134,9 @@ s32 Audio_AdjustPan(u8 pan) {
         var_v1 = (pan < 0x20) ? 0 : pan * 2 - 0x3F;
         return var_v1;
     }
+    /* AVOID_UB: branches are exhaustive for u8 pan, but the compiler cannot
+       prove it — falling off returned garbage on host. */
+    return 0x3F;
 }
 
 // Nas_InitAudio_DD
@@ -200,6 +203,15 @@ void Audio_PreNMI(void) {
 }
 
 void Audio_Init(RomOffset audioSequenceStart, RomOffset audioBankStart, RomOffset audioTableStart) {
+#ifdef PORT
+    /* Ground truth for the -0x30 sample-address investigation. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        gdx_cki("[audio-init] seqRomStart", (int) audioSequenceStart);
+        gdx_cki("[audio-init] bankRomStart", (int) audioBankStart);
+        gdx_cki("[audio-init] tableRomStart", (int) audioTableStart);
+    }
+#endif
     PRINTF("==BANDO== SEQ ROM START = %x\n", audioSequenceStart);
     gAudioSequenceRomStart = audioSequenceStart;
     PRINTF("==BANDO== BNK ROM START = %x\n", audioBankStart);
@@ -356,7 +368,41 @@ void Audio_PlayerLevelSEStop(u8 playerIndex, u8 sfxId) {
 }
 
 void Audio_PlayerTriggerSE(u8 racerId, u8 sfxId) {
+#ifdef PORT
+    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). Confirms
+       the game-side boost trigger (racer.c Racer_UpdateFromControls) actually
+       reaches the audio layer's per-racer trigger queue. If this never logs
+       when boosting, the break is upstream in racer.c's boost-state gating,
+       not in audio; if it DOES log, the break is downstream (queue pop /
+       engine-sound-state gate in Audio_PlayerSEStart).
 
+       Probe-design fix: this used to be a single counter shared by every
+       racerId, capped at 8 total logs for the whole race. AI racers boost far
+       more often than the human (F-Zero X's CPU racers boost almost
+       constantly), so in practice the cap was exhausted by AI activity within
+       the first couple of seconds -- a prior Release trace showed exactly 8
+       AI racerIds (1,2,3,5,6,7,14,25) and ZERO human (racerId < gNumPlayers)
+       entries, even though the human demonstrably boosted that race. That is
+       a probe budget exhaustion artifact, not proof the human's boost never
+       reached this function. Human and AI racers now get independent
+       budgets so the human's own boost-queue events can never be crowded out
+       by AI spam. */
+    if (sfxId == NA_SE_7) {
+        extern void gdx_cki(const char* s, int v);
+        extern s32 gNumPlayers;
+        static s32 sBoostQueueHumanLogs = 0;
+        static s32 sBoostQueueAiLogs = 0;
+        if (racerId < gNumPlayers) {
+            if (sBoostQueueHumanLogs < 16) {
+                sBoostQueueHumanLogs++;
+                gdx_cki("[boost-queue] racerId(human)", (int) racerId);
+            }
+        } else if (sBoostQueueAiLogs < 8) {
+            sBoostQueueAiLogs++;
+            gdx_cki("[boost-queue] racerId(ai)", (int) racerId);
+        }
+    }
+#endif
     if (sfxId != sAudioPlayerSEStack[racerId][0] && sfxId != sAudioPlayerSEStack[racerId][1] &&
         sfxId != sAudioPlayerSEStack[racerId][2] && sfxId != sAudioPlayerSEStack[racerId][3]) {
         if (sAudioPlayerSEStack[racerId][0] != NA_SE_NONE) {
@@ -459,6 +505,26 @@ void Audio_TriggerSystemSE(u8 sfxId) {
     u8 i;
 
     PRINTF("==BANDO== System SE = %02x\n", sfxId);
+
+#ifdef PORT
+    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). On EK
+       builds, NA_SE_11 is the ONLY thing that starts the per-racer engine
+       sound state (via func_800BAE5C), which Audio_PlayerSEStart requires
+       before it will play non-whitelisted trigger SEs like the boost sound.
+       This probe shows whether NA_SE_11 is even received here, and whether
+       the OPTION-save SE-disable gate (D_80771C94/D_800D11C8[3]) drops it
+       before func_800BAE5C ever runs. */
+    if (sfxId == NA_SE_11) {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sNaSe11Logs = 0;
+        if (sNaSe11Logs < 8) {
+            sNaSe11Logs++;
+            gdx_cki("[na-se-11] optGate*10+optSE3+gateDrops",
+                    (int) D_80771C94 * 10 + (int) D_800D11C8[3] +
+                        (((D_80771C94 == 1) && (D_800D11C8[3] == 0)) ? 100 : 0));
+        }
+    }
+#endif
 
     if ((D_80771C94 == 1) && (D_800D11C8[3] == 0)) {
         return;
@@ -615,6 +681,20 @@ void func_800BAE5C(u8 playerIndex) {
     PRINTF("==BANDO== WINING RUN ENGINE SOUND START! MACHINE No.= %02x\n", playerIndex);
     Audio_PlayerEngineStart(playerIndex);
     sPlayerEngineSoundState[playerIndex] = 1;
+#ifdef PORT
+    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). Confirms
+       sPlayerEngineSoundState[playerIndex] actually gets set to 1 -- this is
+       the flag Audio_PlayerSEStart's gate checks before allowing the boost
+       (and other non-whitelisted) trigger SEs through. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sEngineStartLogs = 0;
+        if (sEngineStartLogs < 8) {
+            sEngineStartLogs++;
+            gdx_cki("[engine-start] playerIndex", (int) playerIndex);
+        }
+    }
+#endif
 }
 
 void func_80741880(u8 arg0) {
@@ -624,6 +704,18 @@ void func_80741880(u8 arg0) {
 void Audio_SEStart(u8 channelIndex, u8 ioData) {
     PRINTF("==BANDO== Na_SE_Start CALLED!! setype = %02x(hex) senum = %02x(hex) \n", channelIndex, ioData);
     AUDIOCMD_CHANNEL_SET_IO(0, channelIndex, 0, ioData);
+#ifdef PORT
+    /* Diagnostic (task #12): every menu/system SFX request funnels here as a
+       channel-IO write to seqPlayer 0. Encodes chan*1000000 + sfx*1000 +
+       p0seq*10 + enabled so one line shows the request AND whether player 0
+       was actually running the SE sequence to receive it. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        gdx_cki("[sfx-req] chan/sfx/p0seq/en",
+                (int) channelIndex * 1000000 + (int) ioData * 1000 +
+                (int) gAudioCtx.seqPlayers[0].seqId * 10 + (gAudioCtx.seqPlayers[0].enabled ? 1 : 0));
+    }
+#endif
     AudioThread_ScheduleProcessCmds();
 }
 
@@ -784,26 +876,8 @@ void Audio_RomBgmStart(u8 bgm) {
     }
     switch (bgm) {
         case BGM_TITLE:
-#ifdef PORT
-            /* Diagnostic for engram slice/audio-synthesis follow-up (fork F1/F2
-               boundary): proves Audio_RomBgmStart(BGM_TITLE) is reached and that the
-               AUDIOCMD_GLOBAL_INIT_SEQPLAYER macro actually advances the thread-cmd
-               ring (threadCmdWritePos), i.e. the command is genuinely queued. If this
-               fires but the sequencer never enables (load.c seqPlayer ENABLED line
-               never logs), the block is downstream of the queue (F2: never drained). */
-            {
-                extern void gdx_cki(const char* s, int v);
-                gdx_cki("[audio-diag] Audio_RomBgmStart BGM_TITLE writePosBefore", (int) gAudioCtx.threadCmdWritePos);
-            }
-#endif
             AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, bgm + SEQ_DDBGM_MUTE_CITY, 0, 0);
-#ifdef PORT
-            {
-                extern void gdx_cki(const char* s, int v);
-                gdx_cki("[audio-diag] Audio_RomBgmStart BGM_TITLE writePosAfter", (int) gAudioCtx.threadCmdWritePos);
-            }
-#endif
             break;
         case BGM_SELECT:
         case BGM_OPTION:
@@ -1181,6 +1255,17 @@ void Audio_GuitarSeqStart(void) {
     sSequenceLoadState = SEQ_LOAD_BANK;
     sActiveBgm = BGM_NONE;
     D_80771C88 = 1;
+#ifdef PORT
+    {
+        /* [seq-load] Task 2 probe: guitar-riff start-gate trace. gdx_ck timestamps every line
+           (port_log.h ms prefix), so this plus the func_807427C0 transition probes below give ONE
+           boot log of the whole guitar-seq load-state progression -- correlatable against the
+           ckG2 checkpoint and [ai] submit timestamps to see when the seqplayer actually starts and
+           whether it ever stalls in SEQ_LOAD_WAVE. */
+        extern void gdx_ck(const char* s);
+        gdx_ck("[seq-load] Audio_GuitarSeqStart -> SEQ_LOAD_BANK");
+    }
+#endif
 }
 
 void func_807427C0(void) {
@@ -1198,6 +1283,12 @@ void func_807427C0(void) {
             AUDIOCMD_GLOBAL_ASYNC_LOAD_SAMPLE_BANK(SAMPLE_DD_SOUND_EFFECTS, 0, AUDIO_LOAD_SE_WAVE);
             sSEBankLoadStatus = 0;
             sSequenceLoadState = SEQ_LOAD_WAVE;
+#ifdef PORT
+            {
+                extern void gdx_ck(const char* s);
+                gdx_ck("[seq-load] SEQ_LOAD_BANK: async guitar+SE sample-bank loads issued -> SEQ_LOAD_WAVE");
+            }
+#endif
             break;
         case SEQ_LOAD_WAVE:
             loadStatus = AudioThread_GetAsyncLoadStatus(&retMsg);
@@ -1208,8 +1299,21 @@ void func_807427C0(void) {
                 sSEBankLoadStatus |= BANK_SE_LOAD_COMPLETE;
             }
             if (sSEBankLoadStatus == (BANK_GUITAR_LOAD_COMPLETE | BANK_SE_LOAD_COMPLETE)) {
+/* PORT NOTE: an earlier attempt modeled 64DD seek latency here by delaying
+                   SEQ_GUITAR's start ~3s. That inverted the player-0 startup order (the SE
+                   sequence had already started off the title BGM window, and the delayed
+                   guitar init then REPLACED it, silencing all SFX for the session). The
+                   console-faithful stage for the riff is the boot-logo hold, restored in
+                   sys_gfx.c (GD timer wait) — the riff plays over the logo BEFORE the title
+                   BGM exists, exactly as on hardware. No delay needed here. */
                 PRINTF("==BANDO== GUITOR & SE ROM WAVE DMA END\n");
                 AUDIOCMD_GLOBAL_INIT_SEQPLAYER(0, SEQ_GUITAR, 0, 0);
+#ifdef PORT
+                {
+                    extern void gdx_ck(const char* s);
+                    gdx_ck("[seq-load] SEQ_LOAD_WAVE done: both banks loaded, INIT_SEQPLAYER(0,SEQ_GUITAR) issued -> SEQ_LOAD_DATA");
+                }
+#endif
                 sSequenceLoadState = SEQ_LOAD_DATA;
                 break;
             }
@@ -1222,6 +1326,12 @@ void func_807427C0(void) {
                    fontLoadComplete, seqLoadComplete);
             if ((sampleLoadComplete == true) && (fontLoadComplete == true) && (seqLoadComplete == true)) {
                 PRINTF("==BANDO== ALL GUITOR DATA LOAD END\n");
+#ifdef PORT
+                {
+                    extern void gdx_ck(const char* s);
+                    gdx_ck("[seq-load] SEQ_LOAD_DATA complete: guitar wave+font+seq loaded, seqplayer live -> SEQ_LOAD_BGM_DATA");
+                }
+#endif
                 D_80771C88 = 2;
                 AUDIOCMD_GLOBAL_ASYNC_LOAD_SEQ(SEQ_SOUND_EFFECTS, AUDIO_LOAD_FONT_DDBGM_MUTE_CITY);
                 sSequenceLoadState = SEQ_LOAD_BGM_DATA;
@@ -1802,6 +1912,55 @@ void Audio_PlayerSEStart(u8 racerId, u8 sfxId) {
     Vec3f vec;
     u8 pan;
 
+#ifdef PORT
+    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). This gate
+       is the ONLY place a queued per-racer trigger SE (boost, wall hit, jump
+       boost, etc.) gets silently dropped after Audio_PlayerTriggerSEStart
+       queues it -- it requires sPlayerEngineSoundState[racerId] != 0 unless
+       sfxId is on the whitelist below (which NA_SE_7/boost is NOT on).
+       sPlayerEngineSoundState is only set by func_800BAE5C, which on EK
+       builds is reached exclusively via Audio_TriggerSystemSE(NA_SE_11) fired
+       from Racer_Draw's countdown code (racer.c ~6735). If this probe shows
+       engineState==0 and dropped==1 for sfxId==NA_SE_7, the fix is to ensure
+       NA_SE_11 actually fires / func_800BAE5C actually runs before the race
+       starts, not anything in this function.
+
+       Probe-design fix: this was a single counter shared by every racerId and
+       every sfxId, capped at 40 total logs for the whole race. sRacerActiveSE
+       traffic from up to 30 racers (mostly AI, which fire non-whitelisted SEs
+       constantly) can exhaust that budget before the human racer (racerId <
+       gNumPlayers) ever gets a line logged -- so a prior trace showing OOB
+       garbage engineState values (17, 67) for AI racerIds 9/10 passing the
+       gate says nothing about whether the human's own NA_SE_7 gate check was
+       ever captured. Human and AI racers now get independent budgets, and the
+       human budget is reserved for going forward. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        extern s32 gNumPlayers;
+        static s32 sPlayerSEGateHumanLogs = 0;
+        static s32 sPlayerSEGateAiLogs = 0;
+        s32 wouldDrop = ((sPlayerEngineSoundState[racerId] == 0) &&
+                          !((sfxId == NA_SE_22) || (sfxId == NA_SE_16) || (sfxId == NA_SE_33) ||
+                            (sfxId == NA_SE_30) || (sfxId == NA_SE_5) || (sfxId == NA_SE_8) ||
+                            (sfxId == NA_SE_15) || (sfxId == NA_SE_48) || (sfxId == NA_SE_49) ||
+                            (sfxId == NA_SE_52) || (sfxId == NA_SE_53) || (sfxId == NA_SE_62)))
+                             ? 1
+                             : 0;
+        if (racerId < gNumPlayers) {
+            if (sPlayerSEGateHumanLogs < 40) {
+                sPlayerSEGateHumanLogs++;
+                gdx_cki("[playerse-gate](human) racer*1000000+sfx*1000+engineState*10+dropped",
+                        (int) racerId * 1000000 + (int) sfxId * 1000 + (int) sPlayerEngineSoundState[racerId] * 10 +
+                            wouldDrop);
+            }
+        } else if (sPlayerSEGateAiLogs < 24) {
+            sPlayerSEGateAiLogs++;
+            gdx_cki("[playerse-gate](ai) racer*1000000+sfx*1000+engineState*10+dropped",
+                    (int) racerId * 1000000 + (int) sfxId * 1000 + (int) sPlayerEngineSoundState[racerId] * 10 +
+                        wouldDrop);
+        }
+    }
+#endif
     if ((sPlayerEngineSoundState[racerId] == 0) &&
         !((sfxId == NA_SE_22) || (sfxId == NA_SE_16) || (sfxId == NA_SE_33) || (sfxId == NA_SE_30) ||
           (sfxId == NA_SE_5) || (sfxId == NA_SE_8) || (sfxId == NA_SE_15) || (sfxId == NA_SE_48) ||
@@ -2529,6 +2688,36 @@ extern s32 D_80771968;
 
 AudioTask* Audio_SetupCreateTask(void) {
     AudioTask* curAudioTask;
+
+#ifdef PORT
+    /* Progressive-distortion accumulator probe: the user reports audio
+       degrading the longer a race runs. Every ~30s log the active-note count
+       and how many active notes are flagged finished-but-enabled — a growing
+       count = voice leak (notes never released), the leading accumulation
+       candidate; flat count pushes the investigation to per-voice state or
+       the reverb ring instead. */
+    {
+        extern void gdx_cki(const char*, int);
+        static s32 sGdxHealthTick = 0;
+        ++sGdxHealthTick;
+        if ((sGdxHealthTick % 1800) == 0 && gAudioCtx.notes != NULL) {
+            s32 active = 0;
+            s32 zombie = 0;
+            s32 i;
+            for (i = 0; i < gAudioCtx.numNotes; i++) {
+                if (gAudioCtx.notes[i].noteSubEu.bitField0.enabled) {
+                    active++;
+                    if (gAudioCtx.notes[i].noteSubEu.bitField0.finished) {
+                        zombie++;
+                    }
+                }
+            }
+            gdx_cki("[audio-health] tick", sGdxHealthTick);
+            gdx_cki("[audio-health]  active_notes", active);
+            gdx_cki("[audio-health]  finished_but_enabled", zombie);
+        }
+    }
+#endif
 
     if (!sSpecChangeActive) {
         func_807427C0();

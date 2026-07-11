@@ -878,6 +878,56 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                     aligned = ALIGN16((nFramesToDecode * frameSize) + SAMPLES_PER_FRAME);
                     addr = DMEM_COMPRESSED_ADPCM_DATA - aligned;
                     aLoadBuffer(aList++, sampleData - sampleDataStartPad, addr, aligned);
+#ifdef PORT
+                    /* [acmd-d2] the discriminating probe from the Acmd contract
+                       audit: for streamed (non-RAM-medium) notes, log the
+                       INTENDED chunk pointer, what each HLE resolver returns
+                       for its truncated low32, and the first 8 bytes at both.
+                       intended != resolved => resolver false-positive (V1);
+                       equal but bytes wrong vs ROM => unfilled/wrong DMA;
+                       equal and plausible => the defect is past the load. */
+                    {
+                        extern void gdx_ckp(const char* s, void* v);
+                        extern void gdx_cki(const char* s, int v);
+                        extern void* gdx_resolve_registered_host_address(unsigned int raw);
+                        extern void* gdx_resolve_module_host_address(unsigned int raw);
+                        static s32 sD2Logs = 0;
+                        static s32 sD2RamLogs = 0;
+                        /* RAM-medium notes flooded the budget before any
+                           streamed note played (48/48 medium=0 in the
+                           2026-07-10 21:26 run). Keep 8 RAM baselines; spend
+                           the rest of the budget on streamed media only. */
+                        if (sample->medium == MEDIUM_RAM && sD2RamLogs >= 8) {
+                            /* skip */
+                        } else if (sD2Logs < 48) {
+                            if (sample->medium == MEDIUM_RAM) {
+                                sD2RamLogs++;
+                            }
+                            /* CONTRACT (learned from crash 0xC0000005 at this
+                               probe's first version): under the 32-bit
+                               uintptr_t shim, `sampleData` is a TRUNCATED
+                               low32 token, NOT a dereferenceable pointer --
+                               the HLE reconstructs it later. Only the
+                               RESOLVED pointers may be dereferenced here. */
+                            u8* intended = sampleData - sampleDataStartPad;
+                            u32 low = (u32) (uintptr_t) intended;
+                            void* reg = gdx_resolve_registered_host_address(low);
+                            void* mod = gdx_resolve_module_host_address(low);
+                            sD2Logs++;
+                            gdx_cki("[acmd-d2] medium", sample->medium);
+                            gdx_ckp("[acmd-d2]  intended", (void*) intended);
+                            gdx_ckp("[acmd-d2]  reg", reg);
+                            gdx_ckp("[acmd-d2]  mod", mod);
+                            if (reg != NULL) {
+                                gdx_cki("[acmd-d2]  reg0", (int) ((u32*) reg)[0]);
+                                gdx_cki("[acmd-d2]  reg1", (int) ((u32*) reg)[1]);
+                            }
+                            if (mod != NULL && mod != reg) {
+                                gdx_cki("[acmd-d2]  mod0", (int) ((u32*) mod)[0]);
+                            }
+                        }
+                    }
+#endif
                 } else {
                     nSamplesToDecode = 0;
                     sampleDataStartPad = 0;

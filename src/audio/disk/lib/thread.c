@@ -101,23 +101,6 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     AudioLoad_ProcessLoads(gAudioCtx.resetStatus);
     AudioLoad_ProcessScriptLoads();
 
-#ifdef PORT
-    /* Diagnostic for engram slice/audio-synthesis follow-up (fork F2): if
-       resetStatus is ever nonzero here beyond the very first task (it should
-       drop to 0 synchronously inside AudioLoad_Init's one-shot AudioHeap_ResetStep()
-       call before any task is ever created), the thread-cmd drain further below
-       (thread.c ~141: "if (resetStatus == 0)") is permanently skipped and every
-       queued AUDIOCMD_* (including AUDIOCMD_GLOBAL_INIT_SEQPLAYER for BGM_TITLE)
-       sits in the ring forever. Capped to the first 10 tasks that reach this point. */
-    {
-        extern void gdx_cki(const char* s, int v);
-        static s32 sResetStatusLogCount = 0;
-        if (sResetStatusLogCount < 10) {
-            gdx_cki("[audio-diag] CreateTaskImpl resetStatus", (int) gAudioCtx.resetStatus);
-            sResetStatusLogCount++;
-        }
-    }
-#endif
     if (gAudioCtx.resetStatus != 0) {
         if (AudioHeap_ResetStep() == 0) {
             if (gAudioCtx.resetStatus == 0) {
@@ -382,16 +365,32 @@ void AudioThread_InitMesgQueuesImpl(void) {
 }
 
 void AudioThread_QueueCmd(u32 opArgs, void** data) {
-    AudioCmd* cmd = &gAudioCtx.threadCmdBuf[gAudioCtx.threadCmdWritePos & 0xFF];
+#ifdef PORT
+    /* Phase 3 audio thread: this ring is written by the GAME thread and
+       drained by the dedicated audio thread (AudioThread_CreateTaskImpl's
+       loop inside gdx_audio_thread.cpp's mutexed tick). Take the same mutex
+       here so a producer write can never interleave with the drain — this is
+       the single chokepoint every QueueCmd* variant funnels through. No-op
+       cost when the kill switch has the audio thread disabled. */
+    extern void gdx_audio_ctx_lock(void);
+    extern void gdx_audio_ctx_unlock(void);
+    gdx_audio_ctx_lock();
+#endif
+    {
+        AudioCmd* cmd = &gAudioCtx.threadCmdBuf[gAudioCtx.threadCmdWritePos & 0xFF];
 
-    cmd->opArgs = opArgs;
-    cmd->data = *data;
+        cmd->opArgs = opArgs;
+        cmd->data = *data;
 
-    gAudioCtx.threadCmdWritePos++;
+        gAudioCtx.threadCmdWritePos++;
 
-    if (gAudioCtx.threadCmdWritePos == gAudioCtx.threadCmdReadPos) {
-        gAudioCtx.threadCmdWritePos--;
+        if (gAudioCtx.threadCmdWritePos == gAudioCtx.threadCmdReadPos) {
+            gAudioCtx.threadCmdWritePos--;
+        }
     }
+#ifdef PORT
+    gdx_audio_ctx_unlock();
+#endif
 }
 
 void AudioThread_QueueCmdF32(s32 opArgs, f32 data) {
@@ -403,23 +402,60 @@ void AudioThread_QueueCmdU32(s32 opArgs, s32 data) {
 }
 
 void AudioThread_QueueCmdS8(s32 opArgs, s8 data) {
+#ifdef PORT
+    /* SFX silence root cause (engram slice/audio-synthesis, hop 4): AudioCmd's second
+       union (asSbyte/asUShort/asFloat/asInt/...) is a plain (non-bitfield) union, so
+       every member shares byte offset 0 regardless of host endianness -- unlike the
+       opArgs bitfield struct above, which needed the PORT-only field reversal.
+       The N64 original shifts data into the TOP byte of a 32-bit word (data << 24)
+       because on a big-endian target that top byte IS byte-offset-0 in memory, which
+       is exactly where a `s8`/`u8` union member lives. On a little-endian host,
+       byte-offset-0 is the LOW byte, so `data << 24` places the real value at
+       byte-offset-3 instead -- `cmd->asSbyte` (and `cmd->asUbyte`) then always read 0.
+       This silently zeroed every AUDIOCMD_CHANNEL_SET_IO write, including
+       Audio_SEStart's sfxId, so every SFX channel's seqScriptIO[0] channel-io port
+       was written as 0 (not the real sfxId, and not staying at the SEQ_IO_VAL_NONE=-1
+       "empty" sentinel either). Channel scripts poll that port with
+       `LDIO port0; RBLTZ` (branch back to sleep only if value < 0); reading 0 instead
+       of -1 or the real id made every poll fall through into CHAN_DYNTBL/CHAN_DYNCALL
+       with index 0 -- which is NA_SE_NONE, a silent no-op dyntable entry -- so no note
+       was ever born on seqPlayer 0's SE font, matching the [birth] probe finding zero
+       hits for player*100+font == font 1. Music was unaffected because BGM commands
+       are almost all QueueCmdF32/QueueCmdU32 (a different, coincidentally-safe
+       type-punning path; see AudioThread_QueueCmd), not QueueCmdS8/QueueCmdU16.
+       Fix: store the byte at offset 0 directly (no shift) so it lands under
+       `asSbyte`/`asUbyte` on a little-endian host, matching original console
+       semantics without depending on memory byte order. */
+    u32 uData = (u8) data;
+#else
     u32 uData = data << 0x18;
+#endif
 
     AudioThread_QueueCmd(opArgs, (void**) &uData);
 }
 
 void AudioThread_QueueCmdU16(s32 opArgs, u16 data) {
+#ifdef PORT
+    /* Same little-endian fix as AudioThread_QueueCmdS8 above, for the u16 union
+       members (asUShort, used by e.g. AUDIOCMD_CHANNEL_SET_COMB_FILTER_GAIN and
+       AUDIOCMD_GLOBAL_SET_CHANNEL_MASK). */
+    u32 uData = data;
+#else
     u32 uData = data << 0x10;
+#endif
 
     AudioThread_QueueCmd(opArgs, (void**) &uData);
 }
 
 s32 AudioThread_ScheduleProcessCmds(void) {
     static s32 D_80771A38 = 0;
+    s32 sendResult;
 
-    if (osSendMesg(gAudioCtx.threadCmdProcQueueP,
-                   (OSMesg) (((gAudioCtx.threadCmdReadPos & 0xFF) << 8) | (gAudioCtx.threadCmdWritePos & 0xFF)),
-                   OS_MESG_NOBLOCK) != -1) {
+    sendResult = osSendMesg(gAudioCtx.threadCmdProcQueueP,
+                             (OSMesg) (((gAudioCtx.threadCmdReadPos & 0xFF) << 8) | (gAudioCtx.threadCmdWritePos & 0xFF)),
+                             OS_MESG_NOBLOCK);
+
+    if (sendResult != -1) {
         gAudioCtx.threadCmdReadPos = gAudioCtx.threadCmdWritePos;
     } else {
         return -1;
@@ -473,21 +509,6 @@ void AudioThread_ProcessCmds(u32 msg) {
     static u8 sCurCmdRdPos = 0;
     AudioCmd* cmd;
     u8 endPos;
-#ifdef PORT
-    /* Diagnostic for engram slice/audio-synthesis follow-up (fork F2): this
-       function is only ever reached from AudioThread_CreateTaskImpl's drain loop,
-       itself gated on "resetStatus == 0". If ENTERED never logs, the drain gate
-       never opens (proves F2). If ENTERED logs but drainedOp never logs, the ring
-       is empty/desynced every time (readPos already == writePos), also pointing at
-       F2 upstream (queue accounting), not the RSP interpreter. */
-    extern void gdx_cki(const char* s, int v);
-    static s32 sProcessCmdsEnteredLogCount = 0;
-    static bool sDrainedOpLogged = false;
-    if (sProcessCmdsEnteredLogCount < 5) {
-        gdx_cki("[audio-diag] AudioThread_ProcessCmds ENTERED msg", (int) msg);
-        sProcessCmdsEnteredLogCount++;
-    }
-#endif
 
     if (!gAudioCtx.threadCmdQueueFinished) {
         sCurCmdRdPos = msg >> 8;
@@ -506,24 +527,32 @@ void AudioThread_ProcessCmds(u32 msg) {
             return;
         }
 
-#ifdef PORT
-        if (!sDrainedOpLogged) {
-            gdx_cki("[audio-diag] AudioThread_ProcessCmds drainedOp", (int) cmd->op);
-            sDrainedOpLogged = true;
-        }
-#endif
         AudioThread_ProcessCmd(cmd);
         cmd->op = AUDIOCMD_OP_NOOP;
     }
 }
 
 u32 AudioThread_GetAsyncLoadStatus(u32* outData) {
+#ifdef PORT
+    /* Same OSMesg-width overflow as AudioThread_ResetComplete's specId: the
+       receive writes pointer-width on host; a u32 local overflows the stack
+       (RTC "stack around loadStatus corrupted"). */
+    OSMesg loadMesg;
+    u32 loadStatus;
+
+    if (osRecvMesg(&gAudioCtx.externalLoadQueue, &loadMesg, OS_MESG_NOBLOCK) == -1) {
+        *outData = 0;
+        return 0;
+    }
+    loadStatus = (u32)(uintptr_t)loadMesg;
+#else
     u32 loadStatus;
 
     if (osRecvMesg(&gAudioCtx.externalLoadQueue, (OSMesg*) &loadStatus, OS_MESG_NOBLOCK) == -1) {
         *outData = 0;
         return 0;
     }
+#endif
     *outData = loadStatus & 0xFFFFFF;
     return loadStatus >> 0x18;
 }
@@ -732,7 +761,7 @@ void AudioThread_ProcessChannelCmd(SequenceChannel* channel, AudioCmd* cmd) {
 
         case AUDIOCMD_OP_CHANNEL_SET_PAN_WEIGHT:
             //! @bug: Should compare `asSbyte` to `panChannelWeight`
-            if (channel->newPan != cmd->asSbyte) {
+            if (channel->panChannelWeight != cmd->asSbyte) {
                 channel->panChannelWeight = cmd->asSbyte;
                 channel->changes.s.pan = true;
             }

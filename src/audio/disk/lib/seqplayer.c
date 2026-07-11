@@ -1043,7 +1043,10 @@ s32 AudioSeq_SeqLayerProcessScriptStep3(SequenceLayer* layer, s32 cmd) {
 
     if (channel->gateTimeRandomVariance != 0) {
         //! @bug should probably be gateTimeRandomVariance
-        intDelta = (layer->gateDelay * (gAudioCtx.audioRandom % channel->velocityRandomVariance)) / 100;
+        /* AVOID_UB: modulo by velocityRandomVariance divides by zero (hardware
+           exception on x86) whenever gate variance is set but velocity
+           variance is not. Use the guarded field. */
+        intDelta = (layer->gateDelay * (gAudioCtx.audioRandom % channel->gateTimeRandomVariance)) / 100;
         if ((gAudioCtx.audioRandom & 0x4000) != 0) {
             intDelta = -intDelta;
         }
@@ -1222,7 +1225,7 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
                     cmd = (u8) cmdArgs[0];
 
                     if (seqPlayer->defaultFont != 0xFF) {
-                        cmdArgU16 = ((u16*) gAudioCtx.sequenceFontTable)[seqPlayer->seqId];
+                        cmdArgU16 = AUDIO_SEQ_FONT_TABLE_U16(gAudioCtx.sequenceFontTable, seqPlayer->seqId);
                         lowBits = gAudioCtx.sequenceFontTable[cmdArgU16];
                         cmd = gAudioCtx.sequenceFontTable[cmdArgU16 + lowBits - cmd];
                     }
@@ -1351,7 +1354,7 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
                     cmd = (u8) cmdArgs[0];
 
                     if (seqPlayer->defaultFont != 0xFF) {
-                        cmdArgU16 = ((u16*) gAudioCtx.sequenceFontTable)[seqPlayer->seqId];
+                        cmdArgU16 = AUDIO_SEQ_FONT_TABLE_U16(gAudioCtx.sequenceFontTable, seqPlayer->seqId);
                         lowBits = gAudioCtx.sequenceFontTable[cmdArgU16];
                         cmd = gAudioCtx.sequenceFontTable[cmdArgU16 + lowBits - cmd];
                     }
@@ -1530,7 +1533,12 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
 
                 case ASEQ_OP_CHAN_LDSEQTOPTR:
                     cmdArgU16 = (u16) cmdArgs[0];
-                    channel->unk_22 = *(u16*) (seqPlayer->seqData + (u32) (cmdArgU16 + scriptState->value * 2));
+                    /* seqData is big-endian bytecode; assemble the u16 from
+                       bytes (host u16* reads swap it on little-endian). */
+                    {
+                        u8* seqPtr = seqPlayer->seqData + (u32) (cmdArgU16 + scriptState->value * 2);
+                        channel->unk_22 = (u16) ((seqPtr[0] << 8) | seqPtr[1]);
+                    }
                     break;
 
                 case ASEQ_OP_CHAN_PTRTODYNTBL:
@@ -1538,7 +1546,11 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
                     break;
 
                 case ASEQ_OP_CHAN_DYNTBLTOPTR:
-                    channel->unk_22 = ((u16*) (channel->dynTable))[scriptState->value];
+                    /* dynTable points into big-endian seqData; byte-assemble. */
+                    {
+                        u8* dynPtr = (u8*) channel->dynTable + scriptState->value * 2;
+                        channel->unk_22 = (u16) ((dynPtr[0] << 8) | dynPtr[1]);
+                    }
                     break;
 
                 case ASEQ_OP_CHAN_DYNTBLV:

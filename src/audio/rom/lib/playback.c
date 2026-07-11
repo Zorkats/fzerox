@@ -116,9 +116,19 @@ void Audio_ProcessNotes(void) {
 
         playbackState = &note->playbackState;
         if ((playbackState->parentLayer != NO_LAYER)) {
+#ifdef PORT
+            /* Task #24: same KSEG0 sanity guard as the disk driver — on a
+               64-bit host the low 32 bits of a real layer pointer can fall
+               below 0x7FFFFFFF, silently skipping the note forever.
+               Console-faithful host equivalent: only reject NULL. */
+            if (playbackState->parentLayer == NULL) {
+                continue;
+            }
+#else
             if ((u32) playbackState->parentLayer < 0x7FFFFFFF) {
                 continue;
             }
+#endif
 
             if ((note != playbackState->parentLayer->note) && (playbackState->unk_04 == 0)) {
                 playbackState->adsr.action.asByte |= 0x10;

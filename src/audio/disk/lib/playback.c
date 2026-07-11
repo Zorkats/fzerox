@@ -109,6 +109,20 @@ void Audio_NoteSetResamplingRate(Note* note, f32 freqScale) {
     NoteSubEu* noteSub = &note->noteSubEu;
     f32 resamplingRate = 0.0f;
 
+#ifdef PORT
+    /* Note-lifecycle probe: a note that "ends" within a few frames while its
+       envelope sustains points at runaway frequency scale (sample consumed
+       instantly). Log the first few rates (x1000). */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sRateLogs = 0;
+        if (sRateLogs < 8) {
+            sRateLogs++;
+            gdx_cki("[note] freqScale x1000", (int) (freqScale * 1000.0f));
+        }
+    }
+#endif
+
     if (freqScale < 2.0f) {
         noteSub->bitField1.hasTwoParts = false;
         if (freqScale > 1.99998f) {
@@ -145,6 +159,19 @@ void Audio_NoteInit(Note* note) {
 }
 
 void Audio_NoteDisable(Note* note) {
+#ifdef PORT
+    /* Pair of the freqScale probe: records every early note death and the
+       ADSR state it died in (release=4/disabled hints at who killed it). */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sDisableLogs = 0;
+        if (sDisableLogs < 8) {
+            sDisableLogs++;
+            gdx_cki("[note] DISABLED, adsr state", note->playbackState.adsr.action.s.state);
+            gdx_cki("[note] DISABLED, finished flag", note->noteSubEu.bitField0.finished);
+        }
+    }
+#endif
     if (note->noteSubEu.bitField0.needsInit == true) {
         note->noteSubEu.bitField0.needsInit = false;
     }
@@ -173,9 +200,35 @@ void Audio_ProcessNotes(void) {
         note = &gAudioCtx.notes[i];
         playbackState = &note->playbackState;
         if (playbackState->parentLayer != NO_LAYER) {
+#ifdef PORT
+            /* Task #24 ROOT CAUSE (intermittent frozen-boot silence): on
+               console this guard rejects parentLayer values below KSEG0 —
+               every VALID N64 pointer is >= 0x80000000 as u32, so for real
+               layers the branch is dead code; it only catches NULL/corrupt
+               low values. On a 64-bit host the low 32 bits of a genuine
+               heap pointer are arbitrary, so whenever the audio heap lands
+               at an address with low32 < 0x7FFFFFFF (pure allocation luck,
+               varies per boot), every note on that layer is skipped here
+               forever: Audio_InitNoteSub never runs, noteSubEu keeps
+               resamplingRateFixedPoint = 0, synthesis decodes zero samples,
+               and the title BGM is silent. Console-faithful host
+               equivalent of the guard: only reject NULL. */
+            if (playbackState->parentLayer == NULL) {
+                {
+                    extern void gdx_cki(const char* s, int v);
+                    static s32 sSkipLogs = 0;
+                    if (sSkipLogs < 4) {
+                        sSkipLogs++;
+                        gdx_cki("[layerptr-skip] NULL parentLayer noteIndex", i);
+                    }
+                }
+                continue;
+            }
+#else
             if ((u32) playbackState->parentLayer < 0x7FFFFFFF) {
                 continue;
             }
+#endif
 
             if (note != playbackState->parentLayer->note && playbackState->unk_04 == 0) {
                 playbackState->adsr.action.s.release = true;
@@ -287,6 +340,21 @@ void Audio_ProcessNotes(void) {
             subAttrs.frequency *= playbackState->vibratoFreqScale * playbackState->portamentoFreqScale;
             subAttrs.frequency *= gAudioCtx.audioBufferParameters.resampleRate;
             subAttrs.velocity *= scale;
+#ifdef PORT
+            /* Volume-chain probe: names which factor is zero in silent
+               (Release) boots — the layer velocity or the ADSR scale. */
+            {
+                extern void gdx_cki(const char* s, int v);
+                static s32 sVelLogs = 0;
+                if (sVelLogs < 8) {
+                    sVelLogs++;
+                    gdx_cki("[volchain] velocity x1000", (int) (subAttrs.velocity * 1000.0f));
+                    gdx_cki("[volchain] adsrScale x1000", (int) (scale * 1000.0f));
+                    gdx_cki("[volchain] adsrState", playbackState->adsr.action.s.state);
+                    gdx_cki("[volchain] unk_04", playbackState->unk_04);
+                }
+            }
+#endif
             Audio_InitNoteSub(note, &subAttrs);
             noteSubEu->bitField1.bookOffset = bookOffset;
         next:;
@@ -310,6 +378,32 @@ TunedSample* Audio_GetInstrumentTunedSample(Instrument* instrument, s32 semitone
 Instrument* Audio_GetInstrument(s32 fontId, s32 instId) {
     Instrument* inst;
 
+#ifdef PORT
+    /* [inst-get] probe (missing boost/low-health, companion to [note-alloc]):
+       every failure path here is silent at the gameplay layer -- a NULL return
+       makes AudioSeq_GetInstrument invalidate the layer's instrument and the SE
+       simply never sounds. Encodes which branch failed. reason: 1=fontFF,
+       2=fontNotLoaded, 3=instId>=count, 4=nullInstrument. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sInstGetLogs = 0;
+        s32 reason = 0;
+        if (fontId == 0xFF) {
+            reason = 1;
+        } else if (!AudioLoad_IsFontLoadComplete(fontId)) {
+            reason = 2;
+        } else if (instId >= gAudioCtx.soundFontList[fontId].numInstruments) {
+            reason = 3;
+        } else if (gAudioCtx.soundFontList[fontId].instruments[instId] == NULL) {
+            reason = 4;
+        }
+        if (reason != 0 && sInstGetLogs < 48) {
+            sInstGetLogs++;
+            gdx_cki("[inst-get] FAIL reason*100000+font*1000+inst",
+                    reason * 100000 + fontId * 1000 + instId);
+        }
+    }
+#endif
     if (fontId == 0xFF) {
         return NULL;
     }
@@ -786,6 +880,23 @@ Note* Audio_AllocNoteFromActive(NotePool* pool, SequenceLayer* layer) {
 Note* Audio_AllocNote(SequenceLayer* layer) {
     Note* note;
     u32 policy = layer->channel->noteAllocPolicy;
+#ifdef PORT
+    /* [note-alloc] probe (missing boost/low-health investigation): both dead SEs
+       reach seqPlayer 0 channel 10 ([sfx-req] confirmed) and both are the only SE
+       scripts that lower channel notePriority (e9 02 / e9 07) -- prime suspect is
+       priority starvation in note stealing. Log every alloc attempt on that channel
+       (request + outcome) and every global alloc failure. Caps keep it bounded. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sSeChanLogs = 0;
+        if (layer->channel == gAudioCtx.seqPlayers[0].channels[10] && sSeChanLogs < 96) {
+            sSeChanLogs++;
+            gdx_cki("[note-alloc] ch10 req prio*1000+policy*100+inst",
+                    (int) layer->channel->notePriority * 1000 + (int) policy * 100 +
+                        (int) layer->instOrWave);
+        }
+    }
+#endif
 
     if (policy & 1) {
         note = layer->note;
@@ -837,6 +948,18 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
         return note;
     }
 
+#ifdef PORT
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sAllocFailLogs = 0;
+        if (sAllocFailLogs < 48) {
+            sAllocFailLogs++;
+            gdx_cki("[note-alloc] FAIL prio*1000+policy*100+se10",
+                    (int) layer->channel->notePriority * 1000 + (int) policy * 100 +
+                        (layer->channel == gAudioCtx.seqPlayers[0].channels[10] ? 1 : 0));
+        }
+    }
+#endif
     layer->bit3 = true;
     return NULL;
 }

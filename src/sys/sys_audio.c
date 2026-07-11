@@ -30,6 +30,32 @@ void Audio_ThreadEntry(void* arg0) {
     while (true) {
         osRecvMesg(&gAudioTaskMesgQueue, &sAudioTaskMsg, OS_MESG_NOBLOCK);
         osRecvMesg(&gAudioTaskMesgQueue, &sAudioTaskMsg, OS_MESG_BLOCK);
+        /* Diagnostic for engram slice/audio-synthesis follow-up (hop 3): one-shot log (first 10
+           wakeups) proving whether the audio thread's own loop keeps cycling after boot (VI ->
+           gAudioTaskMesgQueue -> this blocking recv). If this stops logging early while the game
+           keeps running, the wake chain (main thread's EVENT_MESG_VI handling or the fiber
+           scheduler) is the break, not anything inside Audio_SetupCreateTask/CreateTaskImpl. */
+        {
+            extern void gdx_cki(const char* s, int v);
+            static s32 sAudioThreadWakeLogCount = 0;
+            if (sAudioThreadWakeLogCount < 10) {
+                gdx_cki("[audio-diag] Audio_ThreadEntry WOKE iter", sAudioThreadWakeLogCount);
+                sAudioThreadWakeLogCount++;
+            }
+        }
+        /* Phase 3 (port/gdx_audio_thread.cpp): kill-switch gate so exactly one producer ever
+           touches gAudioCtx's task-creation state (see gdx_audio_thread.cpp's cross-thread
+           touchpoint enumeration for why running both at once would be a real race, not just a
+           redundant one). Declared locally (no header) -- same extern-without-include pattern
+           already used two lines above for gdx_cki, since port/ is outside gdiffuser_game's
+           include path (only decomp/ is). GDX_AUDIO_THREAD=0 / --no-audio-thread reverts this
+           to unconditionally producing every VI tick, byte-for-byte the pre-Phase-3 behavior. */
+        {
+            extern int gdx_audio_thread_active(void);
+            if (gdx_audio_thread_active()) {
+                continue; /* dedicated thread owns production this run -- stay alive, do nothing. */
+            }
+        }
         if (sCurAudioTask != NULL) {
             gCurAudioOSTask = &sCurAudioTask->task;
             osSendMesg(&gMainThreadMesgQueue, (OSMesg) EVENT_MESG_AUDIO_TASK_SET, OS_MESG_BLOCK);

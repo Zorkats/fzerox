@@ -128,7 +128,7 @@ f32 Audio_GetVibratoFreqScale(VibratoState* vib) {
 
     //! @bug this probably meant to compare with gAudioCtx.sequenceChannelNone.
     //! -1 isn't used as a channel pointer anywhere else.
-    if (channel != ((SequenceChannel*) (-1))) {
+    if (channel != ((SequenceChannel*) (-1)) && channel != &gAudioCtx.sequenceChannelNone) {
         if (vib->depthChangeTimer) {
             if (vib->depthChangeTimer == 1) {
                 vib->depth = (s32) channel->vibratoDepthTarget;
