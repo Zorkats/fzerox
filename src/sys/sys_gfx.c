@@ -5,7 +5,7 @@
 
 #ifdef PORT
 extern void gdx_ck(const char* s);
-#define GDX_CK(n) gdx_ck("[game] ck" #n)
+#define GDX_CK(n) do { if (gdx_diag_verbose()) gdx_ck("[game] ck" #n); } while (0)
 #else
 #define GDX_CK(n)
 #endif
@@ -261,7 +261,21 @@ void Game_ThreadEntry(void* entry) {
 
     startTime = osGetTime();
     GDX_CK(G1_game_entry);
-    Audio_GuitarSeqStart();
+    /* Na_Guitor_Start kicks off the DD-exclusive guitar SE / DDBGM bank load
+     * state machine (func_807427C0, ticked every frame from
+     * Audio_SetupCreateTask). That loader issues MEDIUM_LBA disk reads
+     * unconditionally; with no 64DD disk connected the port's leo stub still
+     * signals load completion (so callers don't deadlock) but leaves the
+     * destination buffers zeroed/garbage, which crashes shortly after boot
+     * once the game tries to use the "loaded" font/seq data. Real hardware
+     * gates all DD-disk-dependent work behind gLeoDriveConnectionState != 0
+     * (see sys_main.c, sys_gfx.c G7/title.c/save.c) — gRamDDCompatible alone
+     * is not a useful gate here since EK builds always set it true regardless
+     * of whether a disk is actually connected. Apply the same convention so
+     * the base game still boots with EK compiled in but no disk present. */
+    if (gLeoDriveConnectionState != 0) {
+        Audio_GuitarSeqStart();
+    }
     GDX_CK(G2_guitar_seq_start);
     osRecvMesg(&D_800DCAB0, msgBuf, OS_MESG_BLOCK);
     GDX_CK(G3_first_vi_handshake);
@@ -349,6 +363,37 @@ void Game_ThreadEntry(void* entry) {
 
     gSegment22B0A0VramStart = gSegment17B960VramEnd;
     gSegment22B0A0VramEnd = gSegment22B0A0VramStart + (size_t) SEGMENT_DATA_SIZE_CONST(machine_models);
+
+#ifdef PORT
+    {
+        /* Same problem the carve above solves for track/setup/machine_custom:
+         * the assignments just made compute hud_gfx (segment 4), machine_global
+         * (segment 7), and machine_models staging from BSS stub symbols —
+         * garbage sizes over overlapping regions. Segments 4/7 never had valid
+         * backing on the port (countdown faces / start arc / machine-part
+         * graphics missing or corrupt). Carve real RDRAM. The segment-4 buffer
+         * serves hud_gfx in races AND create_machine_textures in Create
+         * Machine — size it for the larger of the two. */
+        extern unsigned char* gdx_rdram;
+        extern void* gdx_rdram_alloc_raw(size_t size, size_t align);
+        size_t hudSize = (size_t)(PORT_hud_gfx_ROM_END - PORT_hud_gfx_ROM_START);
+        size_t createMachineSize =
+            (size_t)(PORT_create_machine_textures_ROM_END - PORT_create_machine_textures_ROM_START);
+        size_t seg4Size = (hudSize > createMachineSize) ? hudSize : createMachineSize;
+        size_t seg7Size = (size_t)(PORT_machine_global_gfx_ROM_END - PORT_machine_global_gfx_ROM_START);
+        size_t modelsSize = (size_t)(PORT_machine_models_ROM_END - PORT_machine_models_ROM_START);
+        void* seg4buf = gdx_rdram_alloc_raw(seg4Size, 16u);
+        void* seg7buf = gdx_rdram_alloc_raw(seg7Size, 16u);
+        void* modelsBuf = gdx_rdram_alloc_raw(modelsSize, 16u);
+
+        gSegment1B8550VramStart = (uintptr_t)((unsigned char*)seg4buf - gdx_rdram);
+        gSegment1B8550VramEnd = gSegment1B8550VramStart + seg4Size;
+        gSegment1E23F0VramStart = (uintptr_t)((unsigned char*)seg7buf - gdx_rdram);
+        gSegment1E23F0VramEnd = gSegment1E23F0VramStart + seg7Size;
+        gSegment22B0A0VramStart = (uintptr_t)((unsigned char*)modelsBuf - gdx_rdram);
+        gSegment22B0A0VramEnd = gSegment22B0A0VramStart + modelsSize;
+    }
+#endif /* PORT */
 
     D_800DCDFC = gSegment17B1E0VramEnd;
 #ifndef EXPANSION_KIT // TODO: USE MACRO FOR SIZE
@@ -485,7 +530,22 @@ void Game_ThreadEntry(void* entry) {
                           SEGMENT_BSS_SIZE(ovl_i9));
 
     D_8076CB40 = -1;
-    func_i10_8012B904();
+    /* func_i10_8012B904 reads the course-edit cup track names / options off the
+     * 64DD disk via func_8076852C -> func_80767F14, which blocks on
+     * osSendMesg(&D_807C6E90, ..., OS_MESG_BLOCK). That queue is only ever
+     * osCreateMesgQueue'd from inside sSys6Thread's own entry function
+     * (func_80767958, sys/disk/75000.c), which sys_main.c only starts when a
+     * real drive is detected (gLeoDriveConnectionState == 1, promoted to 2).
+     * With no disk connected, sSys6Thread is created but never started, so
+     * this send blocks forever on an uninitialized queue with no consumer --
+     * the game thread parks here and ckG7_overlays_done never prints (boot
+     * stays on a black screen). This data only exists on a real EK disk
+     * anyway (it's the saved course-edit slot names), so gate it the same
+     * way as the other disk-dependent boot work: on gLeoDriveConnectionState,
+     * not gRamDDCompatible (see the G2 guitar-seq gate above). */
+    if (gLeoDriveConnectionState != 0) {
+        func_i10_8012B904();
+    }
 #endif
     GDX_CK(G7_overlays_done);
 
@@ -528,12 +588,28 @@ void Game_ThreadEntry(void* entry) {
          * carved above. course_track_gfx is MIO0-compressed; the others are raw. */
         extern unsigned char* gdx_rom_buffer;
         mio0Decode(gdx_rom_buffer + PORT_course_track_gfx_ROM_START,
-                   osPhysicalToVirtual((u32)gSegment16C8A0VramStart));
+                   osPhysicalToVirtual(gSegment16C8A0VramStart));
+        /* Byte-order pass (2026-07-11, exploded-decorations root cause): the
+           carve above is what gSegments[8] serves at draw time, but only the
+           bridge's separate heap image ever received the generated fixups.
+           Decoration DLs and their Vtx blocks therefore rendered from raw
+           big-endian bytes -- the interpreter read every s16 coordinate
+           byte-swapped (x256-ish values: boards exploded across the screen,
+           start arc invisible). Apply the same generated fixup pass (kind-1
+           Gfx word swaps + kind-3 Vtx swaps) to the carve so both copies of
+           the image agree. */
+        {
+            extern void gdx_fixup_asset_segment_image(unsigned char segment, unsigned int rom_base,
+                                                      unsigned char* data, unsigned int size);
+            gdx_fixup_asset_segment_image(0x08u, PORT_course_track_gfx_ROM_START,
+                                          (unsigned char*) osPhysicalToVirtual(gSegment16C8A0VramStart),
+                                          (unsigned int) PORT_course_track_gfx_DECODED_SIZE);
+        }
         Dma_LoadAssets(SEGMENT_ROM_START(setup_gfx),
-                       osPhysicalToVirtual((u32)gSegment17B1E0VramStart),
+                       osPhysicalToVirtual(gSegment17B1E0VramStart),
                        SEGMENT_ROM_SIZE(setup_gfx));
         Dma_LoadAssets(SEGMENT_ROM_START(machine_custom_gfx),
-                       osPhysicalToVirtual((u32)gSegment17B960VramStart),
+                       osPhysicalToVirtual(gSegment17B960VramStart),
                        SEGMENT_ROM_SIZE(machine_custom_gfx));
     }
 #endif /* PORT */
@@ -561,7 +637,9 @@ void Game_ThreadEntry(void* entry) {
     if (gRamDDCompatible) {
         func_800742D0();
     }
-    func_800742FC();
+    GDX_CK(G8b_pre_742FC);
+    func_800742FC(); // calls Course_Load(COURSE_MUTE_CITY) -- see Course_Load's gLeoDriveConnectionState gate
+    GDX_CK(G8c_post_742FC);
     Matrix_SetTransRot(&D_80225800.unk_000, 0, 1.0f, 0, 0, 0, 0.0f, 0.0f, 0.0f);
 
     Math_Rand1Init(osGetTime(), osGetTime() + osGetTime());
@@ -585,6 +663,31 @@ void Game_ThreadEntry(void* entry) {
     while (true) {
         if (OS_CYCLES_TO_NSEC(osGetTime() - startTime) * 6e-8 > 230.0) {
             break;
+        }
+    }
+#else
+    /* PORT: this is the console's boot-logo hold — the N64/EK logo blitted by
+       func_806F33D0 sits on screen for this entire wait while the guitar riff
+       plays over it, and only then does the title (and its BGM, whose sample
+       position later swaps player 0 to the SE sequence) begin. Skipping it
+       made the logo invisible (~12ms on screen) and started the title BGM so
+       early its 250..260 window cut the riff mid-phrase. Same condition as
+       console, but with scheduler yields so the audio fiber keeps running. */
+    /* startTime is a console-matching s32 truncation; host osGetTime() is
+       epoch-based and enormous, so (osGetTime() - startTime) overflows the
+       comparison instantly (verified: GC and GD checkpoints logged on the
+       same millisecond). Use a full-width baseline captured here instead. */
+    /* NOTE: an earlier iteration re-presented the CPU-blitted logo from this
+       loop; the direct-to-interpreter draw path renders nothing visible while
+       costing enough GPU sync per call to starve the audio fiber (choppy
+       sound during the hold). Logo presentation needs a real VI-scanout
+       fallback in the frame loop (see the pipeline scoping doc); until then
+       this hold keeps the riff/title timing console-faithful. */
+    {
+        extern void gdx_yield(void);
+        OSTime gdxHoldStart = osGetTime();
+        while (OS_CYCLES_TO_NSEC(osGetTime() - gdxHoldStart) * 6e-8 <= 230.0) {
+            gdx_yield();
         }
     }
 #endif

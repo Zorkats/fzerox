@@ -64,22 +64,30 @@
 /* On the 64-bit port these macros are applied directly to real host pointers
    (e.g. K0_TO_PHYS(gGfxPool->unk_20308) in course_model.c's course-preview draw
    and course_gadgets.c's decoration/gadget matrix loads) — NOT to genuine N64
-   KSEG0/KSEG1 virtual addresses. The original `& 0x1FFFFFFF` mask discards the
-   top 3 bits of the pointer's low 32 bits in addition to the high 32 bits that
-   a plain (u32) cast already drops. That is strictly worse than the
-   already-fixed OS_K0_TO_PHYSICAL wraparound (os_convert.h, PORT branch): the
-   gfx bridge's resolver can reconstruct a full host pointer from an intact
-   low32 via registered host ranges / module windows, but cannot recover 3
-   additionally-masked bits, so the reconstruction fails and the matrix/texture
-   command reads zero/garbage — producing degenerate (e.g. w<=0) transforms.
-   Preserve the low32 intact instead, matching the OS_K0_TO_PHYSICAL PORT fix. */
-#define	K0_TO_K1(x)	((u32)(uintptr_t)(x))	/* kseg0 to kseg1 (PORT: passthrough) */
-#define	K1_TO_K0(x)	((u32)(uintptr_t)(x))	/* kseg1 to kseg0 (PORT: passthrough) */
-#define	K0_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* kseg0 to physical (PORT: passthrough) */
-#define	K1_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* kseg1 to physical (PORT: passthrough) */
-#define	KDM_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* direct mapped to physical (PORT: passthrough) */
-#define	PHYS_TO_K0(x)	((u32)(uintptr_t)(x))	/* physical to kseg0 (PORT: passthrough) */
-#define	PHYS_TO_K1(x)	((u32)(uintptr_t)(x))	/* physical to kseg1 (PORT: passthrough) */
+   KSEG0/KSEG1 virtual addresses.
+
+   Campaign-soak-fix-4: K0_TO_PHYS must pass through the FULL host pointer width.
+   The previous PORT definition `(u32)(uintptr_t)(x)` still TRUNCATED the high 32
+   bits to zero. Under the G1 wide-Gfx pipeline that truncated low32 flows into
+   gSPMatrix -> gDma2p -> _GFXW1_PTR(m) = (GfxW1)m, packing a w1 whose high32 == 0.
+   The graphics bridge reads high32 == 0 as "segmented / legacy" and routes it
+   through the guessing resolver (the very reconstruction G1-G3 removed) — which
+   FAILS for these gGfxPool matrix pointers, hitting fallback_buffer -> [datafail]
+   op=DA (832 hits/soak: course-preview + race gadget matrices load garbage ->
+   invisible 3D models). Passing the full uintptr_t makes _GFXW1_PTR pack the real
+   >4GB host pointer (high32 != 0 -> bridge's w1IsHostPointer verbatim path),
+   exactly like the direct-pointer gSPMatrix sites (racer.c/machine.c) that
+   already render. All compiled callers of these macros are graphics-pointer or
+   host-pointer uses that want the full pointer; the N64-only masking/OR forms
+   live in the non-PORT branch below and in DMA register writes that route through
+   the separate K1_TO_PHYS / osVirtualToPhysical u32 paths. */
+#define	K0_TO_K1(x)	((uintptr_t)(x))	/* kseg0 to kseg1 (PORT: full-width passthrough) */
+#define	K1_TO_K0(x)	((uintptr_t)(x))	/* kseg1 to kseg0 (PORT: full-width passthrough) */
+#define	K0_TO_PHYS(x)	((uintptr_t)(x))	/* kseg0 to physical (PORT: full-width passthrough) */
+#define	K1_TO_PHYS(x)	((u32)(uintptr_t)(x))	/* kseg1 to physical (PORT: u32 for PI/CART reg writes) */
+#define	KDM_TO_PHYS(x)	((uintptr_t)(x))	/* direct mapped to physical (PORT: full-width passthrough) */
+#define	PHYS_TO_K0(x)	((uintptr_t)(x))	/* physical to kseg0 (PORT: full-width passthrough) */
+#define	PHYS_TO_K1(x)	((uintptr_t)(x))	/* physical to kseg1 (PORT: full-width passthrough) */
 #else
 #define	K0_TO_K1(x)	((u32)(x)|0xA0000000)	/* kseg0 to kseg1 */
 #define	K1_TO_K0(x)	((u32)(x)&0x9FFFFFFF)	/* kseg1 to kseg0 */

@@ -48,7 +48,7 @@ extern OSMesgQueue gDmaMesgQueue;
 
 s32 func_800750B0(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
     void* bssStart;
-    s32 sp58;
+    s32 sp58 = 0; /* AVOID_UB: returned without assignment */
     s32 lbaCount;
     s32 nBytes;
     LEOCmd cmdBlock;

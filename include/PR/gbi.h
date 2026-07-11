@@ -1699,10 +1699,44 @@ typedef struct {
 /*
  * Generic Gfx Packet
  */
+#ifdef PORT
+/*
+ * PC port (Phase G1): the pointer-carrying display-list word (w1) must hold a
+ * FULL host pointer, not a truncated 32-bit token. Under the port the decomp
+ * compiles with a 32-bit uintptr_t shim (libc/stdint.h), so the original
+ * `(unsigned int)(ptr)` casts in the gbi macros would truncate every runtime
+ * pointer stored into a display list. We widen w1 to pointer width while w0
+ * stays 32-bit (opcode/params).
+ *
+ * Layout on a 64-bit host: w0 @ offset 0 (4 bytes), 4 bytes natural padding,
+ * w1 @ offset 8 (8 bytes) => sizeof(Gfx) == 16. The port graphics bridge reads
+ * host-built lists at this stride (kHostBuiltGfxStride) and takes w1 from byte
+ * offset 8 as a real pointer. Static asset Gfx[] arrays recompile to this
+ * layout automatically; segmented addresses stay 32-bit VALUES in the wide
+ * field (their high 32 bits are zero, which the bridge treats as "resolve via
+ * the segment table" rather than "already a host pointer").
+ * See docs/PIPELINE_REDESIGN_SCOPE.md section 2, G1.
+ *
+ * NOTE: never store a raw N64/ROM 8-byte Gfx blob through this type — those
+ * enter the bridge on the narrow 8-byte path (Phase G2 converts them).
+ */
+typedef unsigned long long GfxW1; /* pointer-width display-list word (host) */
+/* Cast helper used by every pointer-carrying macro so the address reaches w1
+ * intact. For a host pointer this preserves all 64 bits; for a segmented/int
+ * value it zero-extends. Value-family macros keep their own (unsigned int). */
+#define _GFXW1_PTR(x) ((GfxW1)(x))
+typedef struct {
+	unsigned int w0;
+	GfxW1        w1;
+} Gwords;
+#else
+typedef unsigned int GfxW1;
+#define _GFXW1_PTR(x) ((unsigned int)(x))
 typedef struct {
 	unsigned int w0;
 	unsigned int w1;
 } Gwords;
+#endif
 
 /*
  * This union is the fundamental type of the display list.
@@ -1742,12 +1776,12 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 									\
 	_g->words.w0 = _SHIFTL((c), 24, 8) | _SHIFTL((l), 0, 24);	\
-	_g->words.w1 = (unsigned int)(s);				\
+	_g->words.w1 = _GFXW1_PTR(s);				\
 }
 
 #define	gsDma0p(c, s, l)						\
 {{									\
-	_SHIFTL((c), 24, 8) | _SHIFTL((l), 0, 24), (unsigned int)(s)	\
+	_SHIFTL((c), 24, 8) | _SHIFTL((l), 0, 24), _GFXW1_PTR(s)	\
 }}
 
 #define	gDma1p(pkt, c, s, l, p)						\
@@ -1756,14 +1790,14 @@ typedef union {
 									\
 	_g->words.w0 = (_SHIFTL((c), 24, 8) | _SHIFTL((p), 16, 8) |	\
 			_SHIFTL((l), 0, 16));				\
-	_g->words.w1 = (unsigned int)(s);				\
+	_g->words.w1 = _GFXW1_PTR(s);				\
 }
 
 #define	gsDma1p(c, s, l, p)						\
 {{									\
 	(_SHIFTL((c), 24, 8) | _SHIFTL((p), 16, 8) | 			\
 	 _SHIFTL((l), 0, 16)), 						\
-        (unsigned int)(s)						\
+        _GFXW1_PTR(s)						\
 }}
 
 #define	gDma2p(pkt, c, adrs, len, idx, ofs)				\
@@ -1771,13 +1805,13 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL((c),24,8)|_SHIFTL(((len)-1)/8,19,5)|	\
 			_SHIFTL((ofs)/8,8,8)|_SHIFTL((idx),0,8));	\
-	_g->words.w1 = (unsigned int)(adrs);				\
+	_g->words.w1 = _GFXW1_PTR(adrs);				\
 }
 #define	gsDma2p(c, adrs, len, idx, ofs)					\
 {{									\
 	(_SHIFTL((c),24,8)|_SHIFTL(((len)-1)/8,19,5)|			\
 	 _SHIFTL((ofs)/8,8,8)|_SHIFTL((idx),0,8)),			\
-        (unsigned int)(adrs)						\
+        _GFXW1_PTR(adrs)						\
 }}
 
 #define	gSPNoOp(pkt)		gDma0p(pkt, G_SPNOOP, 0, 0)
@@ -1808,12 +1842,12 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 =							\
 	  _SHIFTL(G_VTX,24,8)|_SHIFTL((n),12,8)|_SHIFTL((v0)+(n),1,7);	\
-	_g->words.w1 = (unsigned int)(v);				\
+	_g->words.w1 = _GFXW1_PTR(v);				\
 }
 # define	gsSPVertex(v, n, v0)					\
 {{									\
 	(_SHIFTL(G_VTX,24,8)|_SHIFTL((n),12,8)|_SHIFTL((v0)+(n),1,7)),	\
-        (unsigned int)(v)						\
+        _GFXW1_PTR(v)						\
 }}
 #elif	(defined(F3DEX_GBI)||defined(F3DLP_GBI))
 /*
@@ -2365,7 +2399,7 @@ typedef union {
 {									\
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_RDPHALF_1,24,8);			\
-	_g->words.w1 = (unsigned int)(dl);				\
+	_g->words.w1 = _GFXW1_PTR(dl);				\
 	_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL(G_BRANCH_Z,24,8)|			\
 		        _SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12));	\
@@ -2374,7 +2408,7 @@ typedef union {
 
 #define	gsSPBranchLessZrg(dl, vtx, zval, near, far, flag, zmin, zmax)	      \
 {{	_SHIFTL(G_RDPHALF_1,24,8),					      \
-	(unsigned int)(dl),						}},    \
+	_GFXW1_PTR(dl),						}},    \
 {{	_SHIFTL(G_BRANCH_Z,24,8)|_SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12),\
 	G_DEPTOZSrg(zval, near, far, flag, zmin, zmax),			}}
 
@@ -2394,7 +2428,7 @@ typedef union {
 {									\
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_RDPHALF_1,24,8);			\
-	_g->words.w1 = (unsigned int)(dl);				\
+	_g->words.w1 = _GFXW1_PTR(dl);				\
 	_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL(G_BRANCH_Z,24,8)|			\
 		        _SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12));	\
@@ -2403,7 +2437,7 @@ typedef union {
 
 #define	gsSPBranchLessZraw(dl, vtx, zval)				\
 {{	_SHIFTL(G_RDPHALF_1,24,8),					      \
-	(unsigned int)(dl),						}},    \
+	_GFXW1_PTR(dl),						}},    \
 {{	_SHIFTL(G_BRANCH_Z,24,8)|_SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12),\
 	(unsigned int)(zval),						}}
 
@@ -2417,19 +2451,19 @@ typedef union {
 {									\
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_RDPHALF_1,24,8);			\
-	_g->words.w1 = (unsigned int)(uc_dstart);			\
+	_g->words.w1 = _GFXW1_PTR(uc_dstart);			\
 	_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL(G_LOAD_UCODE,24,8)|			\
 			_SHIFTL((int)(uc_dsize)-1,0,16));		\
-	_g->words.w1 = (unsigned int)(uc_start);			\
+	_g->words.w1 = _GFXW1_PTR(uc_start);			\
 }
 
 #define	gsSPLoadUcodeEx(uc_start, uc_dstart, uc_dsize)			\
 {{	_SHIFTL(G_RDPHALF_1,24,8),					\
-	(unsigned int)(uc_dstart),				}},	\
+	_GFXW1_PTR(uc_dstart),				}},	\
 {{	_SHIFTL(G_LOAD_UCODE,24,8)|					\
 	  _SHIFTL((int)(uc_dsize)-1,0,16),				\
-	(unsigned int)(uc_start),				}}
+	_GFXW1_PTR(uc_start),				}}
 
 #define	gSPLoadUcode(pkt, uc_start, uc_dstart)				\
         gSPLoadUcodeEx((pkt), (uc_start), (uc_dstart), SP_UCODE_DATA_SIZE)
@@ -2453,14 +2487,14 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_DMA_IO,24,8)|_SHIFTL((flag),23,1)|	\
 	  _SHIFTL((dmem)/8,13,10)|_SHIFTL((size)-1,0,12);		\
-	_g->words.w1 = (unsigned int)(dram);				\
+	_g->words.w1 = _GFXW1_PTR(dram);				\
 }
 
 #define	gsSPDma_io(flag, dmem, dram, size)				\
 {{									\
 	_SHIFTL(G_DMA_IO,24,8)|_SHIFTL((flag),23,1)|			\
 	_SHIFTL((dmem)/8,13,10)|_SHIFTL((size)-1,0,12),			\
-	(unsigned int)(dram)						\
+	_GFXW1_PTR(dram)						\
 }}
 
 #define	gSPDmaRead(pkt,dmem,dram,size)	gSPDma_io((pkt),0,(dmem),(dram),(size))
@@ -3033,14 +3067,14 @@ typedef union {
 									\
 	_g->words.w0 = _SHIFTL(cmd, 24, 8) | _SHIFTL(fmt, 21, 3) |	\
 		       _SHIFTL(siz, 19, 2) | _SHIFTL((width)-1, 0, 12);	\
-	_g->words.w1 = (unsigned int)(i);				\
+	_g->words.w1 = _GFXW1_PTR(i);				\
 }
 
 #define	gsSetImage(cmd, fmt, siz, width, i)				\
 {{									\
 	_SHIFTL(cmd, 24, 8) | _SHIFTL(fmt, 21, 3) |			\
 	_SHIFTL(siz, 19, 2) | _SHIFTL((width)-1, 0, 12),		\
-	(unsigned int)(i)						\
+	_GFXW1_PTR(i)						\
 }}
 
 #define	gDPSetColorImage(pkt, f, s, w, i)	gSetImage(pkt, G_SETCIMG, f, s, w, i)

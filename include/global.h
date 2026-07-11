@@ -21,6 +21,7 @@ extern void *memset(void *, int, unsigned long long);
 extern void gdx_ck(const char* s);
 extern void gdx_cki(const char* s, int v);
 extern void gdx_ckp(const char* s, void* p);
+extern int gdx_diag_verbose(void);
 #define GDX_CK(x) gdx_ck(#x)
 #endif
 

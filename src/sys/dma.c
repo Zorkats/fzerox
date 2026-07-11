@@ -127,12 +127,30 @@ void Dma_LoadAssets(u8* romAddr, u8* ramAddr, size_t size) {
     s32 remainder;
     s32 i;
     s32 numBlocks = size / 1024;
+#ifdef PORT
+    extern void gdx_yield(void);
+#endif
 
     for (i = 0; i < numBlocks; i++) {
         Dma_RomCopy(romAddr, ramAddr, 0x400);
 
         romAddr += 0x400;
         ramAddr += 0x400;
+#ifdef PORT
+        /* Real hardware DMA'd this over the PI bus asynchronously, freeing the
+           CPU for other threads (notably audio) while it ran. This port's
+           Dma_RomCopy is a synchronous memcpy with no yield point, so a large
+           asset load (hud_gfx, machine_global_gfx, course textures -- often
+           hundreds of KB) run inline on the GAME thread can monopolize the
+           cooperative scheduler for its entire duration, starving the AUDIO
+           fiber (measured as AI buffer underrun gaps during course loads).
+           Yield every 32 blocks (32KB) so other runnable fibers get a turn;
+           see port/n64_sched.c's gdx_yield() -- it re-enqueues this thread as
+           runnable and returns to the host frame pump, then we resume here. */
+        if ((i & 31) == 31) {
+            gdx_yield();
+        }
+#endif
     }
     remainder = size % 1024;
     if (remainder != 0) {

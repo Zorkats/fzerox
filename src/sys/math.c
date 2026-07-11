@@ -32,10 +32,15 @@ void func_80069F5C(FrameBuffer* fb) {
     var_s0 = &fb->array[70][96];
 
     for (var_s1 = 0; var_s1 < 0x6A00; var_s1 += 0x100, var_s0 += 80) {
+        /* +8 skips the leading Gfx command in the boot_textures ROM blob. This is
+         * a byte offset into N64-FORMAT ROM data, where a Gfx packet is 8 bytes.
+         * Was sizeof(Gfx); under the PC port (Phase G1) sizeof(Gfx) is wider than
+         * 8, so the literal N64 on-ROM size must be used here. On N64 sizeof(Gfx)
+         * == 8, so this is value-identical there. */
 #ifndef EXPANSION_KIT
-        Dma_ClearRomCopy((uintptr_t) SEGMENT_ROM_START(boot_textures) + var_s1 + sizeof(Gfx), var_s0, 0x100);
+        Dma_ClearRomCopy((uintptr_t) SEGMENT_ROM_START(boot_textures) + var_s1 + 8, var_s0, 0x100);
 #else
-        Dma_ClearRomCopy(gRomSegmentPairs[3][0] + var_s1 + sizeof(Gfx), var_s0, 0x100);
+        Dma_ClearRomCopy(gRomSegmentPairs[3][0] + var_s1 + 8, var_s0, 0x100);
 #endif
     }
 }

@@ -345,8 +345,40 @@ void Main_ThreadEntry(void* arg0) {
     GDX_CK(A_post_gamethread_setup);
 
 #ifdef EXPANSION_KIT
+#ifdef PORT
+    /* PORT fix for engram slice/audio-synthesis (hop 3): func_80768C08/func_80768AF0
+       (sys/disk/75000.c) route every audio DMA/Leo request through func_80767800 ->
+       sSys6Thread's command queue (D_807C6E90). That queue is only ever
+       osCreateMesgQueue'd from INSIDE sSys6Thread's own entry function
+       (func_80767958), which is only osStartThread'd a few lines above when a real
+       64DD drive is detected (gLeoDriveConnectionState becomes 2 only on that path).
+       This port can boot EXPANSION_KIT=1 against a disk-less base ROM -- a
+       combination that can't happen on real hardware, since EK software requires a
+       physical drive to boot at all -- so installing these handlers unconditionally
+       left sDmaHandler/sLeoHandler pointing at a consumer that never runs: the very
+       first audio font/sequence load (AudioLoad_Dma -> sDmaHandler -> func_80768C08
+       -> func_80767800 -> osSendMesg(&D_807C6E90, ..., OS_MESG_BLOCK) on a
+       zero-initialized, never-created queue) blocked forever. Because this port's
+       fiber scheduler is a single cooperative OS thread, that one blocked fiber froze
+       the entire game (confirmed: AudioThread_ProcessCmds fires exactly once, then
+       total silence). Only wire up the EK handlers when the Sys6Thread that services
+       them is actually running; otherwise keep the defaults (osEPiStartDma/
+       LeoReadWrite), which the port's PI manager (devmgr.c) already services
+       correctly for cart-medium ROM reads. */
+    /* PORT update (hop 4): the state==2 gate was insufficient — with a disk
+       image present this port DOES negotiate the drive, the gate passes, and
+       the first audio LBA load still parks the audio fiber forever on the
+       Sys6 queue (whose servicing fiber never performs real work on host).
+       Confirmed by log signature: exactly one audio task, one drain, five
+       unanswered ScheduleProcessCmds notifications. On PORT, never install
+       the Sys6-queue handlers: the defaults are correct here — the Leo
+       handler default is the port's own LeoReadWrite (reads gdx_disk_buffer
+       with the SDK physical mapping = real sample data), and the DMA handler
+       default completes immediately via the wired osEPiStartDma. */
+#else
     AudioLoad_SetDmaHandler(func_80768C08);
     AudioLoad_SetLeoHandler(func_80768AF0);
+#endif
 #endif
 
     osCreateThread(&sAudioThread, THREAD_ID_AUDIO, Audio_ThreadEntry, NULL,
@@ -522,5 +554,14 @@ void func_806F33D0(FrameBuffer* fb) {
         }
         var_s0 += 80;
     }
+
+    /* PORT note (boot logo): this whole function is a CPU-only blit straight
+       into fb's raw pixel memory -- no RDP graphics task is ever submitted for
+       it. On real hardware VI just scans out whatever bytes sit at fb's
+       address. The port reproduces that with a host-side VI-scanout fallback
+       (gdx_vi_present_fallback, called from the main frame loop): when a frame
+       is presented/held with no GFX task, it uploads the current VI
+       framebuffer's pixels and draws them. So no per-blit present hook is
+       needed here -- keep the CPU blit (it writes the pixels VI scans out). */
 }
 #endif

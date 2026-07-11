@@ -922,6 +922,54 @@ void Segment_LoadSegment9(void) {
     D_800CD2E8 = false;
 }
 
+#ifdef PORT
+/* Venue textures are static ROM data (11 venues, see enum Venue) decompressed via mio0Decode
+ * into gSegment235130VramStart on every visit to a race/course-edit mode for that venue --
+ * identical work on N64 too (this mirrors the stock decomp flow byte for byte), but there the
+ * decode cost was inherent to cart hardware. Here it is pure host CPU time paid again each time
+ * the player revisits a venue in the same run (menu -> race -> results -> race again, course
+ * select preview, etc.). Cache the DECODED bytes per venue (keyed by venue index, ROM data is
+ * immutable for the process lifetime) and memcpy on a repeat visit instead of re-DMA'ing +
+ * re-decoding -- skips the mio0_decode() loop entirely (see torch/lib/libmio0/mio0.c) on cache
+ * hits. Shared by Segment_LoadSegment10 and Segment_LoadSegment10CourseEdit, which load the same
+ * per-venue data for two different flows (racing vs. course-edit venue preview). */
+/* gdiffuser_game (this TU) must not include MSVC system headers, so malloc/calloc are not
+ * declared here -- go through the host CRT wrapper (port/shims.c), same convention already used
+ * by decomp_port.c's gdx_rdram allocation. */
+extern void* gdx_host_calloc(size_t count, size_t size);
+
+#define GDX_VENUE_TEXTURE_CACHE_COUNT 11
+static u8* sGdxVenueTextureCache[GDX_VENUE_TEXTURE_CACHE_COUNT];
+static size_t sGdxVenueTextureCacheSize[GDX_VENUE_TEXTURE_CACHE_COUNT];
+
+static void GdxLoadVenueTextureCached(s32 venue, RomOffset romOffset, size_t ramSize) {
+    u8* vram;
+    u8* dst = (u8*) osPhysicalToVirtual(gSegment235130VramStart);
+
+    if ((venue >= 0) && (venue < GDX_VENUE_TEXTURE_CACHE_COUNT) && (sGdxVenueTextureCache[venue] != NULL) &&
+        (sGdxVenueTextureCacheSize[venue] == ramSize)) {
+        memcpy(dst, sGdxVenueTextureCache[venue], ramSize);
+        return;
+    }
+
+    vram = Arena_Allocate(ALLOC_PEEK, ramSize);
+    CLEAR_DATA_CACHE(vram, ramSize);
+    Dma_LoadAssets(romOffset, vram, ramSize);
+    if (*(s32*) vram == (s32) 'MIO0') {
+        mio0Decode(vram, dst);
+        if ((venue >= 0) && (venue < GDX_VENUE_TEXTURE_CACHE_COUNT)) {
+            if (sGdxVenueTextureCache[venue] == NULL) {
+                sGdxVenueTextureCache[venue] = (u8*) gdx_host_calloc(1, ramSize);
+            }
+            if (sGdxVenueTextureCache[venue] != NULL) {
+                memcpy(sGdxVenueTextureCache[venue], dst, ramSize);
+                sGdxVenueTextureCacheSize[venue] = ramSize;
+            }
+        }
+    }
+}
+#endif
+
 void Segment_LoadSegment10(void) {
     s32 pad;
     s32 venue;
@@ -956,6 +1004,9 @@ void Segment_LoadSegment10(void) {
             D_800CD2EC = false;
             return;
     }
+#ifdef PORT
+    GdxLoadVenueTextureCached(venue, romOffset, ramSize);
+#else
     vram = Arena_Allocate(ALLOC_PEEK, ramSize);
 
     CLEAR_DATA_CACHE(vram, ramSize);
@@ -963,6 +1014,7 @@ void Segment_LoadSegment10(void) {
     if (*(s32*) vram == (s32) 'MIO0') {
         mio0Decode(vram, osPhysicalToVirtual(gSegment235130VramStart));
     }
+#endif
     D_800CD2EC = false;
     func_8009CED0(venue);
 }
@@ -999,6 +1051,9 @@ void Segment_LoadSegment10CourseEdit(void) {
             return;
     }
 
+#ifdef PORT
+    GdxLoadVenueTextureCached(venue, romOffset, ramSize);
+#else
     vram = Arena_Allocate(ALLOC_PEEK, ramSize);
 
     CLEAR_DATA_CACHE(vram, ramSize);
@@ -1006,6 +1061,7 @@ void Segment_LoadSegment10CourseEdit(void) {
     if (*(s32*) vram == (s32) 'MIO0') {
         mio0Decode(vram, osPhysicalToVirtual(gSegment235130VramStart));
     }
+#endif
     D_800CD2F0 = -1;
     func_8009CED0(venue);
 }
