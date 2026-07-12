@@ -125,6 +125,68 @@ u8 sSeqInstructionArgsTable[] = {
     CMD_ARGS_0(),    // ASEQ_OP_END
 };
 
+#ifdef PORT
+/* Seq-embedded envelope conversion (missing boost/low-energy root cause).
+   Envelopes referenced by the layer ASEQ_OP_LAYER_ENV (0xCB) and channel LDENV
+   commands live INSIDE the raw sequence blob, which stays BIG-ENDIAN on this
+   port (the script interpreter reads it bytewise) -- but Audio_AdsrUpdate
+   consumes EnvelopePoint.delay/.arg as host-order s16s. Font envelopes are
+   converted by the font loader; these never were. Measured on the boost SE:
+   point (delay=1, arg=0x7FBC) read little-endian became (256, -17281), so the
+   ADSR crawled toward 28% volume over ~190 ticks instead of hitting ~100% in
+   one -- the note played at -77 dB ([boost-vol] adsrScale 0.0014..0.0188 ramp,
+   exactly target(0.278)/delay(192) per tick). Convert on first use into a
+   pointer-keyed cache: the blob itself must stay untouched (layer scripts
+   re-run per note; swapping in place would double-swap), and re-triggered
+   notes reuse the cached host-order copy. GOTO/RESTART markers are
+   non-terminal (GOTO's arg indexes within the same envelope), so conversion
+   only stops at DISABLE/HANG or the point cap. Audio-thread-only state. */
+static EnvelopePoint* AudioSeq_PortConvertSeqEnvelope(u8* raw) {
+    enum { kMaxEnvs = 64, kMaxPoints = 32 };
+    static struct {
+        u8* raw;
+        EnvelopePoint pts[32];
+    } sCache[64];
+    static s32 sCount = 0;
+    s32 i;
+    s32 p;
+
+    for (i = 0; i < sCount; i++) {
+        if (sCache[i].raw == raw) {
+            return sCache[i].pts;
+        }
+    }
+    if (sCount >= kMaxEnvs) {
+        /* Cache full: fail open to the raw pointer (pre-fix behavior). 64 slots
+           is far above the handful of distinct seq envelopes the SE/BGM
+           sequences define; log once if this ever trips. */
+        extern void gdx_cki(const char* s, int v);
+        static s32 sOverflowLogged = 0;
+        if (!sOverflowLogged) {
+            sOverflowLogged = 1;
+            gdx_cki("[seq-env] conversion cache FULL, failing open", kMaxEnvs);
+        }
+        return (EnvelopePoint*) raw;
+    }
+    for (p = 0; p < kMaxPoints; p++) {
+        s16 delay = (s16) ((raw[p * 4 + 0] << 8) | raw[p * 4 + 1]);
+        s16 arg = (s16) ((raw[p * 4 + 2] << 8) | raw[p * 4 + 3]);
+        sCache[sCount].pts[p].delay = delay;
+        sCache[sCount].pts[p].arg = arg;
+        if (delay == ADSR_DISABLE || delay == ADSR_HANG) {
+            break;
+        }
+    }
+    if (p == kMaxPoints) {
+        /* Unterminated within the cap: force a hang on the last point so the
+           ADSR can never walk past the converted copy. */
+        sCache[sCount].pts[kMaxPoints - 1].delay = ADSR_HANG;
+    }
+    sCache[sCount].raw = raw;
+    return sCache[sCount++].pts;
+}
+#endif
+
 u16 AudioSeq_GetScriptControlFlowArgument(SeqScriptState* state, u8 cmd) {
     u8 highBits = sSeqInstructionArgsTable[cmd - 0xB0];
     u8 lowBits = highBits & 3;
@@ -714,7 +776,13 @@ s32 AudioSeq_SeqLayerProcessScriptStep2(SequenceLayer* layer) {
 
             case ASEQ_OP_LAYER_ENV:
                 cmdArg = AudioSeq_ScriptReadS16(state);
+#ifdef PORT
+                /* Host-order copy of the BE seq-embedded envelope -- see
+                   AudioSeq_PortConvertSeqEnvelope's contract comment. */
+                layer->adsr.envelope = AudioSeq_PortConvertSeqEnvelope(seqPlayer->seqData + (u16) cmdArg);
+#else
                 layer->adsr.envelope = (EnvelopePoint*) (seqPlayer->seqData + (u16) cmdArg);
+#endif
                 /* fallthrough */
             case ASEQ_OP_LAYER_RELEASERATE:
                 layer->adsr.decayIndex = AudioSeq_ScriptReadU8(state);
@@ -1300,7 +1368,12 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
 
                 case ASEQ_OP_CHAN_ENV:
                     cmdArgU16 = (u16) cmdArgs[0];
+#ifdef PORT
+                    /* Same BE seq-blob envelope conversion as the layer ENV op. */
+                    channel->adsr.envelope = AudioSeq_PortConvertSeqEnvelope(&seqPlayer->seqData[cmdArgU16]);
+#else
                     channel->adsr.envelope = (EnvelopePoint*) &seqPlayer->seqData[cmdArgU16];
+#endif
                     break;
 
                 case ASEQ_OP_CHAN_RELEASERATE:
