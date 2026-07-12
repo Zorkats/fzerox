@@ -335,6 +335,33 @@ void Audio_ProcessNotes(void) {
                     subAttrs.frequency = 0.0f;
                     subAttrs.velocity = 0.0f;
                 }
+#ifdef PORT
+                /* [boost-vol] probe (onion layer 5): [boost-synth] proved the boost
+                   note synthesizes at targetVol ~9/4096 (-77 dB). velocity here =
+                   layer->noteVelocity * adsrScale; layer->noteVelocity already folds
+                   the channel volume chain. Dump each factor separately for the
+                   fingerprinted boost (9676) / low-energy (1440) notes. */
+                if (noteSubEu->tunedSample != NULL && noteSubEu->tunedSample->sample != NULL &&
+                    (noteSubEu->tunedSample->sample->size == 9676 ||
+                     noteSubEu->tunedSample->sample->size == 1440)) {
+                    extern void gdx_cki(const char* s, int v);
+                    static s32 sBoostVolLogs = 0;
+                    if (sBoostVolLogs < 24) {
+                        sBoostVolLogs++;
+                        gdx_cki("[boost-vol] size", (int) noteSubEu->tunedSample->sample->size);
+                        gdx_cki("[boost-vol] layerVel x10000", (int) (layer->noteVelocity * 10000.0f));
+                        gdx_cki("[boost-vol] chanVol x10000", (int) (channel->volume * 10000.0f));
+                        gdx_cki("[boost-vol] chanVolScale x10000", (int) (channel->volumeScale * 10000.0f));
+                        gdx_cki("[boost-vol] seqPlayerFade x10000",
+                                (int) (channel->seqPlayer->fadeVolume * 10000.0f));
+                        gdx_cki("[boost-vol] muted*10+muteBehavHas3",
+                                (int) channel->seqPlayer->muted * 10 +
+                                    ((channel->muteBehavior & MUTE_BEHAVIOR_3) ? 1 : 0));
+                        gdx_cki("[boost-vol] adsrScale x10000", (int) (scale * 10000.0f));
+                        gdx_cki("[boost-vol] adsrState", (int) playbackState->adsr.action.s.state);
+                    }
+                }
+#endif
             }
 
             subAttrs.frequency *= playbackState->vibratoFreqScale * playbackState->portamentoFreqScale;
@@ -793,6 +820,23 @@ void Audio_NoteInitForLayer(Note* note, SequenceLayer* layer) {
         instId = channel->instOrWave;
     }
     sub->tunedSample = layer->tunedSample;
+#ifdef PORT
+    /* [boost-init] probe (companion to synthesis.c's [boost-synth]): fingerprints
+       the boost (9676-byte) / low-energy (1440-byte) samples at note init.
+       init-line WITHOUT a matching [boost-synth] line = the note died between
+       Audio_NoteInitForLayer and AudioSynth_ProcessNote (disabled/stolen/finished
+       before its first synthesis tick). */
+    if (sub->tunedSample != NULL && sub->tunedSample->sample != NULL &&
+        (sub->tunedSample->sample->size == 9676 || sub->tunedSample->sample->size == 1440)) {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sBoostInitLogs = 0;
+        if (sBoostInitLogs < 24) {
+            sBoostInitLogs++;
+            gdx_cki("[boost-init] size*10+isNullSample", (int) sub->tunedSample->sample->size * 10);
+            gdx_cki("[boost-init] prio*1000+instId", (int) playbackState->priority * 1000 + (int) instId);
+        }
+    }
+#endif
 
     if (instId >= 0x80 && instId < 0xC0) {
         sub->bitField1.isSyntheticWave = true;

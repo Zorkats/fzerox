@@ -576,7 +576,26 @@ Acmd* AudioSynth_SingleAudioUpdate(s16* aiBuf, s32 aiBufLen, Acmd* aList, s32 up
             // Mixes reverb sample into the main dry channel
             // reverb->volume is always set to 0x7FFF (audio spec), and DMEM_LEFT_CH is cleared before the loop.
             // So for the first iteration, this is essentially a DMEMmove from DMEM_WET_LEFT_CH to DMEM_LEFT_CH
+#ifdef PORT
+            /* GDX_NO_REVERB=1: A/B kill switch for the wet->dry return (deep-audit
+               finding #1 -- the single unscanned addend to the mixed buses, same-index
+               equal-magnitude on L and R, ring-wrap cadence ~15/s == the measured grain
+               rate). Grain gone with this off => the recirculating wet content is the
+               source; still there => the reverb loop is exonerated in one run. */
+            {
+                extern char* getenv(const char*);
+                static s32 sNoReverb = -1;
+                if (sNoReverb == -1) {
+                    char* e = getenv("GDX_NO_REVERB");
+                    sNoReverb = (e != NULL && e[0] == '1') ? 1 : 0;
+                }
+                if (!sNoReverb) {
+                    aMix(aList++, DMEM_2CH_SIZE >> 4, reverb->volume, DMEM_WET_LEFT_CH, DMEM_LEFT_CH);
+                }
+            }
+#else
             aMix(aList++, DMEM_2CH_SIZE >> 4, reverb->volume, DMEM_WET_LEFT_CH, DMEM_LEFT_CH);
+#endif
 
             unk14 = reverb->unk_14;
             if (unk14) {
@@ -741,6 +760,50 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
 
         synthState->numParts = nParts;
         sample = noteSubEu->tunedSample->sample;
+#ifdef PORT
+        /* [boost-synth] probe (missing boost/low-energy, onion layer 4): the boost
+           note allocates with instrument 8 and never hits a [note-bail] exit, so
+           either it synthesizes fully but inaudibly (volume/pan zero) or it never
+           reaches this function. Instrument 8's normal sample is uniquely 9676
+           bytes and low-energy's (instrument 0) is 1440 -- fingerprint on size and
+           log the mix-relevant NoteSubEu fields. Zero lines during a boost =>
+           the note dies between Audio_AllocNote and AudioSynth_ProcessNote. */
+        /* [grain-id] probe: the film-grain spike scanner fingers exactly one voice,
+           resamplingRateFixedPoint 0x5833 (a 22.05kHz-rate sample on the 32kHz
+           output). Log its sample identity ONCE so the offline ground-truth decode
+           can find the same bytes in the ROM/disk and settle "authentic N64
+           percussion aliasing" vs "subtle decode error". */
+        if (noteSubEu->resamplingRateFixedPoint == 0x5833) {
+            extern void gdx_cki(const char* s, int v);
+            extern void gdx_ckp(const char* s, void* v);
+            static s32 sGrainIdLogged = 0;
+            if (!sGrainIdLogged) {
+                sGrainIdLogged = 1;
+                gdx_ckp("[grain-id] sampleAddr", (void*) (uintptr_t) sample->sampleAddr);
+                gdx_cki("[grain-id] size*10+medium", (int) sample->size * 10 + (int) sample->medium);
+                gdx_cki("[grain-id] codec*10+isLooped(count!=0)",
+                        (int) sample->codec * 10 + (sample->loop->header.count != 0 ? 1 : 0));
+                gdx_cki("[grain-id] loopStart", (int) sample->loop->header.start);
+                gdx_cki("[grain-id] loopEnd", (int) sample->loop->header.end);
+                gdx_ckp("[grain-id] bookPtr", (void*) sample->book);
+            }
+        }
+        if (sample->size == 9676 || sample->size == 1440) {
+            extern void gdx_cki(const char* s, int v);
+            static s32 sBoostSynthLogs = 0;
+            if (sBoostSynthLogs < 24) {
+                sBoostSynthLogs++;
+                gdx_cki("[boost-synth] size", (int) sample->size);
+                gdx_cki("[boost-synth] volL*100000+volR (targetVol)",
+                        (int) noteSubEu->targetVolLeft * 100000 + (int) noteSubEu->targetVolRight);
+                gdx_cki("[boost-synth] rate*100+gain (freqFP16/gainUQ44)",
+                        (int) noteSubEu->resamplingRateFixedPoint * 100 + (int) noteSubEu->gain);
+                gdx_cki("[boost-synth] rvbIdx*10000+rvbVol*10+finished",
+                        (int) noteSubEu->bitField1.reverbIndex * 10000 +
+                            (int) noteSubEu->reverbVol * 10 + (int) noteSubEu->bitField0.finished);
+            }
+        }
+#endif
         loopInfo = sample->loop;
         loopEndPos = loopInfo->header.end;
         sampleAddr = (uintptr_t) sample->sampleAddr;
@@ -796,6 +859,11 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                         (s32) (nSamplesToProcess - nSamplesInFirstFrame + SAMPLES_PER_FRAME - 1) / SAMPLES_PER_FRAME;
                     nSamplesToDecode = nFramesToDecode * SAMPLES_PER_FRAME;
                     nTrailingSamplesToIgnore = nSamplesInFirstFrame + nSamplesToDecode - nSamplesToProcess;
+                    /* (2026-07-11) A one-extra-frame "tap-slack pad" lived here briefly:
+                       near a loop end it decoded compressed bytes from BEYOND the loop
+                       -- wild-amplitude garbage that the taps then read on short-loop
+                       instruments (owner: "grain got worse, coupled with the bass").
+                       Replaced by the uniform tail-replicate after the decode loop. */
                 } else {
                     nSamplesToDecode = nSamplesUntilLoopEnd - nSamplesInFirstFrame;
                     nTrailingSamplesToIgnore = 0;
@@ -861,8 +929,36 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                     if (sample->medium == MEDIUM_RAM) {
                         sampleData = (u8*) (sampleDataStart + sampleDataOffset + sampleAddr);
                     } else if (gAudioCtx.unk_215C != 0) {
+#ifdef PORT
+                        /* [note-bail] probes (missing boost/low-energy): the note is proven
+                           to ALLOCATE ([note-alloc] instOrWave 10 == instrument 8 at each
+                           boost) yet stays silent -- these three early returns are the only
+                           remaining silent killers between allocation and audible synthesis.
+                           reason 1=unk_215C, 2=MEDIUM_LBA (suspect: the second SE sample
+                           bank's medium never relocated), 3=DmaSampleData NULL. */
+                        {
+                            extern void gdx_cki(const char* s, int v);
+                            static s32 sBail1 = 0;
+                            if (sBail1 < 16) {
+                                sBail1++;
+                                gdx_cki("[note-bail] r1 unk_215C medium", sample->medium);
+                            }
+                        }
+#endif
                         return aList;
                     } else if (sample->medium == MEDIUM_LBA) {
+#ifdef PORT
+                        {
+                            extern void gdx_cki(const char* s, int v);
+                            extern void gdx_ckp(const char* s, void* v);
+                            static s32 sBail2 = 0;
+                            if (sBail2 < 16) {
+                                sBail2++;
+                                gdx_cki("[note-bail] r2 MEDIUM_LBA medium", sample->medium);
+                                gdx_ckp("[note-bail] r2 sampleAddr", (void*) sampleAddr);
+                            }
+                        }
+#endif
                         return aList;
                     } else {
                         sampleData = AudioLoad_DmaSampleData(sampleDataStart + sampleDataOffset + sampleAddr,
@@ -871,6 +967,18 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                     }
 
                     if (sampleData == NULL) {
+#ifdef PORT
+                        {
+                            extern void gdx_cki(const char* s, int v);
+                            extern void gdx_ckp(const char* s, void* v);
+                            static s32 sBail3 = 0;
+                            if (sBail3 < 16) {
+                                sBail3++;
+                                gdx_cki("[note-bail] r3 dma-null medium", sample->medium);
+                                gdx_ckp("[note-bail] r3 sampleAddr", (void*) sampleAddr);
+                            }
+                        }
+#endif
                         return aList;
                     }
 
@@ -1018,6 +1126,28 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                 }
             }
 
+#ifdef PORT
+            /* Tail replicate (2026-07-11, the residual "film grain" root cause): the
+               resampler's 4-tap FIR reads up to 2 source samples PAST the last consumed
+               one (plus RunResample's count round-up tail), but the decode budget covers
+               consumption with only 0..15 samples of slack. Chain-capture analysis
+               proved the assembled stream is bit-exact up to EXACTLY its end and stale
+               beyond it, and that on ~half of all ticks the slack is under 3 -- so the
+               final 1-3 output samples of every sustained voice were computed from
+               stale DMEM: an isolated wrong sample per tick seam, ~15/s per voice,
+               heard as constant film grain over all music. Duplicate the last 8 real
+               samples into the tap slack: the FIR then sees a plausible continuation
+               whose error is bounded by the local waveform slope (vs. unrelated stale
+               audio), uniformly across mid-sample, near-loop-end, and loop-wrap ticks
+               (a decode-ahead pad cannot cover the latter two -- see the note at the
+               decode-budget computation above). The finished path already zero-fills
+               its tail (ClearBuffer above). */
+            if (!finished) {
+                aDMEMMove(aList++,
+                          DMEM_UNCOMPRESSED_NOTE + skipBytes + (samplesLenAdjusted * SAMPLE_SIZE) - 16,
+                          DMEM_UNCOMPRESSED_NOTE + skipBytes + (samplesLenAdjusted * SAMPLE_SIZE), 16);
+            }
+#endif
             switch (nParts) {
                 case 1:
                     sampleDmemBeforeResampling = DMEM_UNCOMPRESSED_NOTE + skipBytes;
