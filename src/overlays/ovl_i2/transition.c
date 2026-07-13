@@ -335,43 +335,75 @@ bool Transition_QueueRandom(s32 appearType, bool instantTransitionAllowed) {
 
 s32 Transition_Update(void) {
     Transition* transition = &sTransition;
+#ifdef PORT
+    /* PORT: gEnhancements.Gameplay.SkippableTransitions (Tier 2 [PB], docs/COMING_SOON_ROADMAP.md
+       "Gameplay > Skippable transitions"; proposed CVar per docs/menu/GAMEPLAY_TAB.md:206).
+       Default OFF reproduces stock behavior exactly (budget
+       of 1 == the switch below runs exactly once per call, same as unmodified). When the CVar is
+       on, re-run the SAME per-type Update tick (the switch below, byte-for-byte unmodified) up to
+       128 times within this single call, instead of once. This cannot desync any state machine
+       that waits on TRANSITION_FLAG_FINISHED / gTransitionState (game.c's
+       GAMEMODE_CHANGE_WAIT_TRANSITION* states, and the gTransitionState-gated menus in
+       course_select.c/main_menu.c/options_menu.c/records.c/machine.c/machine_create_update.c/
+       ead_demo.c) because those only ever look at whether the transition has reached ITS OWN
+       normal finished state -- every intermediate tick (timer increments, tile/wipe/fade state
+       advances) still runs in the exact same order via the exact same functions, just compressed
+       into fewer real frames instead of one real frame each. Verified safe against game.c: the
+       asset/BGM loading that happens around a hide/appear pair (GAMEMODE_CHANGE_INIT block,
+       game.c:560-775) runs synchronously in a single frame between WAIT_TRANSITION and
+       Transition_AppearSet -- nothing there is spread across multiple transition-update frames, so
+       there is no background work relying on the transition lingering. The 128-tick cap
+       comfortably covers every transition type's worst case (small tiles ~63 ticks, tiled
+       whirl/spiral ~64-96, phased strips bounded by TRANSITION_BACKGROUND_HEIGHT/2); the loop also
+       stops immediately once FINISHED is set or the type goes back to NONE, so it never spins the
+       full budget in practice. */
+    extern int CVarGetInteger(const char* name, int defaultValue);
+    s32 fastForwardTicksLeft = CVarGetInteger("gEnhancements.Gameplay.SkippableTransitions", 0) ? 128 : 1;
+#endif
 
     if (transition->queuedTransitionType != TRANSITION_TYPE_NONE) {
         Transition_PopQueue(transition);
     }
 
-    switch (transition->activeTransitionType) {
-        case TRANSITION_TYPE_NONE:
-            break;
-        case TRANSITION_TYPE_SMALL_TILES:
-            Transition_SmallTilesUpdate(transition);
-            break;
-        case TRANSITION_TYPE_LARGE_TILES:
-            Transition_LargeTilesUpdate(transition);
-            break;
-        case TRANSITION_TYPE_TILED_WHIRL:
-            Transition_TiledWhirlUpdate(transition);
-            break;
-        case TRANSITION_TYPE_TILED_SPIRAL:
-            Transition_TiledSpiralUpdate(transition);
-            break;
-        case TRANSITION_TYPE_FADE:
-        case TRANSITION_TYPE_STATIC_FADE:
-            Transition_FadeUpdate(transition);
-            break;
-        case TRANSITION_TYPE_WIPE:
-            Transition_WipeUpdate(transition);
-            break;
-        case TRANSITION_TYPE_PHASED_STRIPS:
-            Transition_PhasedStripsUpdate(transition);
-            break;
-        case TRANSITION_TYPE_GREYSCALE_PALETTE:
-            Transition_GreyscalePaletteUpdate(transition);
-            break;
-        case TRANSITION_TYPE_INSTANT:
-        default:
-            break;
-    }
+#ifdef PORT
+    do {
+#endif
+        switch (transition->activeTransitionType) {
+            case TRANSITION_TYPE_NONE:
+                break;
+            case TRANSITION_TYPE_SMALL_TILES:
+                Transition_SmallTilesUpdate(transition);
+                break;
+            case TRANSITION_TYPE_LARGE_TILES:
+                Transition_LargeTilesUpdate(transition);
+                break;
+            case TRANSITION_TYPE_TILED_WHIRL:
+                Transition_TiledWhirlUpdate(transition);
+                break;
+            case TRANSITION_TYPE_TILED_SPIRAL:
+                Transition_TiledSpiralUpdate(transition);
+                break;
+            case TRANSITION_TYPE_FADE:
+            case TRANSITION_TYPE_STATIC_FADE:
+                Transition_FadeUpdate(transition);
+                break;
+            case TRANSITION_TYPE_WIPE:
+                Transition_WipeUpdate(transition);
+                break;
+            case TRANSITION_TYPE_PHASED_STRIPS:
+                Transition_PhasedStripsUpdate(transition);
+                break;
+            case TRANSITION_TYPE_GREYSCALE_PALETTE:
+                Transition_GreyscalePaletteUpdate(transition);
+                break;
+            case TRANSITION_TYPE_INSTANT:
+            default:
+                break;
+        }
+#ifdef PORT
+    } while (--fastForwardTicksLeft > 0 && transition->activeTransitionType != TRANSITION_TYPE_NONE &&
+             !(transition->flags & TRANSITION_FLAG_FINISHED));
+#endif
 
     if (gTransitionState != TRANSITION_INACTIVE && transition->flags & TRANSITION_FLAG_FINISHED) {
         gTransitionState = TRANSITION_INACTIVE;
@@ -595,6 +627,19 @@ void Transition_SetBackgroundBuffer(void) {
     gdx_set_native_rgba16_texture_range(
         sTransitionPalette, sizeof(sTransitionPalette),
         (transition->flags & TRANSITION_FLAG_CONVERT_TO_PALETTE) ? 1 : 0);
+    /* Track F probe: record the capture span so the bridge's SETTIMG path can log
+       whether this buffer is byteswapped when the wipe/phased-strips draw samples
+       it (see gdx_diag_note_transition_capture / [transition-cap]). Diagnostic
+       only -- it changes no rendering. The palette-converted background is CI8
+       (endian-neutral), so scope the probe to the RGBA16 capture case only. */
+    {
+        extern void gdx_diag_note_transition_capture(void* ptr, size_t size);
+        if (!(transition->flags & TRANSITION_FLAG_CONVERT_TO_PALETTE)) {
+            gdx_diag_note_transition_capture(transition->backgroundBuffer,
+                                             TRANSITION_BACKGROUND_WIDTH * TRANSITION_BACKGROUND_HEIGHT *
+                                                 sizeof(u16));
+        }
+    }
 #endif
 }
 

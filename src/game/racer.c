@@ -84,6 +84,130 @@ Machine gMachines[30];
 CustomMachineInfo sCustomMachineInfo[30];
 u8 sRecordsMachineIndices[7];
 
+#ifdef PORT
+/* ---------------------------------------------------------------------------------------------
+ * G-Diffuser in-session save-state: curated capture of racer.c's race-critical globals (additive).
+ * Compiled only in the port build (PORT). No effect on the matching decomp build. The port glue
+ * (port/gdx_savestate.c) calls these at the parked frame-loop boundary, under the audio lock, to
+ * snapshot/restore the machine physics + race-progress state that lives in native BSS (NOT in the
+ * emulated gdx_rdram buffer). All pointer-valued globals below reference other stable BSS globals
+ * (gRacers/gGhosts/gGhostRacers/the recording buffer) or same-course RDRAM/const data, so raw-copying
+ * their values is safe under the documented same-course/same-race constraint. See gdx_savestate.c.
+ * ------------------------------------------------------------------------------------------- */
+typedef struct GdxSsField { void* addr; unsigned int size; } GdxSsField;
+
+static const GdxSsField sGdxSsRacer[] = {
+    { (void*)&gTotalRacers, (unsigned int)sizeof(gTotalRacers) },
+    { (void*)&sLastRacer, (unsigned int)sizeof(sLastRacer) },
+    { (void*)&sRivalRacer, (unsigned int)sizeof(sRivalRacer) },
+    { (void*)&gEffectsVtxPtr, (unsigned int)sizeof(gEffectsVtxPtr) },
+    { (void*)&gEffectsVtxEndPtr, (unsigned int)sizeof(gEffectsVtxEndPtr) },
+    { (void*)&gPlayerLives, (unsigned int)sizeof(gPlayerLives) },
+    { (void*)&gPlayerCharacters, (unsigned int)sizeof(gPlayerCharacters) },
+    { (void*)&gPlayerMachineSkins, (unsigned int)sizeof(gPlayerMachineSkins) },
+    { (void*)&gPlayerEngine, (unsigned int)sizeof(gPlayerEngine) },
+    { (void*)&gVsRacePlayerVictoryCount, (unsigned int)sizeof(gVsRacePlayerVictoryCount) },
+    { (void*)&gVsRacePlayerPoints, (unsigned int)sizeof(gVsRacePlayerPoints) },
+    { (void*)&D_800E5F20, (unsigned int)sizeof(D_800E5F20) },
+    { (void*)&D_800E5F30, (unsigned int)sizeof(D_800E5F30) },
+    { (void*)&gRacersByPosition, (unsigned int)sizeof(gRacersByPosition) },
+    { (void*)&gNearestRacer, (unsigned int)sizeof(gNearestRacer) },
+    { (void*)&D_800E5FBC, (unsigned int)sizeof(D_800E5FBC) },
+    { (void*)&sSpunOutRacers, (unsigned int)sizeof(sSpunOutRacers) },
+    { (void*)&D_800E5FC0, (unsigned int)sizeof(D_800E5FC0) },
+    { (void*)&gRacersRetired, (unsigned int)sizeof(gRacersRetired) },
+    { (void*)&gRacersFinished, (unsigned int)sizeof(gRacersFinished) },
+    { (void*)&gCpuRacersRetired, (unsigned int)sizeof(gCpuRacersRetired) },
+    { (void*)&gPlayerRacersRetired, (unsigned int)sizeof(gPlayerRacersRetired) },
+    { (void*)&gPlayerRacersFinished, (unsigned int)sizeof(gPlayerRacersFinished) },
+    { (void*)&sLastMultiplayerTotalRacerCount, (unsigned int)sizeof(sLastMultiplayerTotalRacerCount) },
+    { (void*)&sLastMultiplayerPlayerCount, (unsigned int)sizeof(sLastMultiplayerPlayerCount) },
+    { (void*)&gEnableRaceSfx, (unsigned int)sizeof(gEnableRaceSfx) },
+    { (void*)&gRacersKOd, (unsigned int)sizeof(gRacersKOd) },
+    { (void*)&D_800E5FD4, (unsigned int)sizeof(D_800E5FD4) },
+    { (void*)&D_800E5FD6, (unsigned int)sizeof(D_800E5FD6) },
+    { (void*)&sRaceFrameCount, (unsigned int)sizeof(sRaceFrameCount) },
+    { (void*)&gPracticeBestLap, (unsigned int)sizeof(gPracticeBestLap) },
+    { (void*)&gStartNewBestLap, (unsigned int)sizeof(gStartNewBestLap) },
+    { (void*)&gCurrentTimeAttackRecordPosition, (unsigned int)sizeof(gCurrentTimeAttackRecordPosition) },
+    { (void*)&gCurrentTimeAttackHasMaxSpeed, (unsigned int)sizeof(gCurrentTimeAttackHasMaxSpeed) },
+    { (void*)&gBestTimedLap, (unsigned int)sizeof(gBestTimedLap) },
+    { (void*)&sPipeFogColors, (unsigned int)sizeof(sPipeFogColors) },
+    { (void*)&sTunnelFogColors, (unsigned int)sizeof(sTunnelFogColors) },
+    { (void*)&D_800E5FF0, (unsigned int)sizeof(D_800E5FF0) },
+    { (void*)&gGhosts, (unsigned int)sizeof(gGhosts) },
+    { (void*)&gFastestGhost, (unsigned int)sizeof(gFastestGhost) },
+    { (void*)&sGhostReplayRecordingBuffer, (unsigned int)sizeof(sGhostReplayRecordingBuffer) },
+    { (void*)&sGhostReplayRecordingSize, (unsigned int)sizeof(sGhostReplayRecordingSize) },
+    { (void*)&sGhostReplayRecordingEnd, (unsigned int)sizeof(sGhostReplayRecordingEnd) },
+    { (void*)&sReplayRecordFrameCount, (unsigned int)sizeof(sReplayRecordFrameCount) },
+    { (void*)&sGhostReplayRecordingPtr, (unsigned int)sizeof(sGhostReplayRecordingPtr) },
+    { (void*)&sReplayRecordPosX, (unsigned int)sizeof(sReplayRecordPosX) },
+    { (void*)&sReplayRecordPosY, (unsigned int)sizeof(sReplayRecordPosY) },
+    { (void*)&sReplayRecordPosZ, (unsigned int)sizeof(sReplayRecordPosZ) },
+    { (void*)&D_800F5DE4, (unsigned int)sizeof(D_800F5DE4) },
+    { (void*)&gUnableToRecordGhost, (unsigned int)sizeof(gUnableToRecordGhost) },
+    { (void*)&D_800F5DE8, (unsigned int)sizeof(D_800F5DE8) },
+    { (void*)&D_800F5DEA, (unsigned int)sizeof(D_800F5DEA) },
+    { (void*)&gGhostRacers, (unsigned int)sizeof(gGhostRacers) },
+    { (void*)&D_800F5E8C, (unsigned int)sizeof(D_800F5E8C) },
+    { (void*)&gFastestGhostRacer, (unsigned int)sizeof(gFastestGhostRacer) },
+    { (void*)&D_800F5E94, (unsigned int)sizeof(D_800F5E94) },
+    { (void*)&gRaceIntroTimer, (unsigned int)sizeof(gRaceIntroTimer) },
+    { (void*)&sRacerPairInfo, (unsigned int)sizeof(sRacerPairInfo) },
+    { (void*)&D_800F809C, (unsigned int)sizeof(D_800F809C) },
+    { (void*)&D_800F80A0, (unsigned int)sizeof(D_800F80A0) },
+    { (void*)&D_800F80A4, (unsigned int)sizeof(D_800F80A4) },
+    { (void*)&gPlayerReverseTimer, (unsigned int)sizeof(gPlayerReverseTimer) },
+    { (void*)&D_800F80B8, (unsigned int)sizeof(D_800F80B8) },
+    { (void*)&sCourseHalfLength, (unsigned int)sizeof(sCourseHalfLength) },
+    { (void*)&sCourseNegativeHalfLength, (unsigned int)sizeof(sCourseNegativeHalfLength) },
+    { (void*)&D_800F80C4, (unsigned int)sizeof(D_800F80C4) },
+    { (void*)&gMachines, (unsigned int)sizeof(gMachines) },
+    { (void*)&sCustomMachineInfo, (unsigned int)sizeof(sCustomMachineInfo) },
+    { (void*)&sRecordsMachineIndices, (unsigned int)sizeof(sRecordsMachineIndices) },
+};
+
+static void gdx_ss_racer_bcopy(unsigned char* d, const unsigned char* s, unsigned int n) {
+    unsigned int i;
+    for (i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+}
+
+unsigned int Gdx_SaveState_Racer_Size(void) {
+    unsigned int total = 0;
+    unsigned int i;
+    unsigned int count = (unsigned int)(sizeof(sGdxSsRacer) / sizeof(sGdxSsRacer[0]));
+    for (i = 0; i < count; i++) {
+        total += sGdxSsRacer[i].size;
+    }
+    return total;
+}
+
+void Gdx_SaveState_Racer_Capture(void* dst) {
+    unsigned int off = 0;
+    unsigned int i;
+    unsigned int count = (unsigned int)(sizeof(sGdxSsRacer) / sizeof(sGdxSsRacer[0]));
+    for (i = 0; i < count; i++) {
+        gdx_ss_racer_bcopy((unsigned char*)dst + off, (const unsigned char*)sGdxSsRacer[i].addr,
+                           sGdxSsRacer[i].size);
+        off += sGdxSsRacer[i].size;
+    }
+}
+
+void Gdx_SaveState_Racer_Restore(const void* src) {
+    unsigned int off = 0;
+    unsigned int i;
+    unsigned int count = (unsigned int)(sizeof(sGdxSsRacer) / sizeof(sGdxSsRacer[0]));
+    for (i = 0; i < count; i++) {
+        gdx_ss_racer_bcopy((unsigned char*)sGdxSsRacer[i].addr, (const unsigned char*)src + off,
+                           sGdxSsRacer[i].size);
+        off += sGdxSsRacer[i].size;
+    }
+}
+#endif /* PORT */
+
 TexturePtr sPosition1PMarkerTexs[] = {
     aFirstPlaceMarker1PTex,
     aSecondPlaceMarker1PTex,
@@ -5564,6 +5688,13 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     Vec3f* boosterPos;
     GhostRacer* sp4F8;
     TexturePtr var_s2;
+#ifdef PORT
+    // G-Diffuser Tier-3 "Machine LOD forcing" (gEnhancements.Graphics.ForceMaxMachineLOD).
+    // Cached once per Racer_Draw call (there is one call per active camera per frame) so the
+    // distance-tiering loops below never call into the CVar bridge per-racer. Default 0 leaves
+    // every read/branch below on its original path -- stock 1:1 by construction.
+    s32 gdxForceMaxMachineLod;
+#endif
 
     camera = &gCameras[playerIndex];
 
@@ -5596,6 +5727,13 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     sp580.m[2][1] = camera->projectionViewMtx.m[2][1];
     sp580.m[2][2] = camera->projectionViewMtx.m[2][2];
     sp580.m[2][3] = camera->projectionViewMtx.m[2][3];
+
+#ifdef PORT
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+        gdxForceMaxMachineLod = CVarGetInteger("gEnhancements.Graphics.ForceMaxMachineLOD", 0);
+    }
+#endif
 
 #ifndef EXPANSION_KIT
     if (gGameMode != GAMEMODE_GP_END_CS) {
@@ -5638,6 +5776,11 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                     continue;
                 }
 
+#ifdef PORT
+                if (gdxForceMaxMachineLod) {
+                    racer->machineLod = 1;
+                } else
+#endif
                 if (temp_fa0 < 230.0f) {
                     racer->machineLod = 1;
                 } else if (temp_fa0 < 290.0f) {
@@ -5672,7 +5815,11 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     }
     if (gNumPlayers >= 3) {
         for (racer = &gRacers[gNumPlayers - 1]; racer >= gRacers; racer--) {
-            if ((racer->machineLod != 0) && (racer->machineLod < 6)) {
+            if (
+#ifdef PORT
+                !gdxForceMaxMachineLod &&
+#endif
+                (racer->machineLod != 0) && (racer->machineLod < 6)) {
                 racer->machineLod++;
             }
             if (racer->unk_2B3 == 2) {
@@ -5714,6 +5861,11 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                     continue;
                 }
 
+#ifdef PORT
+                if (gdxForceMaxMachineLod) {
+                    racer->machineLod = 1;
+                } else
+#endif
                 if (temp_fa0 < 230.0f) {
                     racer->machineLod = 1;
                 } else if (temp_fa0 < 290.0f) {

@@ -4555,9 +4555,36 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     Racer* racer;
     Camera* camera;
     s32 i;
+#ifdef PORT
+    // G-Diffuser Tier-3 "Extended draw distance" (gEnhancements.Graphics.DrawDistance, a percentage,
+    // default 100). Cached once per Course_Draw call (there is one call per active camera per
+    // frame) so the per-chunk cull loop below -- up to SEGMENT_CHUNK_COUNT iterations -- never
+    // calls into the CVar bridge per-chunk. Applied ONLY at the chunk-depth cull comparison further
+    // down: sCourseFarRenderDistance itself (the course's own, per-venue value set in
+    // Course_SegmentsInit) is left untouched, so nothing else that reads it is affected. At the
+    // default 100 the multiplier is exactly 1.0f, which is a no-op multiply (IEEE-754 exact) --
+    // stock 1:1 rendering is preserved bit-for-bit.
+    f32 gdxFarRenderDistanceScale;
+#endif
 
     camera = &gCameras[cameraIndex];
     racer = &gRacers[camera->id];
+#ifdef PORT
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+        s32 drawDistancePercent = CVarGetInteger("gEnhancements.Graphics.DrawDistance", 100);
+        // Defensive range clamp independent of the menu slider (the CVar can be hand-edited in the
+        // config file): never shrink below stock, and cap at the recommended slider max (300%) --
+        // segmentChunkGroup accumulation already bails out gracefully past its fixed capacity, but
+        // there is no reason to feed it an unbounded multiplier.
+        if (drawDistancePercent < 100) {
+            drawDistancePercent = 100;
+        } else if (drawDistancePercent > 300) {
+            drawDistancePercent = 300;
+        }
+        gdxFarRenderDistanceScale = (f32) drawDistancePercent / 100.0f;
+    }
+#endif
 
     sCourseDisp = gfx;
     segment = racer->segmentPositionInfo.courseSegment;
@@ -4610,7 +4637,11 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
         chunk->depth = ((sp60.m[0][2] * chunk->pos.x) + (sp60.m[1][2] * chunk->pos.y) + (sp60.m[2][2] * chunk->pos.z)) +
                        sp60.m[3][2];
 
+#ifdef PORT
+        if ((chunk->depth < 0.0f) || ((sCourseFarRenderDistance * gdxFarRenderDistanceScale) < chunk->depth)) {
+#else
         if ((chunk->depth < 0.0f) || (sCourseFarRenderDistance < chunk->depth)) {
+#endif
             chunk->drawState = 0;
         } else {
             temp_fa0 =

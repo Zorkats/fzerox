@@ -230,6 +230,13 @@ extern s16 gMenuChangeMode;
 extern s32 gTotalRacers;
 extern s16 D_80115D50[];
 
+#ifdef PORT
+// G-Diffuser autosave-on-record (ghost). Defined after Menus_CheckGhostCanSave below, where the
+// ghost globals and Save_* helpers are already in scope. Gated by the
+// gEnhancements.Gameplay.AutosaveOnRecord CVar (default off) -- a no-op unless enabled.
+void Gdx_AutosaveGhostOnRecord(void);
+#endif
+
 void Menus_Update(void) {
     s32 i;
 
@@ -258,6 +265,13 @@ void Menus_Update(void) {
                 if (gCourseIndex < COURSE_EDIT_1) {
                     Save_SaveCourseRecordProfiles(gCourseIndex);
                 }
+#ifdef PORT
+                // G-Diffuser autosave-on-record: also persist the best ghost replay here (stock
+                // F-Zero X only saves it via the manual Save-Ghost prompt). Gated by
+                // gEnhancements.Gameplay.AutosaveOnRecord (default off); no-op unless enabled.
+                // func_80089BD0() (above) has just refreshed gFastestGhost for this race.
+                Gdx_AutosaveGhostOnRecord();
+#endif
             } else if (gGameMode == GAMEMODE_GP_RACE) {
                 RecordsEntry_UpdateRaceStats(gCourseIndex);
             } else if (gGameMode == GAMEMODE_DEATH_RACE) {
@@ -2189,6 +2203,46 @@ s32 Menus_CheckGhostCanSave(void) {
 #endif
     return 0;
 }
+
+#ifdef PORT
+// Autosave-on-record (G-Diffuser). When gEnhancements.Gameplay.AutosaveOnRecord is enabled, persist
+// the current best ghost to SRAM at race finish so a good run is never lost to a quit before the
+// manual "Save Ghost" prompt. Called once per Time Attack finish from Menus_Update (latched by
+// sRaceFinishSaveTriggered), right after the numeric-record autosave the game already performs.
+//
+// Uses only the game's own SRAM ghost helpers (Save_LoadGhostInfo / Save_SaveGhost) on the single-
+// slot SRAM ghost -- never the 64DD disk-ghost path (dead on the port without a real drive).
+// Conservative overwrite policy: write to an empty slot, or overwrite our OWN same-course ghost
+// only on a strict improvement; never auto-replace a different-course ghost (the vanilla overwrite
+// prompt can, but that is an explicit player choice). This mirrors the SRAM branch of
+// Menus_AttemptSaveGhost (menus.c) and the improvement test in Menus_CheckGhostCanSave.
+void Gdx_AutosaveGhostOnRecord(void) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    s32 ghostSlot;
+
+    if (!CVarGetInteger("gEnhancements.Gameplay.AutosaveOnRecord", 0)) {
+        return;
+    }
+    if (gCourseIndex >= COURSE_EDIT_1) {
+        return; // Save_SaveGhost course bound (mirrors Menus_AttemptSaveGhost's gCourseIndex check).
+    }
+    if (gFastestGhost == NULL) {
+        return; // no ghost was recorded this race.
+    }
+    // Save_LoadGhostInfo fills gSavedGhostInfo and returns non-zero when the SRAM slot holds no
+    // valid ghost (empty, or a bad checksum that it just reinitialized). Non-zero -> free to write.
+    ghostSlot = Save_LoadGhostInfo(&gSavedGhostInfo);
+    if (ghostSlot != 0) {
+        Save_SaveGhost(gCourseIndex, gFastestGhost);
+        return;
+    }
+    // Occupied slot: only overwrite our own same-course ghost, and only on a strict improvement.
+    if ((gSavedGhostInfo.courseIndex == gCourseIndex) &&
+        (gFastestGhost->raceTime < gSavedGhostInfo.raceTime)) {
+        Save_SaveGhost(gCourseIndex, gFastestGhost);
+    }
+}
+#endif
 
 Gfx* Menus_DrawSaved(Gfx* gfx) {
 

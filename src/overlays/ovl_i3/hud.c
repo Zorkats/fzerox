@@ -1021,6 +1021,23 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 extern s32 gNumPlayers;
 
 Gfx* Hud_DrawHud(Gfx* gfx) {
+#ifdef PORT
+    // G-Diffuser Practice photo mode: hide the race HUD for a clean shot. Gated by
+    // gEnhancements.Practice.PhotoMode (default 0) AND the game's existing pause (gGamePaused != 0)
+    // -- we reuse the pause so the simulation is already frozen; no new time-freeze is introduced.
+    // When the CVar is 0 (default) the && short-circuits, this if is not taken, and execution falls
+    // straight through to the original gSPDisplayList below, so a stock boot draws the HUD byte-for-
+    // byte as before. Emitting nothing here is safe because the follow-on overlays drawn after
+    // Hud_DrawHud (Hud_DrawRacePortraits/Hud_DrawPosition/Hud_DrawPlayerSpeed, menus.c) each reload
+    // their own display list and render state; see PhotoMode notes for the overlays still left drawn.
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+        extern s8 gGamePaused;
+        if (CVarGetInteger("gEnhancements.Practice.PhotoMode", 0) && (gGamePaused != 0)) {
+            return gfx; // photo mode active: emit no HUD commands this frame
+        }
+    }
+#endif
 
     gSPDisplayList(gfx++, D_8014940);
 
@@ -1048,6 +1065,16 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 
             // Best Lap Time
             gfx = Hud_DrawPracticeBestLap(gfx);
+#ifdef PORT
+            // G-Diffuser Practice HUD lap-split delta: gEnhancements.Practice.ShowLapDeltas
+            // (default off). See Hud_DrawPracticeLapDelta below for the full CVar/mode gate;
+            // this call is a no-op unless both GAMEMODE_PRACTICE and the CVar are true, so stock
+            // (CVar unset/0) behavior is unchanged -- nothing new is drawn.
+            {
+                extern Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx);
+                gfx = Hud_DrawPracticeLapDelta(gfx);
+            }
+#endif
             gfx = Hud_DrawDeathRaceTimer(gfx, 0, 0);
 
             gfx = Hud_DrawDeathRaceBestTime(gfx, 0, 0);
@@ -1859,6 +1886,205 @@ Gfx* Hud_DrawPracticeBestLap(Gfx* gfx) {
 
     return gfx;
 }
+
+#ifdef PORT
+// G-Diffuser Practice HUD lap-split delta (Tier 2, docs/COMING_SOON_ROADMAP.md "Practice";
+// docs/menu/PRACTICE_TAB.md item #2). Gated by gEnhancements.Practice.ShowLapDeltas (default off);
+// when the CVar is 0/unset Hud_DrawPracticeLapDelta returns immediately and draws nothing, so a
+// stock boot is byte-for-byte unaffected.
+//
+// Reference lap time is the loaded ghost's same-lap split (gFastestGhostRacer->ghost->lapTimes[])
+// when a ghost racer is active; otherwise the player's own best completed lap this session. Native
+// F-Zero X only ever populates gGhostRacers / gFastestGhostRacer for GAMEMODE_TIME_ATTACK (see the
+// race-init ghost setup in racer.c) -- GAMEMODE_PRACTICE always leaves gFastestGhostRacer NULL even
+// though Ghost::lapTimes[3] is itself a clean, directly-comparable per-lap split. So today this
+// always falls through to the own-best branch; the ghost-relative branch is left wired in so a
+// future "apply a ghost into Practice" pass (docs/menu/PRACTICE_TAB.md, phase T1) lights it up for
+// free, no HUD change required.
+//
+// True sub-lap sector deltas are explicitly out of scope (no checkpoint/track-progress model
+// exists -- see PRACTICE_TAB.md's "hard part" note on item #2); this only ever diffs whole laps.
+
+// Signed MM'SS"HH delta timer: a color-parameterized twin of the native Hud_DrawRaceTimeInterval
+// above (identical digit layout/spacing/macros), except the caller supplies the prim color instead
+// of the hardcoded yellow, so ahead/behind can be colored independently of the native "gap to
+// leader" readout that the (0, 0, 255, 255, 0, 255) yellow belongs to.
+static Gfx* Hud_DrawPracticeLapDeltaTimer(Gfx* gfx, s32 time, s32 left, s32 top, f32 scale, u8 r, u8 g, u8 b) {
+    s32 offset = 0;
+    s32 timeField;
+
+    gDPPipeSync(gfx++);
+    gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+    gDPSetAlphaCompare(gfx++, G_AC_NONE);
+    gDPSetRenderMode(gfx++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
+    gDPSetCombineLERP(gfx++, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0,
+                      TEXEL0, 0);
+    gDPSetPrimColor(gfx++, 0, 0, r, g, b, 255);
+
+    if (time >= MAX_TIMER) {
+        time = MAX_TIMER;
+    }
+    if (time <= -MAX_TIMER) {
+        time = -MAX_TIMER;
+    }
+    if (time < -4) {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, TIMER_DIGIT_MINUS, scale);
+        time = -time;
+    } else {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, TIMER_DIGIT_PLUS, scale);
+    }
+    if (time < 0) {
+        time = -time;
+    }
+
+    offset += 8;
+
+    timeField = time / 60000;
+
+    if (timeField < 10) {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, 0, scale);
+        offset += 8;
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField, scale);
+        offset += 8;
+    } else {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField / 10, scale);
+        offset += 8;
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField % 10, scale);
+        offset += 8;
+    }
+
+    time -= timeField * 60000;
+    timeField = time / 1000;
+
+    gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, TIMER_DIGIT_PRIME, scale);
+
+    offset += 8;
+
+    if (timeField < 10) {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, 0, scale);
+        offset += 8;
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField, scale);
+        offset += 8;
+    } else {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField / 10, scale);
+        offset += 8;
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField % 10, scale);
+        offset += 8;
+    }
+
+    time -= timeField * 1000;
+    timeField = time / 10;
+
+    gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, TIMER_DIGIT_DOUBLE_PRIME, scale);
+
+    offset += 8;
+
+    if (timeField < 10) {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, 0, scale);
+        offset += 8;
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField, scale);
+    } else {
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField / 10, scale);
+        offset += 8;
+        gfx = Hud_DrawTimerDigitRectangle(gfx, left + offset, top, timeField % 10, scale);
+    }
+    return gfx;
+}
+
+Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    static s32 sLastSeenLap = 0;
+    static s32 sLastRaceTime = 0;
+    static s32 sOwnBestLapTime = -1;
+    static s32 sDeltaValue = 0;
+    static s32 sDeltaTimer = 0;
+    Racer* racer;
+    s32 completedLapIndex;
+    s32 lapTime;
+    s32 refTime;
+    u8 r, g, b;
+
+    if (gGameMode != GAMEMODE_PRACTICE) {
+        return gfx;
+    }
+    if (!CVarGetInteger("gEnhancements.Practice.ShowLapDeltas", 0)) {
+        return gfx;
+    }
+
+    racer = &gRacers[0];
+
+    // racer->raceTime regressing means a fresh race (mode entry or Racer_Init retry, racer.c)
+    // started; drop all session-local state so a new session never inherits a stale delta/best.
+    if (racer->raceTime < sLastRaceTime) {
+        sLastSeenLap = 0;
+        sOwnBestLapTime = -1;
+        sDeltaValue = 0;
+        sDeltaTimer = 0;
+    }
+    sLastRaceTime = racer->raceTime;
+
+    // Detect a completed lap purely from racer->lap transitions -- no dependency on the native
+    // startNewPracticeLap flag, which Hud_UpdatePlayerHudInfo (above) already consumes earlier in
+    // the same frame's draw (see the Hud_DrawHud call order). racer->lap wraps back to 1 after the
+    // final lap in Practice mode (racer.c), so a *decrease* here means "the final lap just
+    // completed", not "no change"; sLastSeenLap != 0 skips the initial 0-lap sync frame.
+    if ((sLastSeenLap != 0) && (racer->lap != sLastSeenLap)) {
+        if (racer->lap > sLastSeenLap) {
+            completedLapIndex = sLastSeenLap - 1;
+        } else {
+            completedLapIndex = gTotalLapCount - 1;
+        }
+
+        if ((completedLapIndex >= 0) && (completedLapIndex < 3)) {
+            lapTime = racer->lapTimes[completedLapIndex];
+
+            if (lapTime > 0) {
+                if (gFastestGhostRacer != NULL) {
+                    refTime = gFastestGhostRacer->ghost->lapTimes[completedLapIndex];
+                } else {
+                    refTime = sOwnBestLapTime;
+                }
+
+                if (refTime > 0) {
+                    sDeltaValue = lapTime - refTime;
+                    if (sDeltaValue >= 0) {
+                        sDeltaValue += 5;
+                    } else {
+                        sDeltaValue -= 5;
+                    }
+                    sDeltaTimer = 180; // ~3s at 60Hz, matches sPracticeBestLapCounter's flash budget above.
+                }
+
+                if ((sOwnBestLapTime < 0) || (lapTime < sOwnBestLapTime)) {
+                    sOwnBestLapTime = lapTime;
+                }
+            }
+        }
+    }
+    sLastSeenLap = racer->lap;
+
+    if (sDeltaTimer <= 0) {
+        return gfx;
+    }
+    if (!gGamePaused) {
+        sDeltaTimer--;
+    }
+    if ((sDeltaTimer % 20) < 5) {
+        return gfx; // blink cadence matches the native lap-interval readout (Hud_UpdateRaceIntervalInfo above).
+    }
+
+    if (sDeltaValue < 0) {
+        r = 40; g = 230; b = 90; // ahead of reference: green
+    } else {
+        r = 255; g = 60; b = 60; // behind reference: red
+    }
+
+    // Reuses sIntervalPositions[0][0] (120,72), the native 1-player "gap to leader" slot -- always
+    // empty on-screen in Practice mode since Hud_UpdateRaceIntervalInfo (above) bails out for
+    // GAMEMODE_PRACTICE before ever drawing there.
+    return Hud_DrawPracticeLapDeltaTimer(gfx, sDeltaValue, 120, 72, 1.0f, r, g, b);
+}
+#endif
 
 Gfx* Hud_DrawDeathRaceTimer(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 offset = 0;

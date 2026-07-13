@@ -187,6 +187,32 @@ u32 gRandMask1 = 6789;
 s32 gRandSeed2 = 9876;
 u32 gRandMask2 = 54321;
 
+#ifdef PORT
+/* G-Diffuser in-session save-state: capture of the LCG RNG state (native BSS). All four words
+   are mutated on every Math_Rand1/Math_Rand2 call (the masks too), so a faithful rewind must
+   restore all of them. Additive; port build only. See port/gdx_savestate.c. */
+unsigned int Gdx_SaveState_Rng_Size(void) {
+    return (unsigned int)(sizeof(gRandSeed1) + sizeof(gRandMask1) + sizeof(gRandSeed2) +
+                          sizeof(gRandMask2));
+}
+
+void Gdx_SaveState_Rng_Capture(void* dst) {
+    s32* p = (s32*)dst;
+    p[0] = gRandSeed1;
+    p[1] = (s32)gRandMask1;
+    p[2] = gRandSeed2;
+    p[3] = (s32)gRandMask2;
+}
+
+void Gdx_SaveState_Rng_Restore(const void* src) {
+    const s32* p = (const s32*)src;
+    gRandSeed1 = p[0];
+    gRandMask1 = (u32)p[1];
+    gRandSeed2 = p[2];
+    gRandMask2 = (u32)p[3];
+}
+#endif /* PORT */
+
 void Math_Rand1Init(s32 seed, s32 mask) {
     gRandSeed1 = seed;
     gRandMask1 = mask;
