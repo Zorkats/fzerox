@@ -137,7 +137,16 @@ void func_xk1_80025ED4(char* arg0) {
             arg0++;
         } else {
             temp_s1 = (arg0[0] << 8) + arg0[1];
+#ifdef PORT
+            /* The table is s32-typed, so it cannot hold a 64-bit host address: store the
+               OFFSET into the glyph buffer and let the draw side (func_xk1_800263B0) add
+               sGdxGlyphBufferHost. Storing base+offset here truncated the pointer and the
+               precomputed-string glyph loads sampled garbage (invisible text — e.g. the
+               Course Edit invalid-node warning message). */
+            D_xk1_8003A548[D_xk1_80030080] = (func_xk1_80025E8C(temp_s1) << 7) + 0xE00;
+#else
             D_xk1_8003A548[D_xk1_80030080] = (func_xk1_80025E8C(temp_s1) << 7) + D_xk1_8003A488 + 0xE00;
+#endif
             D_xk1_80030080++;
             arg0 += 2;
         }
@@ -227,8 +236,16 @@ Gfx* func_xk1_800260F0(Gfx* gfx, s32 arg1, s32 arg2, s32 code) {
     }
 #endif
 
+#ifdef PORT
+    /* Load through the untruncated host pointer: D_xk1_8003A488 is s32 and holds only the
+       low 32 bits of the buffer address (see func_xk1_80025F98). */
+    gDPLoadTextureBlock_4b(gfx++, sGdxGlyphBufferHost + D_xk1_8003A490, G_IM_FMT_I, 16, 16, 0,
+                           G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+                           G_TX_NOLOD);
+#else
     gDPLoadTextureBlock_4b(gfx++, D_xk1_8003A488 + D_xk1_8003A490, G_IM_FMT_I, 16, 16, 0, G_TX_NOMIRROR | G_TX_CLAMP,
                            G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+#endif
 
     gSPTextureRectangle(gfx++, arg1 << 2, arg2 << 2, (arg1 + 16) << 2, (arg2 + 16) << 2, 0, 0, 0, 1 << 10, 1 << 10);
 
@@ -260,8 +277,15 @@ Gfx* func_xk1_800262F4(Gfx* gfx, s32 arg1, s32 arg2, u8* arg3) {
 
 Gfx* func_xk1_800263B0(Gfx* gfx, s32 arg1, s32 arg2, s32 arg3) {
 
+#ifdef PORT
+    /* arg3 is a buffer OFFSET on the port (see func_xk1_80025ED4): resolve against the
+       untruncated host base at draw time. */
+    gDPLoadTextureBlock_4b(gfx++, sGdxGlyphBufferHost + (u32)arg3, G_IM_FMT_I, 16, 16, 0, G_TX_NOMIRROR | G_TX_CLAMP,
+                           G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+#else
     gDPLoadTextureBlock_4b(gfx++, arg3, G_IM_FMT_I, 16, 16, 0, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP,
                            G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+#endif
 
     gSPTextureRectangle(gfx++, arg1 << 2, arg2 << 2, (arg1 + 16) << 2, (arg2 + 16) << 2, 0, 0, 0, 1 << 10, 1 << 10);
 

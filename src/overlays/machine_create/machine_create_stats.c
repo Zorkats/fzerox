@@ -165,6 +165,17 @@ Gfx* func_xk3_80135158(Gfx* gfx) {
 extern u8 aMachineCreateBodyTex[];
 extern u8 aMachineCreateBoostTex[];
 extern u8 aMachineCreateGripTex[];
+#ifdef PORT
+/* The translated EK overlay keeps the JP segment-4 names, while the US cart
+ * stores the same English IA8 labels 0x900 bytes earlier. Bind by semantic
+ * payload, not by the incompatible JP numeric offsets. */
+extern u8 D_4002F40[];
+extern u8 D_4003140[];
+extern u8 D_4003340[];
+#define aMachineCreateBodyTex D_4002F40
+#define aMachineCreateBoostTex D_4003140
+#define aMachineCreateGripTex D_4003340
+#endif
 extern CustomMachine gCustomMachine;
 
 Gfx* MachineCreate_DrawStatSelection(Gfx* gfx, s32 left, s32 top) {

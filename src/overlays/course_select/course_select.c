@@ -19,6 +19,10 @@ UNUSED s32 D_i5_8007B080 = 0;
 #include ASSET_SOURCE_EK(overlays/course_select/course_select/course_select.c)
 #endif
 
+#ifdef PORT
+extern int gdx_ghost_library_has_player(s32 encodedCourseIndex);
+#endif
+
 s32 sCourseSelectState = COURSE_SELECT_CUP_SELECT;
 UNUSED s32 D_i5_801190C4 = 0;
 s8 gCupSelectOption = 0;
@@ -731,6 +735,11 @@ s32 CourseSelect_Update(void) {
                                 courseInfo = &gCourseInfos[i];
                                 DDSave_LoadCourseGhostRecords(i, ghostRecords);
                                 D_i5_8007B9EC[i] = 0;
+#ifdef PORT
+                                if (gdx_ghost_library_has_player(courseInfo->encodedCourseIndex)) {
+                                    D_i5_8007B9EC[i] |= 1;
+                                }
+#endif
                                 for (j = 0; j < 3; j++) {
                                     if (courseInfo->encodedCourseIndex == 0) {
                                         break;
@@ -1246,9 +1255,26 @@ Gfx* CourseSelect_HeaderDraw(Gfx* gfx, Object* headerObj) {
 }
 
 Gfx* CourseSelect_OkDraw(Gfx* gfx, Object* okObj) {
+#ifdef PORT
+    /* port/input_bridge.c. Gate the anchor emission at the call site so CVar-off builds emit
+     * a bit-identical display list to stock (the interpreter re-checks the CVars on consume). */
+    extern int gdx_widescreen_ui_active(void);
+    s32 gdxWideOk = gdx_widescreen_ui_active();
+#endif
     gfx = func_8007DB28(gfx, 0);
-    return func_80078EA0_impl(gfx, sOKCompTexInfo, OBJECT_LEFT(okObj) + 0x10B, OBJECT_TOP(okObj) + 0xD0, 1, 0, 0, 1.0f,
-                              1.0f, true);
+#ifdef PORT
+    if (gdxWideOk) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    gfx = func_80078EA0_impl(gfx, sOKCompTexInfo, OBJECT_LEFT(okObj) + 0x10B, OBJECT_TOP(okObj) + 0xD0, 1, 0, 0, 1.0f,
+                             1.0f, true);
+#ifdef PORT
+    if (gdxWideOk) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    return gfx;
 }
 
 Gfx* CourseSelect_ArrowsDraw(Gfx* gfx, Object* arrowsObj) {

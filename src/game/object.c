@@ -13,6 +13,13 @@
 #define GDX_READ_BE_U32(p) \
     (((u32)((const u8*)(p))[0] << 24) | ((u32)((const u8*)(p))[1] << 16) | \
      ((u32)((const u8*)(p))[2] << 8)  |  (u32)((const u8*)(p))[3])
+
+/* Return the decoded byte count stored in a MIO0 header.  The original N64
+ * routine is just `lw v0, 4(a0)` in the return delay slot; spell the load out
+ * so the raw big-endian header has the same meaning on little-endian hosts. */
+s32 func_800AA6BC(u8* header) {
+    return (s32) GDX_READ_BE_U32(header + 4);
+}
 #else
 #define GDX_IS_MIO0(p) (*(s32*)(p) == (s32)'MIO0')
 #endif

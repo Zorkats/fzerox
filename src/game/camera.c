@@ -1063,10 +1063,10 @@ void Camera_MatrixToMtx(MtxF* mtxF, Mtx* mtx2) {
 extern s32 D_800CCFB0;
 
 #ifdef PORT
-// ── G-Diffuser Practice photo mode: free camera ────────────────────────────────────────────────
-// Tier 2 (docs/COMING_SOON_ROADMAP.md "Practice"; docs/menu/PRACTICE_TAB.md). Gated by
-// gEnhancements.Practice.PhotoMode (default 0) AND the game's existing pause (gGamePaused != 0) --
-// we reuse the pause so the simulation is already frozen and introduce NO new time-freeze.
+// ── G-Diffuser photo mode: free camera ─────────────────────────────────────────────────────────
+// Available in every race mode and gated by the explicit ImGui toggle plus the game's existing
+// pause state. We reuse the pause so the simulation is already frozen and introduce no new
+// time-freeze.
 //
 // Reversibility is by construction: this helper only ever transforms the PRIMARY camera's
 // eye/at/fov for the current frame's matrix build. Camera_UpdateProjectionViewMtx saves those three
@@ -1076,8 +1076,7 @@ extern s32 D_800CCFB0;
 // persistent camera state is modified, so there is no separate "restore on exit" step to get wrong;
 // leaving photo mode simply stops the per-frame transform. When the CVar is 0 the very first branch
 // returns 0 without touching anything, so the default path is a byte-for-byte no-op.
-extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
-extern s8 gGamePaused;
+extern int gdx_photo_mode_active(void); // port/input_bridge.c
 extern float sinf(float angle); // PR/gu.h
 extern float cosf(float angle); // PR/gu.h
 
@@ -1139,7 +1138,7 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
     f32 fovMax = 110.0f;
 
     // Gate: feature off, sim not paused, or not the primary camera -> pure no-op (nothing written).
-    if (!CVarGetInteger("gEnhancements.Practice.PhotoMode", 0) || (gGamePaused == 0) || (camera->id != 0)) {
+    if (!gdx_photo_mode_active() || (camera->id != 0)) {
         if (sGdxPhotoActive != 0) {
             GdxPhotoCamera_ResetOffsets();
             sGdxPhotoActive = 0;
@@ -3228,7 +3227,12 @@ void Camera_UpdateRace(Camera* camera, CameraSettings* cameraSettings, CameraScr
     controller = &gControllers[gPlayerControlPorts[playerIndex]];
     settingChanged = false;
 
+#ifdef PORT
+    if (!gdx_photo_mode_active() && !(racer->stateFlags & RACER_STATE_RETIRED) &&
+        (controller->buttonPressed & BTN_CRIGHT)) {
+#else
     if (!(racer->stateFlags & RACER_STATE_RETIRED) && (controller->buttonPressed & BTN_CRIGHT)) {
+#endif
         settingChanged = true;
         if (++camera->raceSetting == CAMERA_RACE_SETTING_MAX) {
             camera->raceSetting = CAMERA_RACE_SETTING_OVERHEAD;

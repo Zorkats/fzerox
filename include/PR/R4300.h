@@ -10,6 +10,9 @@
  *									  *
  **************************************************************************/
 
+#include "PR/ultratypes.h"
+#include "libc/stdint.h" /* uintptr_t for the PORT address-translation macros below */
+
 /**************************************************************************
  *
  *  $Revision: 1.13 $

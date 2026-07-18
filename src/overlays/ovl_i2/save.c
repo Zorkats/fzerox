@@ -90,11 +90,82 @@ void Save_ReadProfileSaves(ProfileSave* profileSave) {
 extern Ghost gGhosts[];
 extern s32 gCurrentGhostType;
 
+#ifdef PORT
+extern int gdx_ghost_library_archive_sram(void);
+extern int gdx_ghost_library_load_selected(s32 encodedCourseIndex, Ghost* outGhosts, s32 capacity);
+extern int gdx_ghost_library_save_player(s32 courseIndex, const Ghost* ghost);
+
+static Ghost sGdxSelectedGhosts[3];
+
+static void Gdx_LoadLibraryPlayerGhosts(s32 encodedCourseIndex) {
+    s32 locked[3] = { false, false, false };
+    s32 selectedCount;
+    s32 i;
+    s32 j;
+
+    selectedCount = gdx_ghost_library_load_selected(encodedCourseIndex, sGdxSelectedGhosts, 3);
+    if (selectedCount <= 0) {
+        return;
+    }
+    /* Defensive clamp at the ABI boundary: the loader is passed capacity 3, but the loop
+     * below indexes sGdxSelectedGhosts[3] and must never trust a larger return value. */
+    if (selectedCount > 3) {
+        selectedCount = 3;
+    }
+
+    for (i = 0; i < selectedCount; i++) {
+        s32 ghostIndex = -1;
+        s32 slowestTime = -1;
+
+        /* If vanilla SRAM/session loading already staged this replay, keep it and protect its slot. */
+        for (j = 0; j < 3; j++) {
+            if (!locked[j] && (gGhosts[j].encodedCourseIndex == encodedCourseIndex) &&
+                (gGhosts[j].ghostType == GHOST_PLAYER) &&
+                (gGhosts[j].raceTime == sGdxSelectedGhosts[i].raceTime) &&
+                (gGhosts[j].replayChecksum == sGdxSelectedGhosts[i].replayChecksum)) {
+                ghostIndex = j;
+                break;
+            }
+        }
+        /* Chosen persistent ghosts are authoritative. Prefer an empty/non-matching slot; if all
+         * remaining slots hold valid session ghosts, replace the slowest unprotected one. */
+        if (ghostIndex < 0) {
+            for (j = 0; j < 3; j++) {
+                if (!locked[j] && ((gGhosts[j].encodedCourseIndex == 0) ||
+                                   (gGhosts[j].encodedCourseIndex != encodedCourseIndex) ||
+                                   (gGhosts[j].ghostType != GHOST_PLAYER))) {
+                    ghostIndex = j;
+                    break;
+                }
+            }
+        }
+        if (ghostIndex < 0) {
+            for (j = 0; j < 3; j++) {
+                if (!locked[j] && gGhosts[j].raceTime > slowestTime) {
+                    slowestTime = gGhosts[j].raceTime;
+                    ghostIndex = j;
+                }
+            }
+        }
+        if (ghostIndex >= 0) {
+            gGhosts[ghostIndex] = sGdxSelectedGhosts[i];
+            locked[ghostIndex] = true;
+        }
+    }
+}
+#endif
+
 s32 Save_LoadGhost(s32 courseIndex) {
     s32 i;
     s32 sp18;
     s32 encodedCourseIndex = gCourseInfos[courseIndex].encodedCourseIndex;
     Ghost* ghost = gGhosts;
+
+#ifdef PORT
+    // Migrate a pre-library cartridge-slot ghost before any later vanilla overwrite. Failures are
+    // deliberately non-fatal: SRAM compatibility and the original loader remain authoritative.
+    gdx_ghost_library_archive_sram();
+#endif
 
     for (i = 0; i < 3; i++) {
         if (encodedCourseIndex != ghost->encodedCourseIndex) {
@@ -112,6 +183,9 @@ s32 Save_LoadGhost(s32 courseIndex) {
             sp18 = Save_LoadPlayerGhost_impl(courseIndex, encodedCourseIndex, -1);
 #else
             sp18 = func_i2_800A5F58(courseIndex, encodedCourseIndex);
+#ifdef PORT
+            Gdx_LoadLibraryPlayerGhosts(encodedCourseIndex);
+#endif
 #endif
             break;
         case GHOST_STAFF:
@@ -800,10 +874,19 @@ s32 Save_SaveGhost(s32 courseIndex, Ghost* ghost) {
     GhostData* ghostData = &gSaveContext.ghostSave.data;
 #endif
 
+#ifdef PORT
+    // Preserve the cartridge slot's previous player ghost before vanilla replaces it.
+    gdx_ghost_library_archive_sram();
+#endif
+
     Save_SaveGhostRecord(ghost);
     Save_WriteGhostRecord(ghostRecord);
     Save_SaveGhostData(ghost);
     Save_WriteGhostData(ghostData);
+#ifdef PORT
+    // The host library is additive. A disk error must never invalidate the successful vanilla save.
+    gdx_ghost_library_save_player(courseIndex, ghost);
+#endif
     return 0;
 }
 
@@ -832,6 +915,11 @@ s32 Save_Init(SaveContext* saveContext, s32 arg1) {
     Save_CreateNew(saveContext, arg1);
     Save_InitWrite(saveContext);
     Save_Load(saveContext);
+#ifdef PORT
+    // Migrate an existing cartridge-slot player ghost only after the save has been fully loaded.
+    // Doing this here avoids any GUI-startup ordering dependency.
+    gdx_ghost_library_archive_sram();
+#endif
     return 0;
 }
 

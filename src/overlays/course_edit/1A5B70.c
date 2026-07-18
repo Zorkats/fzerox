@@ -185,6 +185,10 @@ void func_xk2_800F4580(Gfx** gfxP) {
 extern Gfx D_3000510[];
 extern unk_80128C94* D_80128C94;
 extern unk_80128C94 D_6000000;
+#ifdef PORT
+/* D_6000000 is the N64 segment-6 token, not independent storage. */
+#define D_6000000 (*D_80128C94)
+#endif
 
 extern u16 D_xk2_80105540[];
 extern s32 D_xk2_801195E0;

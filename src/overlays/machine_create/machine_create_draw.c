@@ -318,7 +318,11 @@ void func_xk3_8012F7AC(Gfx** gfxP, char* arg1) {
     u16 sp6A;
     u16 sp68;
     u8 sp67;
-    char sp44[35];
+    /* Was [35]: func_xk1_80026830 (expansion_kit/A3AA0.c) expands EACH source byte to two
+       output bytes plus a NUL, so any name longer than 17 bytes overruns the buffer —
+       the same stack-overrun class as MachineCreate_DrawWeight's weighStr above. Sized
+       for the longest possible machine-name expansion. */
+    char sp44[80];
     u8 sp43 = 0;
 
     gfx = *gfxP;
@@ -366,7 +370,12 @@ extern u8 aMachineCreateKgTex[];
 
 Gfx* MachineCreate_DrawWeight(Gfx* gfx, s32 left, s32 top, s32 weight) {
     u8 i;
-    signed char weighStr[4];
+    /* Was [4]: a latent retail bug. 4-digit weights are EXPECTED here (the x-position
+       branch below tests weight >= 1000; the Super machine table carries 2210/1840),
+       and sprintf then writes 5 bytes (4 digits + NUL) — a 1-byte stack overrun that
+       landed in padding on console but trips MSVC /RTC stack checks on the port
+       (crash when the Parts screen drew a >=1000 kg machine). Sized for any s32. */
+    signed char weighStr[12];
 
     gSPDisplayList(gfx++, D_xk3_801373F0);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);

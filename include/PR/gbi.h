@@ -197,6 +197,18 @@
 #define G_TEXRECTFLIP		0xe5	/* -27 */
 #define G_TEXRECT		0xe4	/* -28 */
 
+#ifdef PORT
+/* LibUltraShip custom command used by G-Diffuser to scope aspect-aware 2D draws. */
+#define G_EXTRAGEOMETRYMODE 0x3a
+
+#define G_EX_INVERT_CULLING             0x00000001
+#define G_EX_ALWAYS_EXECUTE_BRANCH      0x00000002
+#define G_EX_WIDESCREEN_STRETCH         0x00000004
+#define G_EX_WIDESCREEN_ANCHOR_LEFT     0x00000008
+#define G_EX_WIDESCREEN_ANCHOR_RIGHT    0x00000010
+#define G_EX_WIDESCREEN_DISTRIBUTE      0x00000020
+#endif
+
 
 /* 
  * The following commands are the "generated" RDP commands; the user
@@ -2910,6 +2922,19 @@ typedef union {
 #define	gsSPClearGeometryMode(word)	gsSPGeometryMode((word),0)
 #define	gSPLoadGeometryMode(pkt, word)	gSPGeometryMode((pkt),-1,(word))
 #define	gsSPLoadGeometryMode(word)	gsSPGeometryMode(-1,(word))
+
+#ifdef PORT
+#define gSPExtraGeometryMode(pkt, c, s)                                    \
+{                                                                          \
+	Gfx *_g = (Gfx *)(pkt);                                                 \
+	_g->words.w0 = _SHIFTL(G_EXTRAGEOMETRYMODE,24,8) |                     \
+	               _SHIFTL(~(u32)(c),0,24);                                \
+	_g->words.w1 = (u32)(s);                                                \
+}
+
+#define gSPSetExtraGeometryMode(pkt, word) gSPExtraGeometryMode((pkt),0,(word))
+#define gSPClearExtraGeometryMode(pkt, word) gSPExtraGeometryMode((pkt),(word),0)
+#endif
 
 #else	/* F3DEX_GBI_2 */
 #define	gSPSetGeometryMode(pkt, word)					\

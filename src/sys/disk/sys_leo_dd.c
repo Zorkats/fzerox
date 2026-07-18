@@ -2,6 +2,14 @@
 #include "leo/leo_internal.h"
 #include "leo/mfs.h"
 
+#ifdef PORT
+/* Host format guard (port/disk_savefile.cpp): default-off predicate plus an
+   always-on refusal log. Raw externs -- this decomp TU cannot include the host
+   headers. Used by the D6 template-write guard in func_80706518 below. */
+extern int gdx_disk_allow_format(void);
+extern void gdx_disk_log_format_refused(void);
+#endif
+
 s32 sSLLeoReadWriteBlocksSize;
 LEOStatus D_800E32E0;
 LEOCmd D_800E32E8;
@@ -941,6 +949,21 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
     PRINTF("SLMFSMediaInit Mario Artist Custum !!\n");
     PRINTF("correct disk !!\n");
     PRINTF("MEDIA INIT OK !!\n");
+
+#ifdef PORT
+    /* Port D6 guard: this routine template-formats the MFS RAM area (the write
+       burst below). Gate the whole format behind the host format predicate
+       (default off) so an uninitialized or foreign disk is never auto-formatted
+       unprompted -- which, with the durable disk sidecar, would wipe the user's
+       prior saved content. When refused, skip the format entirely; both the
+       template read and its paired completion wait are skipped together, so the
+       Leo message queue stays balanced and the game continues as if the disk is
+       not yet initialized. Port-only: hardware builds keep retail behavior. */
+    if (!gdx_disk_allow_format()) {
+        gdx_disk_log_format_refused();
+        return;
+    }
+#endif
 
     func_80707B08();
 

@@ -379,6 +379,27 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
     if (gInCourseEditTestRun) {
         return gfx;
     }
+
+#ifdef PORT
+    // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Default 0 =
+    // bit-identical to stock N64 (this whole block, and every consumer below, is PORT-only). When
+    // on, the selected/checker node parity flips every two frames instead of every frame and the
+    // flagged-node size pulse advances at half rate, halving the ~20 Hz Course Edit strobe on
+    // modern displays. Read once per draw call, mirroring the file's other PORT blocks. The blink
+    // parity D_800DCCFC and the frame counter gGameFrameCount both advance once per rendered frame
+    // (sys_gfx.c), so gGameFrameCount&2 is exactly half the native flip rate. See port/gdx_menu.cpp
+    // DrawGameplayMenu for the toggle.
+    extern int CVarGetInteger(const char* name, int defaultValue);
+    s32 gdxReduceFlash = CVarGetInteger("gEnhancements.Gameplay.ReduceEditorFlashing", 0);
+    s32 gdxBlinkPhase = gdxReduceFlash ? ((gGameFrameCount & 2) != 0) : (D_800DCCFC != 0);
+    u32 gdxPulseFrame = gdxReduceFlash ? (gGameFrameCount / 2) : gGameFrameCount;
+#define GDX_EDIT_BLINK gdxBlinkPhase
+#define GDX_EDIT_PULSE (gdxPulseFrame % 10)
+#else
+#define GDX_EDIT_BLINK (D_800DCCFC != 0)
+#define GDX_EDIT_PULSE (gGameFrameCount % 10)
+#endif
+
     spC0 = func_xk2_800EFDE4(150.0f);
     gSPDisplayList(gfx++, D_9014C60);
 
@@ -386,12 +407,12 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
         gDPPipeSync(gfx++);
         if (D_80128690[i].unk_08 != 0) {
             gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
-        } else if ((i == D_800D6CA0.unk_1C) && (D_800DCCFC != 0)) {
+        } else if ((i == D_800D6CA0.unk_1C) && GDX_EDIT_BLINK) {
             gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
-        } else if ((i == D_800D6CA0.unk_20) && (D_800DCCFC != 0)) {
+        } else if ((i == D_800D6CA0.unk_20) && GDX_EDIT_BLINK) {
             gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
         } else if ((i == spC0) && (D_800D6CA0.unk_00 != 1)) {
-            if (D_800DCCFC != 0) {
+            if (GDX_EDIT_BLINK) {
                 gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
             } else {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
@@ -413,7 +434,7 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
         }
 
         if (D_80128690[i].unk_08 != 0) {
-            var_fs1 = ((gGameFrameCount % 10) * 0.2f) + 1.0f;
+            var_fs1 = (GDX_EDIT_PULSE * 0.2f) + 1.0f;
         } else {
             var_fs1 = 1.0f;
         }
@@ -422,6 +443,8 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
                             Math_Round(spBC + (4.0f * var_fs1)) << 2, Math_Round(spB8 + (4.0f * var_fs1)) << 2, 0, 0, 0,
                             Math_Round((1 << 10) / var_fs1), Math_Round((1 << 10) / var_fs1));
     }
+#undef GDX_EDIT_BLINK
+#undef GDX_EDIT_PULSE
     return gfx;
 }
 
@@ -446,6 +469,10 @@ s32 func_xk2_800E08FC(s32 arg0) {
 }
 
 extern unk_80128C94 D_6000000;
+#ifdef PORT
+/* D_6000000 is the N64 segment-6 token, not independent storage. */
+#define D_6000000 (*D_80128C94)
+#endif
 
 extern s32 D_800DCD04;
 extern s32 gCreateOption;
@@ -2074,7 +2101,7 @@ void func_xk2_800E7028(s32 arg0) {
         }
     }
     gfx = D_xk2_80136EF8;
-    for (i = 0; i < 120; i++) {
+    for (i = 0; i < (30 * 30); i++) {
         vtx = &D_xk2_80128DF8[i * 4];
         gSPVertex(gfx++, vtx, 4, 0);
         gSP2Triangles(gfx++, 2, 1, 0, 0, 1, 2, 3, 0);

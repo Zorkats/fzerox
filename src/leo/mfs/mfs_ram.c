@@ -2,6 +2,14 @@
 #include "macros.h"
 #include "libc/stddef.h"
 
+#ifdef PORT
+/* Host format guard (port/disk_savefile.cpp): default-off predicate plus an
+   always-on refusal log. Raw externs -- this decomp TU cannot include the host
+   headers. Used by the D6 auto-format guard in Mfs_ValidateRamVolume below. */
+extern int gdx_disk_allow_format(void);
+extern void gdx_disk_log_format_refused(void);
+#endif
+
 void func_i1_80403D30(void) {
     osCreateMesgQueue(&D_i1_8042A5E8, D_i1_8042A5E4, ARRAY_COUNT(D_i1_8042A5E4));
 }
@@ -386,21 +394,28 @@ s32 Mfs_ValidateRamVolume(void) {
 
     if (j != 0) {
 #ifdef PORT
-        /* Port: an unformatted/foreign RAM area would normally raise
-           N64DD_MEDIA_NOT_INIT and route through the interactive format
-           prompt, which the port cannot present. Auto-format instead so the
-           EK boots on disks with a blank MFS RAM area. Port-only: hardware
-           builds keep the retail error path. */
+        /* Port D6 guard: an unformatted/foreign RAM area would normally raise
+           N64DD_MEDIA_NOT_INIT and route through the interactive format prompt,
+           which the port cannot present. The port historically auto-formatted
+           here so the EK boots on a blank MFS RAM area -- but that fires
+           unprompted and, with the durable disk sidecar, would overwrite the
+           user's prior saved RAM area. Gate the auto-format behind the host
+           format predicate (default off). When allowed, format as before; when
+           refused, fall through to the retail not-initialized path (no disk
+           write) so the game continues exactly as for a not-yet-initialized
+           disk. Port-only: hardware builds keep the retail error path. */
+        if (gdx_disk_allow_format()) {
 #if MFS_VERSION == MFS_VERSION_A
-        Mfs_InitRamArea(1);
+            Mfs_InitRamArea(1);
 #else
-        Mfs_InitRamArea(1, 0, NULL);
+            Mfs_InitRamArea(1, 0, NULL);
 #endif
-        return 0;
-#else
+            return 0;
+        }
+        gdx_disk_log_format_refused();
+#endif
         gMfsError = N64DD_MEDIA_NOT_INIT;
         return -1;
-#endif
     }
     return 0;
 }

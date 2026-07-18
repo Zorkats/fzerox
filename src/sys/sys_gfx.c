@@ -75,6 +75,15 @@ uintptr_t gSegment1E23F0VramStart;
 uintptr_t gSegment1E23F0VramEnd;
 uintptr_t gSegment22B0A0VramStart;
 uintptr_t gSegment22B0A0VramEnd;
+#ifdef PORT
+/* Segment 9 has two mutually-exclusive owners in the Expansion Kit. Keep
+ * separate persistent carves so host command-range metadata from one image
+ * can never describe bytes after the other image replaces it. */
+uintptr_t gGdxMachineModelsVramStart;
+uintptr_t gGdxMachineModelsVramEnd;
+uintptr_t gGdxCourseEditTexturesVramStart;
+uintptr_t gGdxCourseEditTexturesVramEnd;
+#endif
 uintptr_t gSegment235130VramStart;
 uintptr_t gSegment235130VramEnd;
 uintptr_t gSegment2738A0VramStart;
@@ -381,17 +390,61 @@ void Game_ThreadEntry(void* entry) {
             (size_t)(PORT_create_machine_textures_ROM_END - PORT_create_machine_textures_ROM_START);
         size_t seg4Size = (hudSize > createMachineSize) ? hudSize : createMachineSize;
         size_t seg7Size = (size_t)(PORT_machine_global_gfx_ROM_END - PORT_machine_global_gfx_ROM_START);
-        size_t modelsSize = (size_t)(PORT_machine_models_ROM_END - PORT_machine_models_ROM_START);
+        size_t modelsSize = 0x186C8u;
+        size_t courseEditSize = 0;
         void* seg4buf = gdx_rdram_alloc_raw(seg4Size, 16u);
         void* seg7buf = gdx_rdram_alloc_raw(seg7Size, 16u);
-        void* modelsBuf = gdx_rdram_alloc_raw(modelsSize, 16u);
+        void* modelsBuf;
+        void* courseEditBuf = NULL;
+
+        /* machine_models is MIO0-compressed in the ROM. The old carve used
+         * the compressed span (0xA090) as segment capacity even though the
+         * console exposes the 0x186C8-byte decoded image at segment 9. Read
+         * the authoritative decoded size from the MIO0 header, retaining the
+         * known retail size as a guarded fallback. */
+        {
+            extern unsigned char* gdx_rom_buffer;
+            extern size_t gdx_rom_size;
+            const size_t start = (size_t)PORT_machine_models_ROM_START;
+            if (gdx_rom_buffer != NULL && start + 8u <= gdx_rom_size &&
+                gdx_rom_buffer[start + 0] == 'M' && gdx_rom_buffer[start + 1] == 'I' &&
+                gdx_rom_buffer[start + 2] == 'O' && gdx_rom_buffer[start + 3] == '0') {
+                size_t decoded = ((size_t)gdx_rom_buffer[start + 4] << 24) |
+                                 ((size_t)gdx_rom_buffer[start + 5] << 16) |
+                                 ((size_t)gdx_rom_buffer[start + 6] << 8) |
+                                 (size_t)gdx_rom_buffer[start + 7];
+                if (decoded != 0 && decoded <= 0x1000000u) {
+                    modelsSize = decoded;
+                }
+            }
+        }
+#ifdef EXPANSION_KIT
+        {
+            extern unsigned int gdx_ek_segment_image_size(unsigned char segment);
+            courseEditSize = (size_t)gdx_ek_segment_image_size(9u);
+        }
+#endif
+        modelsBuf = gdx_rdram_alloc_raw(modelsSize, 16u);
+        if (courseEditSize != 0) {
+            courseEditBuf = gdx_rdram_alloc_raw(courseEditSize, 16u);
+        }
 
         gSegment1B8550VramStart = (uintptr_t)((unsigned char*)seg4buf - gdx_rdram);
         gSegment1B8550VramEnd = gSegment1B8550VramStart + seg4Size;
         gSegment1E23F0VramStart = (uintptr_t)((unsigned char*)seg7buf - gdx_rdram);
         gSegment1E23F0VramEnd = gSegment1E23F0VramStart + seg7Size;
-        gSegment22B0A0VramStart = (uintptr_t)((unsigned char*)modelsBuf - gdx_rdram);
-        gSegment22B0A0VramEnd = gSegment22B0A0VramStart + modelsSize;
+        gGdxMachineModelsVramStart = (uintptr_t)((unsigned char*)modelsBuf - gdx_rdram);
+        gGdxMachineModelsVramEnd = gGdxMachineModelsVramStart + modelsSize;
+        if (courseEditBuf != NULL) {
+            gGdxCourseEditTexturesVramStart =
+                (uintptr_t)((unsigned char*)courseEditBuf - gdx_rdram);
+            gGdxCourseEditTexturesVramEnd = gGdxCourseEditTexturesVramStart + courseEditSize;
+        } else {
+            gGdxCourseEditTexturesVramStart = 0;
+            gGdxCourseEditTexturesVramEnd = 0;
+        }
+        gSegment22B0A0VramStart = gGdxMachineModelsVramStart;
+        gSegment22B0A0VramEnd = gGdxMachineModelsVramEnd;
     }
 #endif /* PORT */
 
@@ -608,6 +661,21 @@ void Game_ThreadEntry(void* entry) {
         Dma_LoadAssets(SEGMENT_ROM_START(setup_gfx),
                        osPhysicalToVirtual(gSegment17B1E0VramStart),
                        SEGMENT_ROM_SIZE(setup_gfx));
+        /* Byte-order pass for the segment-3 carve (2026-07-15, NINTEX/Overhead sign root
+           cause): setup_gfx is the only decoration source that segment 8's fixup above does
+           not cover. The NINTEX and Overhead sign draw functions pull their texture-load and
+           geometry DLs (D_3000590/D_30005D8/D_3000688/D_30006D0) plus embedded Vtx blocks
+           (D_3000608/D_30006F8) from this segment, and gSegments[3] serves this carve raw --
+           unswapped s16 vertex coordinates exploded the boards and corrupted Gfx words turned
+           the sign texture into a screen-covering smear. Same generated fixup table, same
+           pattern as the segment-8 call above. */
+        {
+            extern void gdx_fixup_asset_segment_image(unsigned char segment, unsigned int rom_base,
+                                                      unsigned char* data, unsigned int size);
+            gdx_fixup_asset_segment_image(0x03u, PORT_setup_gfx_ROM_START,
+                                          (unsigned char*) osPhysicalToVirtual(gSegment17B1E0VramStart),
+                                          (unsigned int) (PORT_setup_gfx_ROM_END - PORT_setup_gfx_ROM_START));
+        }
         Dma_LoadAssets(SEGMENT_ROM_START(machine_custom_gfx),
                        osPhysicalToVirtual(gSegment17B960VramStart),
                        SEGMENT_ROM_SIZE(machine_custom_gfx));

@@ -546,12 +546,37 @@ void EndingCutsceneEffects_Update(void) {
                                 }
                                 break;
                             case FIREWORKS_STYLE_CHARACTER:
+#ifdef PORT
+                                {
+                                    // PORT hardening: sCharacterFireworkBuffer is filled at
+                                    // init from a common-asset via func_80077CF0. If that asset
+                                    // fails to resolve on the port (o2r/cache miss serving zero
+                                    // bytes), the buffer can be all-zero and this scan would
+                                    // never find a set bit, spinning forever and hard-hanging the
+                                    // game fiber on the frozen podium frame (the GP-ceremony
+                                    // softlock). Bound the scan to the bitmask size so a bad
+                                    // buffer degrades to a plain burst instead of an infinite
+                                    // loop, letting the launcher recycle and the ceremony advance.
+                                    s32 scanGuard = 0x1000;
+                                    while (!(sCharacterFireworkBuffer[var_s1 >> 3] &
+                                             sFireworksBitMask[var_s1 & 7])) {
+                                        var_s1++;
+                                        if (var_s1 >= 0x1000) {
+                                            var_s1 = 0;
+                                        }
+                                        if (--scanGuard <= 0) {
+                                            break;
+                                        }
+                                    }
+                                }
+#else
                                 while (!(sCharacterFireworkBuffer[var_s1 >> 3] & sFireworksBitMask[var_s1 & 7])) {
                                     var_s1++;
                                     if (var_s1 >= 0x1000) {
                                         var_s1 = 0;
                                     }
                                 }
+#endif
 
                                 temp_fv0_6 = -(((var_s1 & 0x3F) - 0x20) * 0.12f);
 

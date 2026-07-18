@@ -1377,10 +1377,17 @@ void AudioLoad_SyncDma(uintptr_t devAddr, u8* ramAddr, size_t size, s32 medium) 
 
 void AudioLoad_SyncDiskDrive(uintptr_t devAddr, u8* ramAddr, size_t size, s32 lba) {
     uintptr_t adjustedDevAddr = devAddr;
+    s32 startLba;
     s32 pad;
 
     Audio_InvalDCache(ramAddr, size);
-    AudioLoad_DiskDrive(AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr), adjustedDevAddr, ramAddr, size);
+    /* GetStartLbaAddr MUTATES adjustedDevAddr, which is also passed by value in
+       the same argument list. C leaves argument evaluation order unspecified:
+       GCC captured the PRE-walk devAddr (MSVC the post-walk one), so any load
+       whose devAddr crosses an LBA boundary read from the wrong disk offset on
+       Linux. Sequence the calls. Same fix at every GetStartLbaAddr call site. */
+    startLba = AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr);
+    AudioLoad_DiskDrive(startLba, adjustedDevAddr, ramAddr, size);
 }
 
 s32 AudioLoad_Dma(OSIoMesg* mesg, u32 priority, s32 direction, uintptr_t devAddr, void* ramAddr, size_t size,
@@ -1967,10 +1974,13 @@ void AudioLoad_DmaSlowCopy(AudioSlowLoad* slowLoad, ssize_t size) {
 
 void AudioLoad_DmaSlowCopyDiskDrive(uintptr_t devAddr, u8* ramAddr, size_t size, s32 lba) {
     uintptr_t adjustedDevAddr;
+    s32 startLba;
 
     adjustedDevAddr = devAddr;
     Audio_InvalDCache(ramAddr, size);
-    AudioLoad_DiskDrive(AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr), adjustedDevAddr, ramAddr, size);
+    /* Sequenced: unspecified argument evaluation order (see AudioLoad_SyncDiskDrive). */
+    startLba = AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr);
+    AudioLoad_DiskDrive(startLba, adjustedDevAddr, ramAddr, size);
 }
 
 s32 AudioLoad_SlowLoadSeq(s32 seqId, u8* ramAddr, s8* status) {
@@ -2007,6 +2017,20 @@ s32 AudioLoad_SlowLoadSeq(s32 seqId, u8* ramAddr, s8* status) {
 
 extern AudioDiskInfo D_806F2350;
 
+#ifdef PORT
+/* The async disk loader shared D_806F2348 (tag + staging buffer) with every
+   synchronous disk read. AudioLoad_ReadWriteDisk stamps pair->lba at REQUEST
+   time (not completion) and AudioLoad_DiskLoad's partial-block bcopys never
+   re-check the tag, so a sync sequence/sample read issued while an async font
+   load was in flight (music changes load both) swapped the staging buffer
+   contents between the stamp and the copy. The font header then converted
+   garbage offsets — the Linux gameplay SIGSEGV in gdx_fontconv_tuned_sample.
+   The boot-time loader already owns a private pair (see func_80738A04's
+   struct); give the async loader one too. */
+static u8 sAsyncLbaBuffer[0x4D10];
+static LbaVaddrPair sAsyncLbaVaddrPair;
+#endif
+
 void AudioLoad_InitAsyncLoads(void) {
     s32 i;
 
@@ -2017,7 +2041,13 @@ void AudioLoad_InitAsyncLoads(void) {
     osCreateMesgQueue(&gAudioCtx.asyncLoadDiskDriveQueue, gAudioCtx.asyncLoadDiskDriveMsgBuf,
                       ARRAY_COUNT(gAudioCtx.asyncLoadDiskDriveMsgBuf));
     gAudioCtx.curDiskDriveLoad = NULL;
+#ifdef PORT
+    sAsyncLbaVaddrPair.lba = -1;
+    sAsyncLbaVaddrPair.vAddr = sAsyncLbaBuffer;
+    D_806F2350.lbaVaddrPair = &sAsyncLbaVaddrPair;
+#else
     D_806F2350.lbaVaddrPair = &D_806F2348;
+#endif
 }
 
 AudioAsyncLoad* AudioLoad_StartAsyncLoadDiskDrive(s32 lba, uintptr_t devAddr, void* ramAddr, size_t size, s32 medium,
@@ -2113,12 +2143,18 @@ void AudioLoad_ProcessAsyncLoads(s32 resetStatus) {
 void AudioLoad_ProcessAsyncLoadDiskDrive(AudioAsyncLoad* asyncLoad, s32 resetStatus) {
     s32 pad[2];
     uintptr_t adjustedDevAddr;
+    s32 startLba;
 
     if (asyncLoad->delay == 3) {
         adjustedDevAddr = asyncLoad->curDevAddr;
         Audio_InvalDCache(asyncLoad->curRamAddr, asyncLoad->bytesRemaining);
-        AudioLoad_DiskInit(&D_806F2350, AudioLoad_GetStartLbaAddr(asyncLoad->diskLba, &adjustedDevAddr),
-                           adjustedDevAddr, asyncLoad->curRamAddr, asyncLoad->bytesRemaining);
+        /* Sequenced: unspecified argument evaluation order (see AudioLoad_SyncDiskDrive).
+           THIS was the Linux gameplay soundfont crash: GCC passed the pre-walk devAddr
+           alongside the post-walk lba, DiskLoad computed a negative first block, and the
+           font buffer received the next LBA's sample data (instOffset 0x3D89009A). */
+        startLba = AudioLoad_GetStartLbaAddr(asyncLoad->diskLba, &adjustedDevAddr);
+        AudioLoad_DiskInit(&D_806F2350, startLba, adjustedDevAddr, asyncLoad->curRamAddr,
+                           asyncLoad->bytesRemaining);
         asyncLoad->delay = 0;
     } else if (resetStatus != 0) {
         do {
@@ -2236,10 +2272,13 @@ void AudioLoad_AsyncDma(AudioAsyncLoad* asyncLoad, size_t size) {
 
 void AudioLoad_AsyncDiskDrive(uintptr_t devAddr, u8* ramAddr, size_t size, s32 lba) {
     uintptr_t adjustedDevAddr;
+    s32 startLba;
 
     adjustedDevAddr = devAddr;
     Audio_InvalDCache(ramAddr, size);
-    AudioLoad_DiskDrive(AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr), adjustedDevAddr, ramAddr, size);
+    /* Sequenced: unspecified argument evaluation order (see AudioLoad_SyncDiskDrive). */
+    startLba = AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr);
+    AudioLoad_DiskDrive(startLba, adjustedDevAddr, ramAddr, size);
 }
 
 #ifndef PORT
@@ -2794,6 +2833,20 @@ s32 AudioLoad_DiskLoad(AudioDiskInfo* diskInfo) {
             }
 
             diskInfo->blockSize = AudioLoad_LbaToBlockSize(diskInfo->finalLba) - diskInfo->devAddr;
+#ifdef PORT
+            /* Unreachable when GetStartLbaAddr ran correctly (walk postcondition:
+               devAddr < block size). A negative block silently corrupted the load
+               once (the sequencing bug above) — make any recurrence loud. */
+            if (diskInfo->blockSize < 0) {
+                extern void gdx_cki(const char* s, int v);
+                static int sNegBlockLogs = 0;
+                if (sNegBlockLogs < 4) {
+                    sNegBlockLogs++;
+                    gdx_cki("[audio-diag] DiskLoad NEGATIVE first block, lba", diskInfo->finalLba);
+                    gdx_cki("[audio-diag] DiskLoad NEGATIVE first block, devAddr", (int) diskInfo->devAddr);
+                }
+            }
+#endif
             if (diskInfo->bytesRemaining < diskInfo->blockSize) {
                 diskInfo->blockSize = diskInfo->bytesRemaining;
             }
@@ -2906,8 +2959,14 @@ s32 func_807389AC(unk_807C1948* arg0) {
     return -1;
 }
 
-s32 func_80738A04(unk_807C1948* arg0, s32 ramAddr, s32 bytesRemaining) {
+/* ramAddr is a RAM DESTINATION POINTER (passed straight to AudioLoad_DiskInit's u8* ramAddr).
+ * It was typed s32, which truncated the 64-bit heap pointer the caller passes
+ * (arg0->unk_00 + arg0->unk_08). Harmless on Windows/LLP64 where the audio heap sits in the
+ * low 4 GB, but on LP64 Linux the heap is above 4 GB and the DMA wrote to a truncated address
+ * (garbage sample/font data at the intended buffer). Use uintptr_t. */
+s32 func_80738A04(unk_807C1948* arg0, uintptr_t ramAddr, s32 bytesRemaining) {
     uintptr_t adjustedDevAddr;
+    s32 startLba;
 
     if (arg0->unk_24 != 0) {
         return 0;
@@ -2918,8 +2977,9 @@ s32 func_80738A04(unk_807C1948* arg0, s32 ramAddr, s32 bytesRemaining) {
         bytesRemaining = (bytesRemaining - arg0->unk_20) + arg0->sampleSize;
         arg0->unk_20 = 0;
     }
-    AudioLoad_DiskInit(&arg0->diskInfo, AudioLoad_GetStartLbaAddr(arg0->unk_10, &adjustedDevAddr), adjustedDevAddr,
-                       ramAddr, bytesRemaining);
+    /* Sequenced: unspecified argument evaluation order (see AudioLoad_SyncDiskDrive). */
+    startLba = AudioLoad_GetStartLbaAddr(arg0->unk_10, &adjustedDevAddr);
+    AudioLoad_DiskInit(&arg0->diskInfo, startLba, adjustedDevAddr, (u8*) ramAddr, bytesRemaining);
     arg0->unk_24 = 1;
     return bytesRemaining;
 }

@@ -74,6 +74,10 @@ extern Mtx D_2000000[];
 extern bool gInCourseEditTestRun;
 extern unk_80128C94 D_6000000;
 extern unk_80128C94* D_80128C94;
+#ifdef PORT
+/* D_6000000 is the N64 segment-6 token, not independent storage. */
+#define D_6000000 (*D_80128C94)
+#endif
 
 #ifdef NON_MATCHING
 // stack

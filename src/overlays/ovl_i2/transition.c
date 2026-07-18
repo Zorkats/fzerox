@@ -497,6 +497,9 @@ void Transition_PopQueue(Transition* transition) {
 
 Gfx* Transition_Draw(Gfx* gfx) {
     Transition* transition = &sTransition;
+#ifdef PORT
+    s32 gdxWideTransition = false;
+#endif
 
     if (!(transition->flags & TRANSITION_FLAG_DRAW)) {
         return gfx;
@@ -505,7 +508,63 @@ Gfx* Transition_Draw(Gfx* gfx) {
     gDPPipeSync(gfx++);
     gDPSetCycleType(gfx++, G_CYC_1CYCLE);
 
+#ifdef PORT
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue);
+        extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
+        /* The transition redraws a CAPTURED frame. Whenever the live game renders widescreen
+           (3D Widescreen on), that capture holds a 16:9 composite and must be stretched back
+           to the full viewport, or the whole screen visibly squeezes into a centered 4:3 box
+           for the duration of the wipe (owner-reported main menu -> Cup Select shrink).
+           This is gated on the 3D Widescreen CVar alone -- NOT WidescreenUI, which only
+           governs 2D element anchoring -- and stays off for forced-4:3 editor frames so
+           their transitions match the pillarboxed content. The fixed-aspect flag is a live
+           process global (republished at the mode flip in game.c), so this read is correct
+           even on the exact frame an editor is exited. */
+        gdxWideTransition = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
+                            !gdx_get_force_fixed_aspect();
+        /* GDX-DEBUG-2026-07-15: one bounded line per transition instance (fires when
+           activeTransitionType changes to a new non-NONE value). Compares first vs
+           subsequent Cup Select / Options visits: type, appear direction, whether the
+           STRETCH scope is emitted, live Widescreen/ForceFixedAspect CVars, and the
+           game mode the transition belongs to. Remove once #3/#4 are root-caused. */
+        {
+            extern void gdx_dbg_logf(const char* fmt, ...);
+            static u32 sGdxDbgSig = 0xFFFFFFFFu;
+            static s32 sGdxDbgCount = 0;
+            /* Log when the (type, appear, mode, wide) signature changes so every distinct
+               transition instance is captured -- including two consecutive wipes of the
+               same type into different game modes (the earlier type-only dedup lost the
+               Cup Select entry because it reused the title wipe's type). */
+            u32 sig = ((u32)(transition->activeTransitionType & 0xFF) << 16) |
+                      ((u32)(transition->appearType & 0xFF) << 8) |
+                      ((u32)(gGameMode & 0x1F)) |
+                      ((u32)(gdxWideTransition ? 1 : 0) << 24);
+            if (sig != sGdxDbgSig) {
+                sGdxDbgSig = sig;
+                if (sGdxDbgCount < 200) {
+                    sGdxDbgCount++;
+                    gdx_dbg_logf("[GDX-DBG trans] type=%d appear=%d wide=%d W=%d FFA=%d mode=%02X\n",
+                                  transition->activeTransitionType, transition->appearType,
+                                  gdxWideTransition,
+                                  CVarGetInteger("gEnhancements.Graphics.Widescreen", 1),
+                                  CVarGetInteger("gGdxRuntime.ForceFixedAspect", 0),
+                                  gGameMode & 0x1F);
+                }
+            }
+        }
+        if (gdxWideTransition) {
+            gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+        }
+    }
+#endif
+
     gfx = func_8006A00C(gfx, SCISSOR_BOX_FULL_SCREEN);
+#ifdef PORT
+    if (gdxWideTransition) {
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    }
+#endif
 
     if (transition->flags & TRANSITION_FLAG_FILL_BLACK) {
         gSPDisplayList(gfx++, aSetupFillBlackDL);
@@ -541,7 +600,24 @@ Gfx* Transition_Draw(Gfx* gfx) {
         case TRANSITION_TYPE_INSTANT:
             break;
     }
+#ifdef PORT
+    if (gdxWideTransition) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+    }
+#endif
     if (transition->flags & TRANSITION_FLAG_FINISHED) {
+#ifdef PORT
+        /* The last transition display list still references these buffers and
+           is converted after this function returns.  Ask the bridge to retire
+           their host-order RGBA16 ownership after that task has actually run;
+           the back arena may reuse the same address for normal menu assets on
+           the following frame. */
+        {
+            extern void gdx_defer_native_rgba16_texture_range_clear(void* ptr);
+            gdx_defer_native_rgba16_texture_range_clear(transition->backgroundBuffer);
+            gdx_defer_native_rgba16_texture_range_clear(sTransitionPalette);
+        }
+#endif
         transition->activeTransitionType = TRANSITION_TYPE_NONE;
         transition->state = TRANSITION_STATE_INACTIVE;
         transition->flags &= ~TRANSITION_FLAG_DRAW;

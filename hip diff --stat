@@ -1,0 +1,56 @@
+warning: in the working copy of 'include/PR/R4300.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'include/PR/gbi.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'include/PR/ultratypes.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'include/libc/stdint.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/audio/disk/lib/load.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/audio/disk/lib/thread.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/game/camera.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/game/course_gadgets.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/game/object.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/game/texture_utils.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/leo/mfs/mfs_ram.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/overlays/course_edit/1A2D70.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/overlays/course_edit/1A5B70.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/overlays/course_edit/oxl_xk2_bss.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/overlays/machine_create/machine_create.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/overlays/machine_create/machine_create_stats.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/overlays/ovl_i2/transition.c', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/sys/sys_gfx.c', LF will be replaced by CRLF the next time Git touches it
+ include/PR/R4300.h                                 |   3 [32m+[m
+ include/PR/gbi.h                                   |  25 [32m++++[m
+ include/PR/os_libc.h                               |   7 [32m+[m
+ include/PR/ultratypes.h                            |  39 [32m+++++[m[31m-[m
+ include/libc/stdint.h                              |  12 [32m+[m[31m-[m
+ src/audio/disk/lib/audio.h                         |   3 [32m+[m
+ src/audio/disk/lib/load.c                          |  76 [32m+++++++++[m[31m--[m
+ src/audio/disk/lib/thread.c                        |  46 [32m+++++++[m
+ src/game/camera.c                                  |  18 [32m++[m[31m-[m
+ src/game/game.c                                    |  36 [32m+++++[m
+ src/game/object.c                                  |   7 [32m+[m
+ src/game/texture_utils.c                           |  26 [32m++++[m
+ src/leo/mfs/mfs_ram.c                              |  35 [32m+++[m[31m--[m
+ src/libultra/os/jammesg.c                          |  45 [32m++++++[m
+ src/libultra/os/recvmesg.c                         |  47 [32m+++++++[m
+ src/libultra/os/sendmesg.c                         |  52 [32m+++++++[m
+ src/overlays/course_edit/191080.c                  |  37 [32m++++[m[31m-[m
+ src/overlays/course_edit/1A2D70.c                  |   4 [32m+[m
+ src/overlays/course_edit/1A4210.c                  |  16 [32m++[m[31m-[m
+ src/overlays/course_edit/1A5B70.c                  |   4 [32m+[m
+ src/overlays/course_edit/oxl_xk2_bss.c             |   3 [32m+[m[31m-[m
+ src/overlays/course_select/course_select.c         |  30 [32m+++[m[31m-[m
+ src/overlays/ending/ending.c                       |  32 [32m+++++[m
+ src/overlays/ending/ending_effects.c               |  25 [32m++++[m
+ src/overlays/expansion_kit/A2E90.c                 |  24 [32m++++[m
+ src/overlays/expansion_kit/A6340.c                 |   4 [32m+[m
+ src/overlays/machine_create/machine_create.c       |  19 [32m+++[m
+ src/overlays/machine_create/machine_create_draw.c  |  13 [32m+[m[31m-[m
+ src/overlays/machine_create/machine_create_stats.c |  11 [32m++[m
+ src/overlays/ovl_i2/save.c                         |  88 [32m++++++++++++[m
+ src/overlays/ovl_i2/transition.c                   |  76 [32m+++++++++++[m
+ src/overlays/ovl_i3/hud.c                          | 105 [32m++++++++++++[m[31m--[m
+ src/overlays/ovl_i3/menus.c                        |  88 [32m+++++++++++[m[31m-[m
+ src/overlays/ovl_i4/machine.c                      | 152 [32m+++++++++++++++++++[m[31m--[m
+ src/overlays/ovl_i6/main_menu.c                    |  15 [32m++[m
+ src/sys/disk/sys_leo_dd.c                          |  23 [32m++++[m
+ src/sys/sys_gfx.c                                  |  76 [32m++++++++++[m[31m-[m
+ 37 files changed, 1245 insertions(+), 77 deletions(-)

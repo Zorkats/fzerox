@@ -39,6 +39,14 @@ s16 gGameModeChangeState = GAMEMODE_UPDATE;
 s16 gMenuChangeMode = MENU_CHANGE_INACTIVE;
 
 #ifdef PORT
+/* Menu buttons and host shortcuts execute after the game fibers are parked. Defer the actual reset
+ * until func_800690FC owns the game-flow state again on the next tick. */
+static s32 sGdxResetRequested = false;
+
+void gdx_game_request_reset(void) {
+    sGdxResetRequested = true;
+}
+
 /* G-Diffuser in-session save-state: capture of the game-mode/race-flow scalars (native BSS).
    Additive; port build only. Pure POD (no pointers). See port/gdx_savestate.c. */
 typedef struct GdxSsField { void* addr; unsigned int size; } GdxSsField;
@@ -539,6 +547,22 @@ void func_800690FC(void) {
     s32 sp24;
 
 #ifdef PORT
+    if (sGdxResetRequested && (gGameModeChangeState == GAMEMODE_UPDATE)) {
+        extern void gdx_ck(const char*);
+        gdx_ck("[game] reset request consumed");
+        sGdxResetRequested = false;
+        gGamePaused = false;
+        gTitleDemoState = TITLE_DEMO_INACTIVE;
+        gMenuChangeMode = MENU_CHANGE_INACTIVE;
+        if (gGameMode != GAMEMODE_FLX_TITLE) {
+            /* Only replace the queued destination at a stable game-flow boundary. The normal
+             * gGameMode != gQueuedGameMode path below starts and owns the complete transition.
+             * Forcing CHANGE_START while another transition is active skips teardown/init phases
+             * and can leave the overlay/object arena in a partially reinitialized state. */
+            gQueuedGameMode = GAMEMODE_FLX_TITLE;
+        }
+    }
+
     { extern void gdx_ck(const char*); extern void gdx_cki(const char*, int);
       if (gdx_diag_verbose()) {
       gdx_ck("[game] 690FC_entry");
@@ -649,6 +673,18 @@ void func_800690FC(void) {
 #endif
             }
             gGameMode = gQueuedGameMode;
+#ifdef PORT
+            /* Republish the fixed-aspect flag at the flip itself: the port's per-frame tick
+             * only sees gGameMode as of the previous dispatch, so consumers that read the
+             * CVar live in THIS frame's rendering (Transition_Draw's stretch gate, the
+             * renderer's 4:3 composite) would otherwise use the pre-flip mode -- one whole
+             * pillarboxed menu frame on every editor exit. See gdx_fixed_aspect_publish
+             * in port/input_bridge.c. */
+            {
+                extern void gdx_fixed_aspect_publish(void);
+                gdx_fixed_aspect_publish();
+            }
+#endif
             if (gTitleDemoState == TITLE_DEMO_EXIT) {
                 gTitleDemoState = TITLE_DEMO_INACTIVE;
             }

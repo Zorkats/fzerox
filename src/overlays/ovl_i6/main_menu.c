@@ -1021,6 +1021,16 @@ Gfx* MainMenu_TimeAttackModeDraw(Gfx* gfx, Object* timeAttackModeObj) {
 
 Gfx* MainMenu_OkDraw(Gfx* gfx, Object* okObj) {
 
+#ifdef PORT
+    /* port/input_bridge.c. Gate the anchor emission at the call site so CVar-off builds emit
+     * a bit-identical display list to stock (the interpreter re-checks the CVars on consume). */
+    extern int gdx_widescreen_ui_active(void);
+    s32 gdxWideOk = gdx_widescreen_ui_active();
+
+    if (gdxWideOk) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
     switch (D_800CD384) {
         case 0:
         case 1:
@@ -1037,6 +1047,11 @@ Gfx* MainMenu_OkDraw(Gfx* gfx, Object* okObj) {
                                      1.0f, 1.0f, true);
             break;
     }
+#ifdef PORT
+    if (gdxWideOk) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
     return gfx;
 }
 

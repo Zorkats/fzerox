@@ -455,7 +455,12 @@ void func_xk2_800F2B48(Gfx** gfxP) {
     s32 i;
     s32 temp_v1;
     s32 top = 200;
-    s32 pad;
+    /* The FAKE below passes `pad = gfx++` as the macro's pkt argument, so the
+       packet writes go through pad's VALUE. As s32 (original) that truncates
+       the 64-bit cursor on host builds — the invalid-part warning box then
+       faulted on its first texrect word (the Course Edit invalid-node crash).
+       Pointer-width pad keeps the console codegen shape and the host correct. */
+    Gfx* pad;
 
     gfx = *gfxP;
     D_xk2_80104F04 = 0;
@@ -471,6 +476,15 @@ void func_xk2_800F2B48(Gfx** gfxP) {
         temp_v1 = (s32) (SCREEN_WIDTH - width) / 2;
 
         gSPDisplayList(gfx++, D_3000510);
+#ifdef PORT
+        /* D_3000510 sets the combiner + blender but never the cycle type, so these texrects
+           inherit whatever the RDP was last in. The editor's fill-rect paths leave FILL mode
+           with a red fill color (1A5B70.c), and a texrect in FILL mode paints the stale
+           fill_color and ignores the PRIM combiner — the warning box rendered as a solid red
+           rectangle. Console reached this widget with 1CYCLE inherited by draw order; make the
+           widget self-sufficient on the port. */
+        gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+#endif
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
 
         // FAKE

@@ -51,7 +51,27 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
         }
     }
 
+#ifdef PORT
+    /* Residual Release 64DD SIGABRT — DEFINITIVE fix (engram crash/release-64dd-residual, #1832).
+       This per-tick osSendMesg is the LAST decomp osSendMesg the dedicated audio OS thread still
+       reached: the fresh post-rebuild core showed the audio thread here
+       (osSendMesg <- AudioThread_CreateTaskImpl <- Audio_SetupCreateTask <- gdx_audio_produce_one_tick)
+       running CONCURRENT with the boot fiber's own osSendMesg (osSendMesg <- LeoSpdlMotor <-
+       SLMFSLoad, the 64DD disk mount) -> glibc heap/list abort. The earlier MPMC-ring fix (#1817)
+       only moved AudioThread_ScheduleProcessCmds off the kernel; this send remained, so the audio
+       thread kept entering the libultra osSendMesg kernel body every tick during the boot window.
+       taskStartQueue has NO consumer in this port: AudioThread_WaitForAudioTask (the only reader)
+       is never called, so the message was only ever posted to satisfy a waiter that does not exist.
+       Route it to a plain host-side atomic counter (port/gdx_audio_thread.cpp) so the audio thread
+       never touches libultra's run-queue/waiter machinery here. Kill-switch-independent: the legacy
+       fiber path (host thread) is equally happy with the counter since nothing consumes the queue. */
+    {
+        extern void gdx_audio_taskstart_post(unsigned int token);
+        gdx_audio_taskstart_post((unsigned int) gAudioCtx.totalTaskCount);
+    }
+#else
     osSendMesg(gAudioCtx.taskStartQueueP, (OSMesg) gAudioCtx.totalTaskCount, OS_MESG_NOBLOCK);
+#endif
     gAudioCtx.rspTaskIndex ^= 1;
     gAudioCtx.curAiBufIndex++;
     gAudioCtx.curAiBufIndex %= 3;
@@ -139,11 +159,26 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
 
     j = 0;
     if (gAudioCtx.resetStatus == 0) {
+#ifdef PORT
+        /* Drain the lock-free cmd ring (see AudioThread_ScheduleProcessCmds' PORT branch and
+           port/gdx_audio_thread.cpp) instead of the decomp osRecvMesg. sp4C stays declared for
+           the non-PORT path's OSMesg-width overflow note above; unused here by design. */
+        {
+            extern int gdx_audio_cmdring_pop(unsigned int* out);
+            unsigned int cmdToken;
+            while (gdx_audio_cmdring_pop(&cmdToken) != -1) {
+                AudioThread_ProcessCmds((u32) cmdToken);
+                j++;
+            }
+        }
+        (void) sp4C;
+#else
         while (osRecvMesg(gAudioCtx.threadCmdProcQueueP, &sp4C, OS_MESG_NOBLOCK) != -1) {
             AudioThread_ProcessCmds((u32) (uintptr_t) sp4C);
             if (1) {}
             j++;
         }
+#endif
         if ((j == 0) && (gAudioCtx.threadCmdQueueFinished)) {
             AudioThread_ScheduleProcessCmds();
         }
@@ -451,9 +486,20 @@ s32 AudioThread_ScheduleProcessCmds(void) {
     static s32 D_80771A38 = 0;
     s32 sendResult;
 
+#ifdef PORT
+    /* Phase 3 crash fix (engram crash/release-64dd-mfs-abort): route the cross-thread cmd token
+       over the lock-free ring in port/gdx_audio_thread.cpp instead of the decomp libultra
+       osSendMesg, so neither the game/host thread (this producer) nor the dedicated audio thread
+       (the consumer + a rare self-reschedule producer) touches the fiber run queue for it. Same
+       OS_MESG_NOBLOCK convention: 0 = queued, -1 = ring full. */
+    extern int gdx_audio_cmdring_push(unsigned int token);
+    sendResult = gdx_audio_cmdring_push(
+        (unsigned int) (((gAudioCtx.threadCmdReadPos & 0xFF) << 8) | (gAudioCtx.threadCmdWritePos & 0xFF)));
+#else
     sendResult = osSendMesg(gAudioCtx.threadCmdProcQueueP,
                              (OSMesg) (((gAudioCtx.threadCmdReadPos & 0xFF) << 8) | (gAudioCtx.threadCmdWritePos & 0xFF)),
                              OS_MESG_NOBLOCK);
+#endif
 
     if (sendResult != -1) {
         gAudioCtx.threadCmdReadPos = gAudioCtx.threadCmdWritePos;

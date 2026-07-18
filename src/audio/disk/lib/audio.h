@@ -6,6 +6,9 @@
 #include "libc/stdlib.h"
 #include "libc/stdbool.h"
 #include "PR/leo.h"
+/* size_t for the PORT-added prototypes below comes from PR/ultratypes.h (via ultra64.h),
+ * which defines it for host GCC/Clang builds; do NOT include the system <stddef.h> here --
+ * it also typedefs wchar_t, conflicting with the decomp's own definition. */
 
 struct Note;
 struct NotePool;

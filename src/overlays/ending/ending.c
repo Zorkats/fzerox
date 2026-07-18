@@ -42,6 +42,15 @@ s16 sCupNameWidth;
 s16 sCupDifficulty;
 s16 sDrawThanksForPlaying;
 s16 sThanksForPlayingFade;
+#ifdef PORT
+// PORT-only watchdog for the terminal ENDING_THANKS_FOR_PLAYING gate. The gate only
+// opens once the character fireworks finish (sFireworksType==NONE && gActiveFireworks==0).
+// If a firework effect never resolves on the port, that gate can stay shut forever and
+// permanently freeze the ceremony. These latch the gate open after a bounded dwell so
+// THANKS always appears and the A/START exit is always reachable.
+s32 sEndingThanksGateWatchdog = 0;
+bool sEndingThanksGateBypassed = false;
+#endif
 s16 sTotalScrollResults;
 EndingCutsceneResults sEndingCutsceneResults[10];
 Podium gPodiums[3];
@@ -302,6 +311,10 @@ void EndingCutscene_Init(void) {
     sCongratulationsEndingTextAlpha = 0;
     sEndingState = ENDING_START;
     sEndingTimer = 0;
+#ifdef PORT
+    sEndingThanksGateWatchdog = 0;
+    sEndingThanksGateBypassed = false;
+#endif
 
     switch (gCupType) {
         case JACK_CUP:
@@ -586,7 +599,26 @@ s32 EndingCutscene_UpdateState(void) {
             }
             break;
         case ENDING_THANKS_FOR_PLAYING:
+#ifdef PORT
+            // Bound the fireworks sub-gate wait. The gate normally opens when the
+            // character fireworks finish; if they never resolve on the port (empty mask
+            // buffer producing no particles, or a launcher that never recycles) the
+            // scene would freeze here forever. Latch the gate open after a generous
+            // dwell (~40s @30Hz) so the ceremony always progresses. Console behavior is
+            // unchanged: there the fireworks resolve well within the timeout.
             if ((sFireworksType == FIREWORKS_NONE) && (gActiveFireworks == 0)) {
+                sEndingThanksGateWatchdog = 0;
+            } else if (!sEndingThanksGateBypassed) {
+                sEndingThanksGateWatchdog++;
+                if (sEndingThanksGateWatchdog >= 1200) {
+                    sEndingThanksGateBypassed = true;
+                }
+            }
+            if (((sFireworksType == FIREWORKS_NONE) && (gActiveFireworks == 0)) ||
+                sEndingThanksGateBypassed) {
+#else
+            if ((sFireworksType == FIREWORKS_NONE) && (gActiveFireworks == 0)) {
+#endif
                 sEndingTimer++;
                 if (sEndingTimer == 60) {
                     sDrawThanksForPlaying = true;

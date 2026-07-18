@@ -117,7 +117,26 @@ Gfx* MachineCreate_Draw(Gfx* gfx) {
     gDPSetColorImage(gfx++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH, OS_PHYSICAL_TO_K0(gFrameBuffers[D_800DCD04]));
 
     if (gWorksMachineMode == MACHINE_MODE_ENTRY) {
+#ifdef PORT
+        s32 gdxWideSelectMachine;
+        extern int CVarGetInteger(const char* name, int defaultValue);
+
+        /* Expansion Kit custom-machine entry uses a second machine-selection gradient. Widen this
+         * background independently from the regular 30-machine selector in ovl_i4/machine.c. */
+        gdxWideSelectMachine = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
+                               CVarGetInteger("gEnhancements.Graphics.WidescreenUI", 0);
+        if (gdxWideSelectMachine) {
+            gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+        }
+#endif
         gfx = MachineCreate_DrawColorGradientRectangle(gfx, 12, 8, 307, 231, 0.0f, 0.0f, 0.0f, 10.0f, 0.0f, 60.0f);
+#ifdef PORT
+        if (gdxWideSelectMachine) {
+            gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+            gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);
+        }
+#endif
         gfx = MachineCreate_DrawMachineSelect(gfx);
     } else {
         gfx = func_xk3_80131494(gfx);

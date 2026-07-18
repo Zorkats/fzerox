@@ -74,8 +74,33 @@ void func_8007A828(u16* pixel, size_t size, s32 arg2, s32 arg3, s32 arg4) {
     u32 i;
     u32 colorBlend;
     u32 red, green, blue, alpha;
+#ifdef PORT
+    u16 texel;
+#endif
 
     for (i = 0; i < (size / sizeof(u16)); i++, pixel++) {
+#ifdef PORT
+        /* Every caller passes an MIO0-decoded ROM texture, which the port keeps in original
+         * big-endian byte order (the gfx bridge samples RGBA16 big-endian unless a buffer is
+         * explicitly registered as host-order). Swap on read AND on write so the buffer stays
+         * big-endian; reading the texel as a native u16 on a little-endian host garbles the
+         * channels before the luminance math and then compounds when the bridge re-reads the
+         * host-order result raw (the corrupted Options/Course Select backgrounds).
+         * func_8007A59C above is intentionally NOT given this treatment: its only caller is
+         * the transition system, whose source is a HOST-ORDER framebuffer capture that is
+         * separately registered native -- swapping there would break it. */
+        texel = (u16) ((*pixel << 8) | (*pixel >> 8));
+        red = ((texel & 0xF800) >> 11) * 77;
+        green = ((texel & 0x7C0) >> 6) * 150;
+        blue = ((texel & 0x3E) >> 1) * 29;
+        alpha = texel & 0x1;
+
+        colorBlend = (red + green + blue) >> 8;
+
+        texel = (u16) ((((arg2 * colorBlend) >> 8) << 11) + (((arg3 * colorBlend) >> 8) << 6) +
+                       (((arg4 * colorBlend) >> 8) << 1) + alpha);
+        *pixel = (u16) ((texel << 8) | (texel >> 8));
+#else
         red = ((*pixel & 0xF800) >> 11) * 77;
         green = ((*pixel & 0x7C0) >> 6) * 150;
         blue = ((*pixel & 0x3E) >> 1) * 29;
@@ -85,6 +110,7 @@ void func_8007A828(u16* pixel, size_t size, s32 arg2, s32 arg3, s32 arg4) {
 
         *pixel = (((arg2 * colorBlend) >> 8) << 11) + (((arg3 * colorBlend) >> 8) << 6) +
                  (((arg4 * colorBlend) >> 8) << 1) + alpha;
+#endif
     }
 }
 

@@ -1116,6 +1116,21 @@ Gfx* MachineSelect_BackgroundDraw(Gfx* gfx) {
     s32 rmul = 10;
     s32 gmul = 0;
     s32 bmul = 60;
+#ifdef PORT
+    /* Same predicate as every other anchor site in this file (port/input_bridge.c) --
+     * a divergent inline CVar composite here would desync background vs foreground
+     * gating if a default ever changes. Declared locally: this function sits above the
+     * file-scope extern used by the later anchor sites. */
+    extern int gdx_widescreen_ui_active(void);
+    s32 gdxWideSelectMachine = gdx_widescreen_ui_active();
+    if (gdxWideSelectMachine) {
+        /* The gradient's native 12..307 safe-area rectangle owns the blue background seen on the
+         * regular 30-machine selector. Stretch only this layer and restore the menu scissor before
+         * its portraits, labels, and machines are drawn. */
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+    }
+#endif
 
     gDPSetCycleType(gfx++, G_CYC_FILL);
 
@@ -1130,6 +1145,12 @@ Gfx* MachineSelect_BackgroundDraw(Gfx* gfx) {
         gDPSetFillColor(gfx++, PACK_5551(r, g, b, 1) << 0x10 | PACK_5551(r, g, b, 1));
         gDPFillRectangle(gfx++, 12, i + 8, 307, i + 8);
     }
+#ifdef PORT
+    if (gdxWideSelectMachine) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);
+    }
+#endif
     return gfx;
 }
 
@@ -1186,6 +1207,13 @@ Gfx* MachineSettings_PortraitDraw(Gfx* gfx, Object* portraitObj) {
 
 extern Machine gMachines[];
 
+#ifdef PORT
+/* port/input_bridge.c. Gates every anchor/distribute emission below so that CVar-off builds
+ * emit a bit-identical display list to stock (the interpreter re-checks the CVars when it
+ * consumes the mode bits; gating both sides is deliberate defense in depth). */
+extern int gdx_widescreen_ui_active(void);
+#endif
+
 Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
     s32 temp_fp;
     const char* temp_s0;
@@ -1193,6 +1221,12 @@ Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
     s32 playerIndex;
     s8* temp_a3;
     s32 i;
+
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
 
     playerIndex = statsObj->cmdId - OBJECT_MACHINE_SELECT_STATS_0;
 
@@ -1224,6 +1258,11 @@ Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
                                   (temp_t0 + 10) + i * 20, temp_s0, 0, FONT_SET_2, 0);
         }
     }
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
     return gfx;
 }
 
@@ -1232,16 +1271,38 @@ Gfx* MachineSelect_PortraitDraw(Gfx* gfx, Object* portraitObj) {
 
     playerIndex = portraitObj->cmdId - OBJECT_MACHINE_SELECT_PORTRAIT_0;
 
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
     gfx = func_80078F80_impl(gfx, &D_800E3F28[OBJECT_CACHE_INDEX(portraitObj)], OBJECT_LEFT(portraitObj),
                              OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
-    return func_80078EA0_impl(gfx, sPlayerNumIconCompTexInfos[playerIndex],
-                              D_i4_8011D674[playerIndex * 2 + 0] + OBJECT_LEFT(portraitObj),
-                              D_i4_8011D674[playerIndex * 2 + 1] + OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
+    gfx = func_80078EA0_impl(gfx, sPlayerNumIconCompTexInfos[playerIndex],
+                             D_i4_8011D674[playerIndex * 2 + 0] + OBJECT_LEFT(portraitObj),
+                             D_i4_8011D674[playerIndex * 2 + 1] + OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
+    return gfx;
 }
 
 Gfx* MachineSelect_CursorNumDraw(Gfx* gfx, Object* portraitObj) {
-    return func_80078EA0_impl(gfx, sPlayerNumIconCompTexInfos[portraitObj->cmdId - OBJECT_MACHINE_SELECT_CURSOR_NUM_0],
-                              OBJECT_LEFT(portraitObj), OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
+    }
+#endif
+    gfx = func_80078EA0_impl(gfx, sPlayerNumIconCompTexInfos[portraitObj->cmdId - OBJECT_MACHINE_SELECT_CURSOR_NUM_0],
+                             OBJECT_LEFT(portraitObj), OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
+    }
+#endif
+    return gfx;
 }
 
 extern u32 gGameFrameCount;
@@ -1254,6 +1315,11 @@ Gfx* MachineSelect_CursorDraw(Gfx* gfx, Object* cursorObj) {
     s32 green;
     s32 blue;
 
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
+    }
+#endif
     for (i = 0; i < 4; i++) {
         if (Object_Get(OBJECT_MACHINE_SELECT_CURSOR_NUM_0 + i) != NULL) {
             temp_v0 = gGameFrameCount % temp_s3;
@@ -1283,6 +1349,11 @@ Gfx* MachineSelect_CursorDraw(Gfx* gfx, Object* cursorObj) {
                                      OBJECT_TOP(cursorObj), 1, 0, 0, 1.0f, 1.0f, true);
         }
     }
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
+    }
+#endif
     return gfx;
 }
 
@@ -1353,8 +1424,19 @@ Gfx* MachineSelect_OkDraw(Gfx* gfx, Object* okObj) {
     }
 
     gfx = func_8007DB28(gfx, 0);
-    return func_80078EA0_impl(gfx, sOKCompTexInfo, OBJECT_LEFT(okObj) + var_v1, OBJECT_TOP(okObj) + 209, 1, 0, 0, 1.0f,
-                              1.0f, true);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    gfx = func_80078EA0_impl(gfx, sOKCompTexInfo, OBJECT_LEFT(okObj) + var_v1, OBJECT_TOP(okObj) + 209, 1, 0, 0, 1.0f,
+                             1.0f, true);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    return gfx;
 }
 
 extern const char* gMachineNames[];
@@ -1647,6 +1729,12 @@ Gfx* MachineSelect_DifficultyCupsDraw(Gfx* gfx, Object* difficultyCupsObj) {
     s32 cupsUnlocked;
     s8* var_t1;
 
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
+
     character = Character_GetCharacterFromSlot(sMachineSelectIndex[0]);
     difficulty = 0;
     switch (gMachineSelectState) {
@@ -1711,6 +1799,13 @@ Gfx* MachineSelect_DifficultyCupsDraw(Gfx* gfx, Object* difficultyCupsObj) {
 #ifdef EXPANSION_KIT
     if (1) {}
 
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+
     for (i = 0; i < 2; i++) {
 
         if (((s8*) var_t1)[(i ^ 0) + 5] == 0) {
@@ -1722,9 +1817,22 @@ Gfx* MachineSelect_DifficultyCupsDraw(Gfx* gfx, Object* difficultyCupsObj) {
 
         gfx = func_80078EA0_impl(gfx, sTrophyCompTexInfos[trophyIndex], 284, 115 + i * 20, 0, 0, 0, 1.0f, 1.0f, false);
     }
+
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
 #endif
 
-    return func_80078EA0_impl(gfx, sDifficultyCompTexInfos[difficulty], 30, 209, 0, 0, 0, 1.0f, 1.0f, true);
+    gfx = func_80078EA0_impl(gfx, sDifficultyCompTexInfos[difficulty], 30, 209, 0, 0, 0, 1.0f, 1.0f, true);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+#endif
+    return gfx;
 }
 
 Gfx* MachineSelect_NameDraw(Gfx* gfx, Object* nameObj) {
@@ -1743,15 +1851,37 @@ Gfx* MachineSelect_NameDraw(Gfx* gfx, Object* nameObj) {
 
     gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(machineName, FONT_SET_2, 0) / 2), 218, machineName, 0,
                           FONT_SET_2, 0);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
     gfx = Font_DrawMachineWeightSmall(gfx, 252, 221,
                                       gMachines[Character_GetCharacterFromSlot(sMachineSelectIndex[0])].weight);
-    return Font_DrawString(gfx, 252, 221, "$", 0, FONT_SET_2, 0);
+    gfx = Font_DrawString(gfx, 252, 221, "$", 0, FONT_SET_2, 0);
+#ifdef PORT
+    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    return gfx;
 }
 
 Gfx* MachineSettings_OkDraw(Gfx* gfx, Object* okObj) {
     gfx = func_8007DB28(gfx, 0);
-    return func_80078EA0_impl(gfx, sOKCompTexInfo, OBJECT_LEFT(okObj) + 0x10B, OBJECT_TOP(okObj) + 0xD0, 1, 0, 0, 1.0f,
-                              1.0f, true);
+#ifdef PORT
+    if (gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    gfx = func_80078EA0_impl(gfx, sOKCompTexInfo, OBJECT_LEFT(okObj) + 0x10B, OBJECT_TOP(okObj) + 0xD0, 1, 0, 0, 1.0f,
+                             1.0f, true);
+#ifdef PORT
+    if (gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+    }
+#endif
+    return gfx;
 }
 
 void func_i4_80119BB8(Object* arg0) {

@@ -1022,20 +1022,21 @@ extern s32 gNumPlayers;
 
 Gfx* Hud_DrawHud(Gfx* gfx) {
 #ifdef PORT
-    // G-Diffuser Practice photo mode: hide the race HUD for a clean shot. Gated by
-    // gEnhancements.Practice.PhotoMode (default 0) AND the game's existing pause (gGamePaused != 0)
-    // -- we reuse the pause so the simulation is already frozen; no new time-freeze is introduced.
-    // When the CVar is 0 (default) the && short-circuits, this if is not taken, and execution falls
-    // straight through to the original gSPDisplayList below, so a stock boot draws the HUD byte-for-
-    // byte as before. Emitting nothing here is safe because the follow-on overlays drawn after
-    // Hud_DrawHud (Hud_DrawRacePortraits/Hud_DrawPosition/Hud_DrawPlayerSpeed, menus.c) each reload
-    // their own display list and render state; see PhotoMode notes for the overlays still left drawn.
+    int gdxWideHud;
+    // G-Diffuser photo mode: hide the race HUD for a clean shot in every race mode. The shared
+    // predicate combines the explicit ImGui toggle with the game's existing pause state.
+    // When inactive (the default), execution falls straight through to the original display list.
+    // Emitting nothing here is safe because the follow-on overlays each load their own render state;
+    // Menus_Draw suppresses those separate overlays with the same shared predicate.
     {
-        extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
-        extern s8 gGamePaused;
-        if (CVarGetInteger("gEnhancements.Practice.PhotoMode", 0) && (gGamePaused != 0)) {
+        extern int gdx_photo_mode_active(void);     // port/input_bridge.c
+        extern int gdx_widescreen_ui_active(void);  // port/input_bridge.c
+        if (gdx_photo_mode_active()) {
             return gfx; // photo mode active: emit no HUD commands this frame
         }
+        // Read once per frame so every anchor Set below pairs with its Clear even if the CVar
+        // is toggled mid-build. With this false (stock default) the display list is bit-identical.
+        gdxWideHud = gdx_widescreen_ui_active();
     }
 #endif
 
@@ -1043,6 +1044,12 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 
     switch (gNumPlayers) {
         case 1:
+#ifdef PORT
+            /* Right-edge group: time label, timer, and Death Race best label. */
+            if (gdxWideHud) {
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
             // Time
             gDPPipeSync(gfx++);
             gDPLoadTextureBlock(gfx++, aHudTimeTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 24, 16, 0, G_TX_NOMIRROR | G_TX_WRAP,
@@ -1062,6 +1069,12 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
             gfx = Hud_UpdatePlayerHudInfo(gfx, 0, 0);
 
             gfx = Hud_UpdateRaceIntervalInfo(gfx, 0, 0, 1.0f);
+#ifdef PORT
+            /* The L-button first-place interval shares the timer's right-edge layout. */
+            if (gdxWideHud) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
 
             // Best Lap Time
             gfx = Hud_DrawPracticeBestLap(gfx);
@@ -1075,6 +1088,12 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
                 gfx = Hud_DrawPracticeLapDelta(gfx);
             }
 #endif
+#ifdef PORT
+            /* Death Race timer/best and the energy meter belong to the right edge. */
+            if (gdxWideHud) {
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
             gfx = Hud_DrawDeathRaceTimer(gfx, 0, 0);
 
             gfx = Hud_DrawDeathRaceBestTime(gfx, 0, 0);
@@ -1086,6 +1105,12 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 
             gfx = Hud_DrawEnergyOutlineRectangle(gfx, 0, 0);
 
+#ifdef PORT
+            if (gdxWideHud) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+            }
+#endif
             // Lap
             gDPPipeSync(gfx++);
             gDPLoadTextureBlock(gfx++, aLapTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 12, 0, G_TX_NOMIRROR | G_TX_WRAP,
@@ -1101,13 +1126,48 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 
             gfx = Hud_DrawLapCounter(gfx, 0, 0);
 
+#ifdef PORT
+            if (gdxWideHud) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
             gfx = Hud_DrawEnergyBar(gfx, 0, 0);
 
+#ifdef PORT
+            if (gdxWideHud) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
             gfx = Hud_DrawReverse(gfx, 0, 0);
 
+#ifdef PORT
+            if (gdxWideHud) {
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+            }
+#endif
             gfx = Hud_DrawPlayerLives(gfx, 0, 0);
-
+#ifdef PORT
+            if (gdxWideHud) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+            }
+#endif
+#ifdef PORT
+            /* Destroyed-vehicle KO stars sit on the right safe-area edge (x ~= 235-285), like the
+               energy bar. They are emitted AFTER the last anchor Clear above, so without their own
+               scope they render unanchored and drift inward from the physical 16:9 right edge
+               (owner: "stars still 4:3"). Glue them to the right edge, mirroring the energy-bar
+               group's ANCHOR_RIGHT Set/Clear idiom. */
+            if (gdxWideHud) {
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
             gfx = Hud_DrawKOStars(gfx, 0, 0);
+#ifdef PORT
+            if (gdxWideHud) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+#endif
             break;
         case 2:
             // Timer
@@ -1610,8 +1670,25 @@ Gfx* Hud_UpdateRaceIntervalInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex, 
         }
     }
     if ((D_i3_80141EA8[playerIndex].lapIntervalCounter % 20) >= 5) {
-        gfx = Hud_DrawRaceTimeInterval(gfx, sPlayerLeadInterval[playerIndex],
-                                       sIntervalPositions[numPlayersIndex][playerIndex][0],
+        s32 intervalLeft = sIntervalPositions[numPlayersIndex][playerIndex][0];
+#ifdef PORT
+        /* WIDESCREEN-UI, 1P ONLY: the gap-to-1st interval draws inside the lap timer's
+           G_EX_WIDESCREEN_ANCHOR_RIGHT scope (Hud_DrawHud), but its native base X (120, screen
+           center) defeats the anchor -- the uniform +/-0.25 NDC edge-glue relocates an
+           edge-native rect, not a center-native one, so it only drifts from just-left to
+           just-right of center (owner: "gap timer still 4:3-centered"). Re-home the base X onto
+           the main lap-timer's right-edge digit column (sPlayerTimerPositions) so ANCHOR_RIGHT
+           glues it to the physical right edge directly beneath the timer -- the "shares the
+           timer's right-edge layout" the call site intends. Console/4:3 (#ifndef PORT) is
+           untouched, and only the 1P call (numPlayersIndex 0) draws inside an anchor scope. */
+        {
+            extern int gdx_widescreen_ui_active(void); /* port/input_bridge.c */
+            if ((numPlayersIndex == 0) && gdx_widescreen_ui_active()) {
+                intervalLeft = sPlayerTimerPositions[numPlayersIndex][playerIndex][0];
+            }
+        }
+#endif
+        gfx = Hud_DrawRaceTimeInterval(gfx, sPlayerLeadInterval[playerIndex], intervalLeft,
                                        sIntervalPositions[numPlayersIndex][playerIndex][1], scale);
     }
 

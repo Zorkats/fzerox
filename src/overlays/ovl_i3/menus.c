@@ -2206,19 +2206,21 @@ s32 Menus_CheckGhostCanSave(void) {
 
 #ifdef PORT
 // Autosave-on-record (G-Diffuser). When gEnhancements.Gameplay.AutosaveOnRecord is enabled, persist
-// the current best ghost to SRAM at race finish so a good run is never lost to a quit before the
+// the current best ghost to the per-course PC library at race finish so a good run is never lost to a quit before the
 // manual "Save Ghost" prompt. Called once per Time Attack finish from Menus_Update (latched by
 // sRaceFinishSaveTriggered), right after the numeric-record autosave the game already performs.
 //
-// Uses only the game's own SRAM ghost helpers (Save_LoadGhostInfo / Save_SaveGhost) on the single-
-// slot SRAM ghost -- never the 64DD disk-ghost path (dead on the port without a real drive).
-// Conservative overwrite policy: write to an empty slot, or overwrite our OWN same-course ghost
-// only on a strict improvement; never auto-replace a different-course ghost (the vanilla overwrite
-// prompt can, but that is an explicit player choice). This mirrors the SRAM branch of
-// Menus_AttemptSaveGhost (menus.c) and the improvement test in Menus_CheckGhostCanSave.
+// The library owns one exact-course player ghost and does not replace a different course. The
+// vanilla SRAM slot remains a compatibility mirror: write it when empty, or update the same course
+// on a strict improvement, but never evict another course merely because autosave is enabled.
 void Gdx_AutosaveGhostOnRecord(void) {
     extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    extern int gdx_ghost_library_get_player_stats(s32 encodedCourseIndex, s32* outRaceTime,
+                                                  s32* outReplayChecksum);
+    extern int gdx_ghost_library_save_player(s32 courseIndex, const Ghost* ghost);
     s32 ghostSlot;
+    s32 libraryRaceTime;
+    s32 libraryReplayChecksum;
 
     if (!CVarGetInteger("gEnhancements.Gameplay.AutosaveOnRecord", 0)) {
         return;
@@ -2228,6 +2230,13 @@ void Gdx_AutosaveGhostOnRecord(void) {
     }
     if (gFastestGhost == NULL) {
         return; // no ghost was recorded this race.
+    }
+    // Unlike the cartridge slot, this path is keyed by encoded course and therefore preserves the
+    // best replay for every course independently. Save_SaveGhost below mirrors it when SRAM permits.
+    if ((gdx_ghost_library_get_player_stats(gFastestGhost->encodedCourseIndex, &libraryRaceTime,
+                                            &libraryReplayChecksum) != 0) ||
+        (gFastestGhost->raceTime < libraryRaceTime)) {
+        gdx_ghost_library_save_player(gCourseIndex, gFastestGhost);
     }
     // Save_LoadGhostInfo fills gSavedGhostInfo and returns non-zero when the SRAM slot holds no
     // valid ghost (empty, or a bad checksum that it just reinitialized). Non-zero -> free to write.
@@ -5321,6 +5330,14 @@ Gfx* Menus_Draw(Gfx* gfx) {
     f32 averageSpeed;
     f32 intervalTime;
     s32 playerIndex = 0;
+#ifdef PORT
+    extern int gdx_photo_mode_active(void);    // port/input_bridge.c
+    extern int gdx_widescreen_ui_active(void); // port/input_bridge.c
+    s32 gdxPhotoActive = gdx_photo_mode_active();
+    /* Read once so every anchor Set below pairs with its Clear even if the CVar toggles
+     * mid-build. With this false (stock default) the display list is bit-identical. */
+    s32 gdxWideHud = gdx_widescreen_ui_active();
+#endif
 
     gRacersRemaining = gTotalRacers - gRacersRetired;
     if ((gNumPlayers == 1) && (gTotalRacers != 1) && !(gGameFrameCount % 64) && !gGamePaused) {
@@ -5363,7 +5380,11 @@ Gfx* Menus_Draw(Gfx* gfx) {
     gDPPipeSync(gfx++);
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
+#ifdef PORT
+    if (!D_80141D6C && !gdxPhotoActive) {
+#else
     if (!D_80141D6C) {
+#endif
         if (gNumPlayers == 3) {
             gfx = Menus_DrawBeveledBox(gfx, 160, 120, 305, 232, 0, 0, 0, 255);
             gDPPipeSync(gfx++);
@@ -5380,7 +5401,18 @@ Gfx* Menus_Draw(Gfx* gfx) {
 
         gDPPipeSync(gfx++);
         if (gNumPlayers == 1) {
+#ifdef PORT
+            extern int CVarGetInteger(const char* name, int defaultValue);
+            if (CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
+                CVarGetInteger("gEnhancements.Graphics.WidescreenUI", 0)) {
+                /* Anchored HUD elements extend beyond the original 4:3 safe-area scissor. */
+                gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 16, SCREEN_WIDTH, 224);
+            } else {
+                gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+            }
+#else
             gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+#endif
         } else {
             gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);
         }
@@ -5397,11 +5429,31 @@ Gfx* Menus_Draw(Gfx* gfx) {
                                              ((gCameras[playerIndex].mode == CAMERA_MODE_FINISHED_LOSER) &&
                                               (sPlayerLoserFinishTimer[0] >= 300))))) {
                     if (gNumPlayers == 1) {
+#ifdef PORT
+                        if (gdxWideHud) {
+                            gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+                        }
+#endif
                         gfx = Hud_DrawRacePortraits(gfx);
+#ifdef PORT
+                        if (gdxWideHud) {
+                            gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+                        }
+#endif
                     }
                     if ((gGameMode != GAMEMODE_DEATH_RACE) && (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE) &&
                         !(gRacers[i].stateFlags & RACER_STATE_FINISHED)) {
+#ifdef PORT
+                        if ((gNumPlayers == 1) && gdxWideHud) {
+                            gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                        }
+#endif
                         gfx = Minimap_DrawCourseMinimap(gfx, gNumPlayers - 1, i);
+#ifdef PORT
+                        if ((gNumPlayers == 1) && gdxWideHud) {
+                            gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                        }
+#endif
                     }
                     if (gNumPlayers == 3) {
                         gfx = Minimap_DrawCourseMinimap(gfx, gNumPlayers - 1, 3);
@@ -5410,7 +5462,17 @@ Gfx* Menus_Draw(Gfx* gfx) {
                 }
                 if (((gNumPlayers != 1) || (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE)) &&
                     !(gRacers[i].stateFlags & RACER_STATE_FINISHED)) {
+#ifdef PORT
+                    if ((gNumPlayers == 1) && gdxWideHud) {
+                        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    }
+#endif
                     gfx = Hud_DrawPlayerSpeed(gfx, gNumPlayers - 1, i);
+#ifdef PORT
+                    if ((gNumPlayers == 1) && gdxWideHud) {
+                        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    }
+#endif
                 }
             }
         }
@@ -5436,9 +5498,15 @@ Gfx* Menus_Draw(Gfx* gfx) {
         }
     }
     if (gNumPlayers == 1) {
+#ifdef PORT
+        if (!gdxPhotoActive && ((gCameras[playerIndex].mode == CAMERA_MODE_RACE_INTRO) ||
+                               (gCameras[playerIndex].mode == CAMERA_MODE_RACE)) &&
+            (sPlayerGameoverState[0] == PLAYER_GAMEOVER_NONE)) {
+#else
         if (((gCameras[playerIndex].mode == CAMERA_MODE_RACE_INTRO) ||
              (gCameras[playerIndex].mode == CAMERA_MODE_RACE)) &&
             (sPlayerGameoverState[0] == PLAYER_GAMEOVER_NONE)) {
+#endif
             averageSpeed = gRacers[playerIndex].raceDistance / gRacers[playerIndex].raceTime;
             if (gGameMode == GAMEMODE_GP_RACE) {
                 if (gRaceTimeIntervalToggle) {
@@ -5849,6 +5917,9 @@ Gfx* Menus_Draw(Gfx* gfx) {
     }
     if (gTitleDemoState == TITLE_DEMO_INACTIVE) {
         if (gGamePaused) {
+#ifdef PORT
+            if (!gdxPhotoActive) {
+#endif
             if (gGameMode == GAMEMODE_GP_RACE) {
                 gfx = Menus_DrawGpRacePause(gfx);
             } else if (gGameMode == GAMEMODE_DEATH_RACE) {
@@ -5856,6 +5927,9 @@ Gfx* Menus_Draw(Gfx* gfx) {
             } else {
                 gfx = Menus_DrawGeneralPause(gfx);
             }
+#ifdef PORT
+            }
+#endif
         } else {
             sPauseMenuScissorBoxTimer = 60;
             sPauseMenuOptionIndex = 0;
