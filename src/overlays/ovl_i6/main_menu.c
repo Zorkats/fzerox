@@ -548,6 +548,10 @@ s32 func_i6_8011DBD0(void);
 
 void MainMenu_UnlockEverythingInit(Object* unlockEverythingObj) {
     UNLOCK_EVERYTHING_ROMDATA(unlockEverythingObj) = func_i6_8011DBD0();
+#ifdef PORT
+    gdx_unlock_diagf("[unlock] mode-select ready state=%d alreadyUnlocked=%d\n",
+                     OBJECT_STATE(unlockEverythingObj), gSettingEverythingUnlocked);
+#endif
 }
 
 extern u32 gGameFrameCount;
@@ -1083,22 +1087,43 @@ void MainMenu_UnlockEverythingUpdate(Object* unlockEverythingObj) {
     Object* backgroundObj;
 
     if ((OBJECT_STATE(unlockEverythingObj) < 8) && (gInputButtonPressed != 0)) {
+#ifdef PORT
+        s32 previousState = OBJECT_STATE(unlockEverythingObj);
+        gdx_unlock_diagf("[unlock] input step=%d expected=0x%04X edge=0x%04X effective=0x%04X\n",
+                         previousState, gUnlockEverythingInputs[previousState], gInputButtonPressed,
+                         gInputPressed);
+#endif
         if (gUnlockEverythingInputs[OBJECT_STATE(unlockEverythingObj)] & gInputPressed) {
             if (++OBJECT_STATE(unlockEverythingObj) == 8) {
                 gSettingEverythingUnlocked = true;
+#ifdef PORT
+                gdx_unlock_diagf("[unlock] sequence complete state=8 unlocked=%d; saving profiles\n",
+                                 gSettingEverythingUnlocked);
+#endif
                 Save_SaveSettingsProfiles();
+#ifdef PORT
+                gdx_unlock_diagf("[unlock] profiles saved; requesting NA_SE_46\n");
+#endif
                 Audio_TriggerSystemSE(NA_SE_46);
                 backgroundObj = Object_Get(OBJECT_MAIN_MENU_BACKGROUND);
                 if (OBJECT_STATE(backgroundObj) < 2) {
                     OBJECT_STATE(backgroundObj) = (Math_Rand1() % 3) + (OBJECT_STATE(backgroundObj) * 10) + 10;
                 }
             }
+#ifdef PORT
+            gdx_unlock_diagf("[unlock] accepted step=%d next=%d\n", previousState,
+                             OBJECT_STATE(unlockEverythingObj));
+#endif
         } else {
             if (gUnlockEverythingInputs[0] & gInputButtonPressed) {
                 OBJECT_STATE(unlockEverythingObj) = 1;
             } else {
                 OBJECT_STATE(unlockEverythingObj) = 0;
             }
+#ifdef PORT
+            gdx_unlock_diagf("[unlock] rejected step=%d restart=%d\n", previousState,
+                             OBJECT_STATE(unlockEverythingObj));
+#endif
         }
     }
 }

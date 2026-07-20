@@ -46,62 +46,6 @@ static s32 sGdxResetRequested = false;
 void gdx_game_request_reset(void) {
     sGdxResetRequested = true;
 }
-
-/* G-Diffuser in-session save-state: capture of the game-mode/race-flow scalars (native BSS).
-   Additive; port build only. Pure POD (no pointers). See port/gdx_savestate.c. */
-typedef struct GdxSsField { void* addr; unsigned int size; } GdxSsField;
-
-static const GdxSsField sGdxSsGame[] = {
-    { (void*)&gGameMode, (unsigned int)sizeof(gGameMode) },
-    { (void*)&gQueuedGameMode, (unsigned int)sizeof(gQueuedGameMode) },
-    { (void*)&gAntiPiracyAddedDifficulty, (unsigned int)sizeof(gAntiPiracyAddedDifficulty) },
-    { (void*)&gGamePaused, (unsigned int)sizeof(gGamePaused) },
-    { (void*)&gNumPlayers, (unsigned int)sizeof(gNumPlayers) },
-    { (void*)&gCupType, (unsigned int)sizeof(gCupType) },
-    { (void*)&gDifficulty, (unsigned int)sizeof(gDifficulty) },
-    { (void*)&gTotalLapCount, (unsigned int)sizeof(gTotalLapCount) },
-    { (void*)&gGameModeChangeState, (unsigned int)sizeof(gGameModeChangeState) },
-    { (void*)&gMenuChangeMode, (unsigned int)sizeof(gMenuChangeMode) },
-};
-
-static void gdx_ss_game_bcopy(unsigned char* d, const unsigned char* s, unsigned int n) {
-    unsigned int i;
-    for (i = 0; i < n; i++) {
-        d[i] = s[i];
-    }
-}
-
-unsigned int Gdx_SaveState_Game_Size(void) {
-    unsigned int total = 0;
-    unsigned int i;
-    unsigned int count = (unsigned int)(sizeof(sGdxSsGame) / sizeof(sGdxSsGame[0]));
-    for (i = 0; i < count; i++) {
-        total += sGdxSsGame[i].size;
-    }
-    return total;
-}
-
-void Gdx_SaveState_Game_Capture(void* dst) {
-    unsigned int off = 0;
-    unsigned int i;
-    unsigned int count = (unsigned int)(sizeof(sGdxSsGame) / sizeof(sGdxSsGame[0]));
-    for (i = 0; i < count; i++) {
-        gdx_ss_game_bcopy((unsigned char*)dst + off, (const unsigned char*)sGdxSsGame[i].addr,
-                          sGdxSsGame[i].size);
-        off += sGdxSsGame[i].size;
-    }
-}
-
-void Gdx_SaveState_Game_Restore(const void* src) {
-    unsigned int off = 0;
-    unsigned int i;
-    unsigned int count = (unsigned int)(sizeof(sGdxSsGame) / sizeof(sGdxSsGame[0]));
-    for (i = 0; i < count; i++) {
-        gdx_ss_game_bcopy((unsigned char*)sGdxSsGame[i].addr, (const unsigned char*)src + off,
-                          sGdxSsGame[i].size);
-        off += sGdxSsGame[i].size;
-    }
-}
 #endif /* PORT */
 
 void (*sGamemodeInitFuncs[])(void) = {

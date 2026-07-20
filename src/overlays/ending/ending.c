@@ -655,6 +655,23 @@ s32 EndingCutscene_UpdateState(void) {
         }
         cutsceneResults++;
     }
+#ifdef PORT
+    /* GDX ceremony diag: once per second (30 frames @30Hz) dump the GP-end ceremony state so a
+       stalled fireworks gate is diagnosable -- sFireworksType/gActiveFireworks never reaching
+       (NONE,0) is exactly what keeps sEndingState pinned at ENDING_THANKS_FOR_PLAYING and drives
+       the watchdog toward its 1200 bypass. Strip once the ceremony renders correctly. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sGdxCeremonyDiagCounter = 0;
+        if ((sGdxCeremonyDiagCounter++ % 30) == 0) {
+            gdx_cki("[GDX ceremony] sEndingState", (int) sEndingState);
+            gdx_cki("[GDX ceremony] sEndingTimer", (int) sEndingTimer);
+            gdx_cki("[GDX ceremony] sFireworksType", (int) sFireworksType);
+            gdx_cki("[GDX ceremony] gActiveFireworks", (int) gActiveFireworks);
+            gdx_cki("[GDX ceremony] thanksGateWatchdog", (int) sEndingThanksGateWatchdog);
+        }
+    }
+#endif
     if ((exitState != 0) && (gEndingFlags & ENDING_FOLLOW_WITH_CREDITS)) {
         exitState = 2;
     }
@@ -1023,10 +1040,45 @@ Gfx* EndingCutscene_DrawThanksForPlayingWindow(Gfx* gfx) {
     static s32 sThanksForPlayingTop;
     static s32 sThanksForPlayingWidth;
     static s32 sThanksForPlayingBackgroundAlpha;
+#ifdef PORT
+    s32 gdxWideThanks = false;
+#endif
 
     sThanksForPlayingBackgroundAlpha = (sThanksForPlayingFade * 255) / 120;
 
+#ifdef PORT
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue);
+        extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
+        /* The "Thanks for Playing" backdrop fade must cover the whole viewport. It is a single
+           fill that inherits whatever scissor the results chain last latched, so on a widescreen
+           frame it does not reach the stretched viewport edges. Gate on the 3D Widescreen CVar
+           alone -- NOT WidescreenUI, which only governs 2D anchoring: the fade must cover the
+           viewport whenever the frame is widescreen -- and exclude forced-4:3 editor frames. When
+           set, pin an explicit full-screen scissor and STRETCH the fill so it reaches edge to
+           edge instead of relying on the fragile inherited scissor. */
+        gdxWideThanks = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
+                        !gdx_get_force_fixed_aspect();
+        if (gdxWideThanks) {
+            gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+        }
+    }
+#endif
+
     gfx = func_8007A440(gfx, 12, 8, 308, 232, 0, 0, 0, sThanksForPlayingBackgroundAlpha);
+
+#ifdef PORT
+    /* Close the widescreen scope so the trailing "Thanks" text and the following EndScreen logos
+       draw with a bounded safe-area scissor: clear STRETCH and pin the fade's own 12,8,308,232
+       rect. The stock (gate-off) path is left untouched because the inherited scissor state at
+       this call site cannot be proven from the surrounding chain. */
+    if (gdxWideThanks) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);
+    }
+#endif
+
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, sThanksForPlayingBackgroundAlpha);
 

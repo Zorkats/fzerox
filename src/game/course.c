@@ -4574,13 +4574,16 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
         extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
         s32 drawDistancePercent = CVarGetInteger("gEnhancements.Graphics.DrawDistance", 100);
         // Defensive range clamp independent of the menu slider (the CVar can be hand-edited in the
-        // config file): never shrink below stock, and cap at the recommended slider max (300%) --
-        // segmentChunkGroup accumulation already bails out gracefully past its fixed capacity, but
-        // there is no reason to feed it an unbounded multiplier.
+        // config file): never shrink below stock, and cap at 200%. 200% is the EFFECTIVE ceiling,
+        // not an arbitrary limit: the track is streamed as a fixed set of chunks built only out to a
+        // bounded horizon (gSegmentChunks, capped at SEGMENT_CHUNK_COUNT), so once the scaled cull
+        // threshold (sCourseFarRenderDistance * scale) clears the furthest built chunk -- which
+        // happens by ~200% -- a larger multiplier un-culls nothing. Feeding it beyond 200% is inert,
+        // so clamp there and keep the menu slider honest (see gdx_menu.cpp DrawGraphicsMenu).
         if (drawDistancePercent < 100) {
             drawDistancePercent = 100;
-        } else if (drawDistancePercent > 300) {
-            drawDistancePercent = 300;
+        } else if (drawDistancePercent > 200) {
+            drawDistancePercent = 200;
         }
         gdxFarRenderDistanceScale = (f32) drawDistancePercent / 100.0f;
     }

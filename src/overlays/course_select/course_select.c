@@ -21,6 +21,17 @@ UNUSED s32 D_i5_8007B080 = 0;
 
 #ifdef PORT
 extern int gdx_ghost_library_has_player(s32 encodedCourseIndex);
+
+/* Cup-to-cup squeeze instrumentation (enabled by GDX_TRACE=1; gdx_cki is
+   trace-gated internally). Correlates the frame a cup-selection change lands
+   with the model-scene update/draw paths suspected of emitting one fixed-4:3
+   viewport frame per selection change. Logging is bounded to a few frames
+   after each cup change so a browse session stays readable. */
+extern void gdx_cki(const char* s, int v);
+extern u32 gGameFrameCount;
+static u32 sGdxCupChangeFrame = 0xFFFFFFFFu;
+#define GDX_CUPSEL_WINDOW() \
+    (sGdxCupChangeFrame != 0xFFFFFFFFu && (gGameFrameCount - sGdxCupChangeFrame) <= 4u)
 #endif
 
 s32 sCourseSelectState = COURSE_SELECT_CUP_SELECT;
@@ -663,6 +674,11 @@ s32 CourseSelect_Update(void) {
                 sCourseSelectCup = gCupSelectOption;
             }
             if (originalCupSelectOption != gCupSelectOption) {
+#ifdef PORT
+                sGdxCupChangeFrame = gGameFrameCount;
+                gdx_cki("[GDX cupsel] cup change frame", (int) gGameFrameCount);
+                gdx_cki("[GDX cupsel] cup change option", gCupSelectOption);
+#endif
 #ifdef EXPANSION_KIT
                 if (gInputPressed & (BTN_LEFT | BTN_RIGHT)) {
                     D_i5_8007C2AF = -1;
@@ -1072,6 +1088,14 @@ Gfx* CourseSelect_ModelDraw(Gfx* gfx, Object* modelObj) {
         case COURSE_SELECT_NEXT_COURSE_AWAIT_INPUT:
         case COURSE_SELECT_NEXT_COURSE_CONTINUE:
             if (sCourseSelectCup < NUM_COMPETITIVE_CUPS) {
+#ifdef PORT
+                /* Any hit inside the post-cup-change window is the smoking gun:
+                   the carousel viewport draw ran while browsing cups. */
+                if (GDX_CUPSEL_WINDOW()) {
+                    gdx_cki("[GDX cupsel] 80115E64 DRAW state", sCourseSelectState);
+                    gdx_cki("[GDX cupsel] 80115E64 DRAW frame", (int) gGameFrameCount);
+                }
+#endif
                 gfx = func_i5_80115E64(gfx);
             }
             break;
@@ -1280,12 +1304,36 @@ Gfx* CourseSelect_OkDraw(Gfx* gfx, Object* okObj) {
 Gfx* CourseSelect_ArrowsDraw(Gfx* gfx, Object* arrowsObj) {
     f32 temp_fv0 = (SIN(LEFT_ARROW_ROTATION(arrowsObj)) + 1.0) / 2;
     f32 temp_fa1 = (SIN(RIGHT_ARROW_ROTATION(arrowsObj)) + 1.0) / 2;
+#ifdef PORT
+    /* On the first/last track (and during the OK confirmation) the game parks the unusable
+     * navigation arrow past the 4:3 edge -- left native X reaches -57, right native X reaches
+     * 345 -- so the N64 hardware scissor hides it. The wider 16:9 viewport has no such clip and
+     * would otherwise reveal that parked arrow glued to the physical screen edge (the reported
+     * right-arrow sliver). Skip an arrow whose native X falls outside the 4:3 screen. Gated on
+     * the widescreen-UI CVars: with them off, both arrows always emit and the list is
+     * bit-identical to stock. Mirrors CourseSelect_GhostMarkerDraw's -30..SCREEN_WIDTH clip. */
+    extern int gdx_widescreen_ui_active(void);
+    s32 gdxWideArrows = gdx_widescreen_ui_active();
+    s32 leftArrowX = LEFT_ARROW_LEFT(arrowsObj) + 0x2B;
+    s32 rightArrowX = RIGHT_ARROW_LEFT(arrowsObj) + 0xF5;
 
+    // left and top represent x positions for left and right arrows for this object
+    if (!gdxWideArrows || ((leftArrowX >= -30) && (leftArrowX <= SCREEN_WIDTH))) {
+        gfx = func_80078EA0_impl(gfx, sYellowArrowCompTexInfo, leftArrowX,
+                                 (((1.0 - temp_fv0) * 16.0) + 112.0), 3, 0, 0, 1.0f, temp_fv0, true);
+    }
+    if (!gdxWideArrows || ((rightArrowX >= -30) && (rightArrowX <= SCREEN_WIDTH))) {
+        gfx = func_80078EA0_impl(gfx, sYellowArrowCompTexInfo, rightArrowX,
+                                 (((1.0 - temp_fa1) * 16.0) + 112.0), 5, 0, 0, 1.0f, temp_fa1, true);
+    }
+    return gfx;
+#else
     // left and top represent x positions for left and right arrows for this object
     gfx = func_80078EA0_impl(gfx, sYellowArrowCompTexInfo, LEFT_ARROW_LEFT(arrowsObj) + 0x2B,
                              (((1.0 - temp_fv0) * 16.0) + 112.0), 3, 0, 0, 1.0f, temp_fv0, true);
     return func_80078EA0_impl(gfx, sYellowArrowCompTexInfo, RIGHT_ARROW_LEFT(arrowsObj) + 0xF5,
                               (((1.0 - temp_fa1) * 16.0) + 112.0), 5, 0, 0, 1.0f, temp_fa1, true);
+#endif
 }
 
 Gfx* CourseSelect_NameDraw(Gfx* gfx) {
@@ -1429,6 +1477,30 @@ Gfx* CourseSelect_GhostOptionDraw(Gfx* gfx, Object* ghostOptionObj) {
     }
 #endif
 
+#ifdef PORT
+    /* Unlike its sibling draws (CourseSelect_GhostMarkerDraw / CourseSelect_NameDraw, which
+     * explicitly skip the cup-select states), this column always emits: on 4:3 it stays hidden
+     * only because the object is parked past the right edge (base X 150 -> text native X 345)
+     * and the hardware scissor clips it. The 16:9 viewport reveals that parked text glued to the
+     * physical right edge (the reported "Wi" sliver). Skip the same states the marker/name draws
+     * skip. Gated on the widescreen-UI CVars so a CVar-off build still emits the stock off-screen
+     * draws and remains bit-identical. */
+    {
+        extern int gdx_widescreen_ui_active(void);
+        if (gdx_widescreen_ui_active()) {
+            switch (sCourseSelectState) {
+                case COURSE_SELECT_CUP_SELECT:
+                case COURSE_SELECT_EXIT_RECORDS:
+                case COURSE_SELECT_START_EXIT:
+                case COURSE_SELECT_EXIT:
+                    return gfx;
+                default:
+                    break;
+            }
+        }
+    }
+#endif
+
     numUnlockedGhosts = sUnlockedGhosts + 1;
 
     for (i = 0; i < numUnlockedGhosts; i++) {
@@ -1460,6 +1532,15 @@ void CourseSelect_ModelUpdate(Object* modelObj) {
     s32 temp_a1;
     bool var_v1;
 
+#ifdef PORT
+    if (GDX_CUPSEL_WINDOW()) {
+        gdx_cki("[GDX cupsel] modelupdate state", sCourseSelectState);
+        gdx_cki("[GDX cupsel] modelupdate counter", OBJECT_COUNTER(modelObj));
+#ifdef EXPANSION_KIT
+        gdx_cki("[GDX cupsel] modelupdate loadTimer", D_i5_801190B4);
+#endif
+    }
+#endif
 #ifdef EXPANSION_KIT
     if (D_i5_801190B4 == 0) {
         OBJECT_COUNTER(modelObj) = 1;
@@ -1479,6 +1560,11 @@ void CourseSelect_ModelUpdate(Object* modelObj) {
         default:
             if (OBJECT_COUNTER(modelObj) == 0) {
                 if ((func_80742510() == 0) || (gCupSelectOption < 10)) {
+#ifdef PORT
+                    if (GDX_CUPSEL_WINDOW()) {
+                        gdx_cki("[GDX cupsel] 80115E10 via counter-edge frame", (int) gGameFrameCount);
+                    }
+#endif
                     func_i5_80115E10();
                 }
                 var_v1 = true;
@@ -1494,6 +1580,11 @@ void CourseSelect_ModelUpdate(Object* modelObj) {
     if (!var_v1 &&
         (((sCourseSelectState != COURSE_SELECT_CUP_SELECT) && (sCourseSelectState != COURSE_SELECT_EXIT_RECORDS)) ||
          (gCupSelectOption < 4))) {
+#endif
+#ifdef PORT
+        if (GDX_CUPSEL_WINDOW()) {
+            gdx_cki("[GDX cupsel] 80115E10 via browse-path frame", (int) gGameFrameCount);
+        }
 #endif
         func_i5_80115E10();
     }

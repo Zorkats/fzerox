@@ -176,6 +176,18 @@ void Minimap_InitCourseMinimap(void) {
             sCourseMinimapTex[(row + 1) * MINIMAP_MAX_DIMENSION + column + 1] = MINIMAP_PALETTE_BLACK;
         }
     }
+
+#ifdef PORT
+    /* Fast3D keys CI8 textures by address with no content hash, and the per-race
+       arena rewind re-hands this buffer's address to the next course, so the cache
+       would serve this race's outline for the next one. Evict the exact address now
+       that the buffer has been re-rasterized. Covers every caller of this function
+       (including Course Edit's preview). */
+    {
+        extern void gdx_invalidate_texture_address(const void*);
+        gdx_invalidate_texture_address(sCourseMinimapTex);
+    }
+#endif
 }
 
 extern s16 gSettingVsCom;

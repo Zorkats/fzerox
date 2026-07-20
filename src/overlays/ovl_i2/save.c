@@ -1980,6 +1980,93 @@ void Save_LoadDDCups(ProfileSave* profileSaves, u8* cupCompletion, u16* staffGho
 }
 #endif
 
+#ifdef PORT
+/* Big-endian disk-record byte-swappers (PORT).
+ *
+ * MFS/64DD save records (SaveCourseRecords, GhostRecord, GhostData) are stored on
+ * disk in N64 big-endian byte order. The console consumed them in place; the
+ * little-endian port bcopies the raw disk bytes (port/n64_leo.c LeoReadWrite, via
+ * func_8076852C / func_807684AC / DiskDrive_LoadData), so every multi-byte field
+ * reads byte-reversed. These mirror CourseData_FromRom (course_gadgets.c): swap
+ * ONLY the multi-byte fields. Single-byte fields (u8/s8/char -- including the
+ * MachineInfo blocks and the raw replay input stream) are already correct and must
+ * be left untouched.
+ *
+ * Checksum note (applies to every field marked "checksum" below):
+ *   Save_CalculateChecksum() is an additive byte-sum, which is order-invariant --
+ *   swapping bytes WITHIN a field never changes the sum over the record's bytes.
+ *   On the console the record was written with  stored_checksum == byte_sum(data)
+ *   and stored big-endian, so a raw little-endian read of that u16 field yields
+ *   swap16(S). We therefore byte-swap the stored checksum field TOO: swap16 applied
+ *   to swap16(S) restores S, which still equals the (unchanged) byte-sum S. A
+ *   legitimate console-written record then validates, while a genuinely corrupt
+ *   record (whose bytes no longer sum to its stored value) still fails. */
+static void Gdx_SwapU16InPlace(void* p) {
+    u8* b = (u8*)p;
+    u8 t = b[0];
+    b[0] = b[1];
+    b[1] = t;
+}
+static void Gdx_SwapU32InPlace(void* p) {
+    u8* b = (u8*)p;
+    u8 t0 = b[0];
+    u8 t1 = b[1];
+    b[0] = b[3];
+    b[1] = b[2];
+    b[2] = t1;
+    b[3] = t0;
+}
+
+void SaveCourseRecords_FromRom(SaveCourseRecords* r) {
+    s32 i;
+
+    Gdx_SwapU16InPlace(&r->checksum); /* u16 -- see checksum note above */
+    Gdx_SwapU16InPlace(&r->unk_02);   /* s16 */
+    for (i = 0; i < 5; i++) {
+        Gdx_SwapU32InPlace(&r->timeRecord[i]); /* s32 */
+    }
+    for (i = 0; i < 5; i++) {
+        Gdx_SwapU32InPlace(&r->engines[i]); /* f32 -- swap as raw u32 bits */
+    }
+    Gdx_SwapU32InPlace(&r->maxSpeed); /* f32 -- swap as raw u32 bits */
+    Gdx_SwapU32InPlace(&r->bestTime); /* s32 */
+    /* name[5][4], unk_48[8], unk_50[5], unk_F0: all single-byte. unk_80141C88_unk_1D
+       is MachineInfo (20x u8) followed by s8 unk_14[12] -- verified in unk_structs.h,
+       no multi-byte fields, so nothing to swap. */
+}
+
+void GhostRecord_FromRom(GhostRecord* r) {
+    Gdx_SwapU16InPlace(&r->checksum);           /* u16 -- see checksum note above */
+    Gdx_SwapU16InPlace(&r->ghostType);          /* u16 */
+    Gdx_SwapU32InPlace(&r->replayChecksum);     /* s32 */
+    Gdx_SwapU32InPlace(&r->encodedCourseIndex); /* s32 */
+    Gdx_SwapU32InPlace(&r->raceTime);           /* s32 */
+    Gdx_SwapU16InPlace(&r->unk_10);             /* u16 */
+    /* unk_12[5] (s8), trackName[9] (u8), unk_20 (all single-byte): no swap. */
+}
+
+void GhostData_FromRom(GhostData* d) {
+    s32 i;
+    GhostReplayInfo* ri = &d->replayInfo;
+
+    Gdx_SwapU16InPlace(&ri->checksum); /* u16 -- see checksum note above */
+    Gdx_SwapU16InPlace(&ri->unk_02);   /* s16 */
+    for (i = 0; i < 3; i++) {
+        Gdx_SwapU32InPlace(&ri->lapTimes[i]); /* s32 */
+    }
+    Gdx_SwapU32InPlace(&ri->end);    /* s32 */
+    Gdx_SwapU32InPlace(&ri->size);   /* u32 */
+    Gdx_SwapU32InPlace(&ri->unk_18); /* s32 */
+    Gdx_SwapU32InPlace(&ri->unk_1C); /* s32 */
+    /* replayData[16200] (u8) is the raw replay INPUT stream: byte-addressed, consumed
+       byte-by-byte during playback, and summed as bytes by Save_CalculateGhostDataChecksum
+       (order-invariant). Swapping it would corrupt playback, so it is left untouched.
+       unk_3F68[0x18] (s8) likewise. Open question: only the GhostReplayInfo header is
+       provably multi-byte from the struct definition; nothing in the decomp indicates a
+       multi-byte field embedded in the stream, so none is swapped there. */
+}
+#endif
+
 u16 Save_CalculateChecksum(void* data, s32 size) {
     u8* dataPtr = data;
     u16 checksum = 0;

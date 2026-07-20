@@ -5,7 +5,9 @@
 #ifdef PORT
 /* Host format guard (port/disk_savefile.cpp): default-off predicate plus an
    always-on refusal log. Raw externs -- this decomp TU cannot include the host
-   headers. Used by the D6 auto-format guard in Mfs_ValidateRamVolume below. */
+   headers. Used by the D6 terminal format gate in func_i1_80404830 below, at the
+   genuine not-initialized decision point (NOT inside Mfs_ValidateRamVolume, which
+   is a pure comparison invoked transiently against a wiped cache on every mount). */
 extern int gdx_disk_allow_format(void);
 extern void gdx_disk_log_format_refused(void);
 #endif
@@ -393,27 +395,12 @@ s32 Mfs_ValidateRamVolume(void) {
     }
 
     if (j != 0) {
-#ifdef PORT
-        /* Port D6 guard: an unformatted/foreign RAM area would normally raise
-           N64DD_MEDIA_NOT_INIT and route through the interactive format prompt,
-           which the port cannot present. The port historically auto-formatted
-           here so the EK boots on a blank MFS RAM area -- but that fires
-           unprompted and, with the durable disk sidecar, would overwrite the
-           user's prior saved RAM area. Gate the auto-format behind the host
-           format predicate (default off). When allowed, format as before; when
-           refused, fall through to the retail not-initialized path (no disk
-           write) so the game continues exactly as for a not-yet-initialized
-           disk. Port-only: hardware builds keep the retail error path. */
-        if (gdx_disk_allow_format()) {
-#if MFS_VERSION == MFS_VERSION_A
-            Mfs_InitRamArea(1);
-#else
-            Mfs_InitRamArea(1, 0, NULL);
-#endif
-            return 0;
-        }
-        gdx_disk_log_format_refused();
-#endif
+        /* PORT: this is a PURE comparison again -- the D6 auto-format/refusal
+           gate was moved out to func_i1_80404830's terminal decision point. This
+           function runs transiently against the wiped cache (func_i1_804040EC
+           clears id.diskId[0]) on the first pass of every mount, so gating here
+           latched a false "uninitialized" status and could consume the one-shot
+           format opt-in spuriously. It must only report the mismatch. */
         gMfsError = N64DD_MEDIA_NOT_INIT;
         return -1;
     }
@@ -537,6 +524,45 @@ s32 func_i1_80404830(void) {
 
 #if MFS_VERSION == MFS_VERSION_A
     gMfsError = N64DD_MEDIA_NOT_INIT;
+#endif
+
+#ifdef PORT
+    /* Port D6 terminal format gate (relocated from Mfs_ValidateRamVolume).
+       Reached ONLY when the on-disk MFS RAM volume is genuinely invalid: the
+       transient wiped-cache first-pass Mfs_ValidateRamVolume failed, the real
+       volume was re-read via Mfs_ReadRamArea, and the SECOND validate still
+       failed. (A read error returns -1 earlier; a MEDIUM_MAY_HAVE_CHANGED status
+       returns -1 earlier; a passing volume returns 0 earlier. So this is the sole
+       genuine not-initialized decision point.) gMfsError is already
+       N64DD_MEDIA_NOT_INIT here.
+
+       Because the gate now lives here and not inside Mfs_ValidateRamVolume, the
+       per-mount transient first-pass failure can neither latch the Workshop
+       "uninitialized" status (gdx_disk_log_format_refused) nor consume the
+       one-shot format opt-in (gdx_disk_allow_format) spuriously.
+
+       Policy (host predicate, default off): when a format is authorized, format
+       the RAM area exactly as retail's not-initialized recovery would -- the same
+       Mfs_InitRamArea(1, ...) that the func_80706518 media-init path performs --
+       and report the volume as mounted (return 0). When refused, latch the
+       Workshop status and fall through to retail's not-initialized error path
+       (return -1, no disk write) so callers behave as for a not-yet-initialized
+       disk. The format lands in the in-memory disk image and the dirty-range
+       sidecar only, never in the user's pristine .ndd. Port-only; hardware builds
+       keep the retail error path. */
+    if (gdx_disk_allow_format()) {
+#if MFS_VERSION == MFS_VERSION_A
+        if (Mfs_InitRamArea(1) == 0) {
+            return 0;
+        }
+#else
+        if (Mfs_InitRamArea(1, 0, NULL) == 0) {
+            return 0;
+        }
+#endif
+        return -1;
+    }
+    gdx_disk_log_format_refused();
 #endif
     return -1;
 }

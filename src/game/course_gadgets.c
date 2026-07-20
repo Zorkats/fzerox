@@ -3967,6 +3967,30 @@ static void CourseData_FromRom(CourseData* cd) {
 }
 #endif
 
+#if defined(PORT) && defined(EXPANSION_KIT)
+/* func_8076852C fills the WHOLE CourseContext (courseData + ghostSave[3] +
+ * saveCourseRecord) from a big-endian MFS "GOST"/"CRSD" file. After every such
+ * fetch the three ghost records+data and the course record must be byte-swapped
+ * before any checksum validation (DDSave_ValidateCachedGhostRecords) or field use,
+ * exactly as courseData is handled by CourseData_FromRom on the ROM/disk paths.
+ * The record swappers live in ovl_i2/save.c (next to the checksum routines they
+ * pair with); declared extern here following the fzx_save.h consumer pattern. */
+extern void SaveCourseRecords_FromRom(SaveCourseRecords*);
+extern void GhostRecord_FromRom(GhostRecord*);
+extern void GhostData_FromRom(GhostData*);
+
+static void Gdx_CourseContextSaves_FromRom(void) {
+    GhostSave* ghostSave = COURSE_CONTEXT()->ghostSave;
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        GhostRecord_FromRom(&ghostSave[i].record);
+        GhostData_FromRom(&ghostSave[i].data);
+    }
+    SaveCourseRecords_FromRom(&COURSE_CONTEXT()->saveCourseRecord);
+}
+#endif
+
 void Course_Load(s32 courseIndex) {
     s32 pad;
     s32 diskCourseIndex;
@@ -4035,6 +4059,9 @@ void Course_Load(s32 courseIndex) {
             if (gLeoDriveConnectionState != 0) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
                 osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+                Gdx_CourseContextSaves_FromRom();
+#endif
             }
             Course_CalculateChecksum();
             if (DDSave_ValidateCachedGhostRecords()) {
@@ -4067,6 +4094,9 @@ void Course_Load(s32 courseIndex) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
                               sizeof(CourseContext));
                 osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+                Gdx_CourseContextSaves_FromRom();
+#endif
             }
             if (D_8079F9B4 != 0) {
                 PRINTF("ENTRY CHECK BUT NONE %s (DEFAULT COURSE)\n", gEditCupTrackNames[diskCourseIndex]);
@@ -4083,6 +4113,9 @@ void Course_Load(s32 courseIndex) {
                             func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(),
                                           sizeof(CourseContext));
                             osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+                            Gdx_CourseContextSaves_FromRom();
+#endif
                         }
                         Course_CalculateChecksum();
                         if (DDSave_ValidateCachedGhostRecords()) {
@@ -4136,6 +4169,9 @@ void Course_Load(s32 courseIndex) {
         if ((gLeoDriveConnectionState != 0) && (gTitleDemoState == TITLE_DEMO_INACTIVE)) {
             func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
             osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+            Gdx_CourseContextSaves_FromRom();
+#endif
         }
 #endif
 
@@ -4236,6 +4272,9 @@ void func_80702448(s32 courseIndex) {
             if (gLeoDriveConnectionState != 0) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
                 osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+                Gdx_CourseContextSaves_FromRom();
+#endif
             }
             Course_CalculateChecksum();
             if (DDSave_ValidateCachedGhostRecords()) {
@@ -4266,6 +4305,9 @@ void func_80702448(s32 courseIndex) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
                               sizeof(CourseContext));
                 osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+                Gdx_CourseContextSaves_FromRom();
+#endif
             }
             PRINTF("ENTRY CHECK BUT NONE %s (DEFAULT COURSE)\n");
             if (D_8079F9B4 != 0) {
@@ -4284,6 +4326,9 @@ void func_80702448(s32 courseIndex) {
                             func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(),
                                           sizeof(CourseContext));
                             osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
+#ifdef PORT
+                            Gdx_CourseContextSaves_FromRom();
+#endif
                         }
                         Course_CalculateChecksum();
                         if (DDSave_ValidateCachedGhostRecords()) {

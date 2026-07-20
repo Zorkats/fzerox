@@ -1792,6 +1792,9 @@ void Menus_InitGameover(s32 playerIndex) {
 
 Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
     s32 pad[4];
+#ifdef PORT
+    s32 gdxWideGameover = false;
+#endif
     f32 temp_fv0_2;
     s32 row;
     s32 alpha;
@@ -1819,6 +1822,28 @@ Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
         gDPSetAlphaCompare(gfx++, G_AC_NONE);
         gDPSetCombineMode(gfx++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+#ifdef PORT
+        {
+            extern int CVarGetInteger(const char* name, int defaultValue);
+            extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
+            /* The retire fade must black out the whole viewport. Its quads take the default
+               hor+ 4:3 confinement (GfxDrawRectangle) while the safe-area scissor above is
+               scaled linearly, so on a widescreen frame the two mismatch and leave uncovered
+               vertical strips at the sides. Gate on the 3D Widescreen CVar alone -- NOT
+               WidescreenUI, which only governs 2D anchoring: a fullscreen fade must cover the
+               viewport whenever the frame is widescreen -- and exclude forced-4:3 editor frames
+               so their fade matches the pillarboxed content. When set, reopen the scissor to the
+               full screen and STRETCH the fade quads so both reach edge to edge. The row loop's
+               x=12..308 span is deliberately left untouched: the interpreter's stretchActive
+               kSafeAreaScale is calibrated for exactly that span. */
+            gdxWideGameover = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
+                              !gdx_get_force_fixed_aspect();
+            if (gdxWideGameover) {
+                gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+            }
+        }
+#endif
 
         for (row = 16; row < 224; row++) {
             alpha = (row - 124);
@@ -1836,6 +1861,14 @@ Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
             gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, alpha);
             gSPTextureRectangle(gfx++, 12 << 2, row << 2, 308 << 2, (row + 1) << 2, 0, 0, 0, 1 << 10, 1 << 10);
         }
+#ifdef PORT
+        /* Close the widescreen scope so the following 3D GAMEOVER logo draws with stock state:
+           clear the STRETCH mode and restore the safe-area scissor the stock path leaves latched. */
+        if (gdxWideGameover) {
+            gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+            gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+        }
+#endif
     }
 
     if (gRacers[playerIndex].stateFlags & RACER_STATE_FINISHED) {
@@ -2686,9 +2719,29 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
 #endif
 
     gDPPipeSync(gfx++);
+#ifdef PORT
+    {
+        /* The reveal wipe counts sGeneralRaceMenuScissorBoxTimer 60 -> 0. For the first frames
+           (timer > 46) the stock scissor is INVERTED: ulx = timer+205 > lrx = 305-timer, and/or
+           uly = timer+132 > lry = 225-timer. On real RDP an inverted scissor rejects every pixel,
+           which IS the intended "panel not yet revealed" state. The port's software scissor does
+           not replicate that and instead renders the panel at a degenerate/oversized rect (the
+           giant black panel at the TA finish). Clamp each axis so an inverted range collapses to a
+           zero-area rect -> nothing drawn, matching console. Once the window becomes valid the stock
+           coordinates are emitted unchanged, so the reveal animation is preserved. */
+        s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
+        s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
+        s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
+        s32 lry = 225 - sGeneralRaceMenuScissorBoxTimer;
+        if (ulx > lrx) { ulx = lrx; }
+        if (uly > lry) { uly = lry; }
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
+    }
+#else
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, sGeneralRaceMenuScissorBoxTimer + 205,
                   sGeneralRaceMenuScissorBoxTimer + 132, 305 - sGeneralRaceMenuScissorBoxTimer,
                   225 - sGeneralRaceMenuScissorBoxTimer);
+#endif
     gfx = Menus_DrawBeveledBox(gfx, 210, 137, 300, 220, 0, 0, 0, 180);
     gSPDisplayList(gfx++, aMenuTextTlutSetupDL);
     gDPLoadTLUT_pal256(gfx++, func_800783AC(aMenuTextTLUT));
@@ -2993,9 +3046,24 @@ Gfx* Menus_DrawRetiredEndMenu(Gfx* gfx) {
     }
 
     gDPPipeSync(gfx++);
+#ifdef PORT
+    {
+        /* Same inverted-reveal-scissor bug class as Menus_DrawTimeAttackFinishMenu: clamp each
+           axis so an inverted range collapses to a zero-area rect (nothing drawn), replicating the
+           console "not yet revealed" state that an inverted RDP scissor produces. */
+        s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
+        s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
+        s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
+        s32 lry = 226 - sGeneralRaceMenuScissorBoxTimer;
+        if (ulx > lrx) { ulx = lrx; }
+        if (uly > lry) { uly = lry; }
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
+    }
+#else
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, sGeneralRaceMenuScissorBoxTimer + 205,
                   sGeneralRaceMenuScissorBoxTimer + 132, 305 - sGeneralRaceMenuScissorBoxTimer,
                   226 - sGeneralRaceMenuScissorBoxTimer);
+#endif
     gfx = Menus_DrawBeveledBox(gfx, 210, 137, 300, 221, 0, 0, 200, 127);
     gSPDisplayList(gfx++, aMenuTextTlutSetupDL);
     gDPLoadTLUT_pal256(gfx++, func_800783AC(aMenuTextTLUT));
@@ -3117,9 +3185,24 @@ Gfx* Menus_DrawDeathRaceEndMenu(Gfx* gfx) {
     }
 
     gDPPipeSync(gfx++);
+#ifdef PORT
+    {
+        /* Same inverted-reveal-scissor bug class as Menus_DrawTimeAttackFinishMenu: clamp each
+           axis so an inverted range collapses to a zero-area rect (nothing drawn), replicating the
+           console "not yet revealed" state that an inverted RDP scissor produces. */
+        s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
+        s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
+        s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
+        s32 lry = 210 - sGeneralRaceMenuScissorBoxTimer;
+        if (ulx > lrx) { ulx = lrx; }
+        if (uly > lry) { uly = lry; }
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
+    }
+#else
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, sGeneralRaceMenuScissorBoxTimer + 205,
                   sGeneralRaceMenuScissorBoxTimer + 132, 305 - sGeneralRaceMenuScissorBoxTimer,
                   210 - sGeneralRaceMenuScissorBoxTimer);
+#endif
     if (gRacers[0].stateFlags & RACER_STATE_FINISHED) {
         gfx = Menus_DrawBeveledBox(gfx, 210, 137, 300, 205, 0, 0, 0, 180);
     } else {
@@ -4116,7 +4199,45 @@ Gfx* Menus_DrawPlayerRetire(Gfx* gfx, s32 playerIndex) {
         gDPSetAlphaCompare(gfx++, G_AC_NONE);
         gDPSetCombineMode(gfx++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+#ifdef PORT
+        /* Same widescreen-coverage mismatch as the Gameover fade above: the fade quads take
+           the default hor+ 4:3 confinement while the safe-area scissor scales linearly,
+           leaving uncovered vertical strips at the sides on a widescreen frame. Same gate
+           (3D Widescreen CVar, not WidescreenUI) and same STRETCH bracket; the scissor is
+           restored after the loop so the RETIRE letters keep their safe-area clip. */
+        {
+            extern int CVarGetInteger(const char* name, int defaultValue);
+            extern int gdx_get_force_fixed_aspect(void);
+            s32 gdxWideRetireFade = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
+                                    !gdx_get_force_fixed_aspect();
+            if (gdxWideRetireFade) {
+                gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+            }
 
+            for (row = 16; row < 224; row++) {
+                alpha = (row - 120);
+                if (row < 120) {
+                    alpha = -alpha;
+                }
+                alpha = (sPlayerRetireGameoverFadeTransitionTimer[0] + alpha) - 150;
+                if (alpha < 0) {
+                    alpha = 0;
+                }
+                if (alpha > 255) {
+                    alpha = 255;
+                }
+                gDPPipeSync(gfx++);
+                gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, alpha);
+                gSPTextureRectangle(gfx++, 12 << 2, row << 2, 308 << 2, (row + 1) << 2, 0, 0, 0, 1 << 10, 1 << 10);
+            }
+
+            if (gdxWideRetireFade) {
+                gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+                gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+            }
+        }
+#else
         for (row = 16; row < 224; row++) {
             alpha = (row - 120);
             if (row < 120) {
@@ -4133,6 +4254,7 @@ Gfx* Menus_DrawPlayerRetire(Gfx* gfx, s32 playerIndex) {
             gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, alpha);
             gSPTextureRectangle(gfx++, 12 << 2, row << 2, 308 << 2, (row + 1) << 2, 0, 0, 0, 1 << 10, 1 << 10);
         }
+#endif
     }
 
     switch (gNumPlayers) {
@@ -5510,6 +5632,15 @@ Gfx* Menus_Draw(Gfx* gfx) {
             averageSpeed = gRacers[playerIndex].raceDistance / gRacers[playerIndex].raceTime;
             if (gGameMode == GAMEMODE_GP_RACE) {
                 if (gRaceTimeIntervalToggle) {
+#ifdef PORT
+                    /* WIDESCREEN-UI: the L-button gap-to-rival interval draws at a right-edge-native
+                       base X (222), but outside any anchor scope, so in widescreen it stays at the
+                       4:3 column instead of gluing to the physical right edge like the lap timer
+                       above it. Same Set/Clear idiom as the Hud_DrawHud right-edge group. */
+                    if (gdxWideHud) {
+                        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    }
+#endif
                     if ((averageSpeed > 0.1f) && (gRacersRemaining >= 2)) {
                         if (gRacers[playerIndex].position != 1) {
                             intervalTime = ((gRacersByPosition[0]->raceDistance - gRacers[playerIndex].raceDistance) /
@@ -5533,6 +5664,11 @@ Gfx* Menus_Draw(Gfx* gfx) {
                     } else {
                         gfx = Menus_DrawBlankTimeHundredths(gfx, 222, 54);
                     }
+#ifdef PORT
+                    if (gdxWideHud) {
+                        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    }
+#endif
                 }
                 if ((gTitleDemoState == TITLE_DEMO_INACTIVE) &&
                     (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_L)) {
@@ -5555,6 +5691,12 @@ Gfx* Menus_Draw(Gfx* gfx) {
                 sFastestGhostRacerRacer->raceDistance =
                     sFastestGhostRacerRacer->lapDistance + sFastestGhostRacerLapsCompletedDistance;
                 if (gRaceTimeIntervalToggle) {
+#ifdef PORT
+                    /* WIDESCREEN-UI: same right-edge glue as the GP-race interval above. */
+                    if (gdxWideHud) {
+                        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    }
+#endif
                     if (averageSpeed > 0.1f) {
                         intervalTime = ((sFastestGhostRacerRacer->raceDistance - gRacers[playerIndex].raceDistance) /
                                         averageSpeed) *
@@ -5573,6 +5715,11 @@ Gfx* Menus_Draw(Gfx* gfx) {
                     } else {
                         gfx = Menus_DrawBlankTimeHundredths(gfx, 222, 54);
                     }
+#ifdef PORT
+                    if (gdxWideHud) {
+                        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    }
+#endif
                 }
                 sFastestGhostRacerLapDistance = sFastestGhostRacerRacer->lapDistance;
                 if ((gTitleDemoState == TITLE_DEMO_INACTIVE) &&

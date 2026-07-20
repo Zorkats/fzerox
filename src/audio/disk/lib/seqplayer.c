@@ -1735,6 +1735,14 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
 
             case ASEQ_OP_CHAN_LDIO:
                 scriptState->value = channel->seqScriptIO[lowBits];
+#ifdef PORT
+                if ((channel == gAudioCtx.seqPlayers[0].channels[1]) && (lowBits == 0) &&
+                    (scriptState->value == NA_SE_46)) {
+                    gdx_unlock_diagf("[unlock-audio] sequence channel consumed port=0 value=46 font=%d priority=%d\n",
+                                     channel->fontId, channel->notePriority);
+                    gdx_unlock_audio_expect_note();
+                }
+#endif
                 if (lowBits < 2) {
                     channel->seqScriptIO[lowBits] = SEQ_IO_VAL_NONE;
                 }

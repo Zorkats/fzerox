@@ -495,6 +495,91 @@ void Transition_PopQueue(Transition* transition) {
     }
 }
 
+#ifdef PORT
+extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
+
+/* PORT: force-fixed-aspect latch for the transition background capture.
+   -----------------------------------------------------------------------------
+   CAPTURE/DRAW CONTRACT (Cup Select transient-squeeze fix, obs #1758)
+
+   The widescreen-stretch gate in Transition_Draw decides whether a redrawn
+   CAPTURED frame must be stretched back to the full viewport (game rendered 16:9,
+   force-fixed-aspect OFF) or left pillarboxed 4:3 (force-fixed-aspect ON). That
+   decision MUST match the aspect regime the captured pixels were actually baked
+   under, otherwise the whole wipe visibly squeezes for its duration.
+
+   The live force-fixed-aspect flag snaps to the DESTINATION mode several frames
+   BEFORE the real mode flip (gdx_fixed_aspect_publish keys on
+   gGameMode != gQueuedGameMode; port/input_bridge.c, published once per host frame
+   via gdx_fixed_aspect_tick BEFORE gdx_dispatch runs the game pump -- main.cpp).
+   During those frames the OUTGOING screen is still being captured here, so reading
+   the live getter can stretch a capture that was baked under the OTHER regime.
+
+   TIMING (audited against sys_gfx.c func_80067D64 / func_80067E98): the frame pump
+   runs, in this order EVERY frame, func_800690FC (mode flip + aspect republish +
+   Transition_Update) -> func_80069698 (builds THIS frame's DL; Transition_Draw bakes
+   the stretch decision) -> Gfx_FullSync + DP wait (the PREVIOUS frame's RDP task
+   finishes) -> Transition_SetBackgroundBuffer (reads back the pixels the PREVIOUS
+   frame's DL produced). Because the republish lands before the whole pump, the live
+   regime is CONSTANT within one frame -- identical at Transition_Draw and at
+   Transition_SetBackgroundBuffer. So the capture on frame N contains frame N-1's
+   pixels, which were rendered under frame N-1's regime -- NOT frame N's, which the
+   republish at the top of frame N may have just changed. The old code committed the
+   live getter at capture time (frame N's regime) and thus tagged N-1's pixels with
+   the wrong regime on any regime-change frame: one mis-stretched wipe.
+
+   Fix: commit the regime the captured pixels were ACTUALLY baked under -- frame N-1's
+   value -- via a one-iteration-delayed feed (sGdxPendingCapturedFFA). That slot is
+   advanced UNCONDITIONALLY at the top of Transition_SetBackgroundBuffer (the LAST of
+   the three transition hooks each frame), read-old-then-write-new, so on the capture
+   frame it still holds the PREVIOUS frame's regime. Feeding it there is the provably
+   correct every-frame hook, and the two obvious alternatives are wrong:
+     - Transition_Draw returns early and records nothing on the pre-capture frame,
+       when the transition is not active yet (the capture on the Pop frame reads back
+       the plain outgoing screen, whose DL had no Transition_Draw contribution);
+     - Transition_Update runs at the TOP of the frame, BEFORE the same frame's capture,
+       so a single slot fed there is overwritten with frame N's regime before
+       SetBackgroundBuffer reads it -- identical to the buggy live read (a correct
+       Update-based feed would need a second slot to survive the intra-frame overwrite).
+   Transition_Draw still reads the committed latch when it redraws a captured
+   background; buffer-less color wipes (fade / static fade / small tiles / instant)
+   draw only solid fills, never sample the capture, and keep reading the live value.
+
+   There is a single active transition at a time (the sTransition global holds one
+   backgroundBuffer pointer), so a single file-scope latch (plus its one-frame feed)
+   is correct -- the gFrameBuffers[var_v0] indexing only selects which SOURCE
+   framebuffer to read from, not multiple simultaneous captures. -1 == not primed yet
+   this session, in which case both the commit and Transition_Draw fall back to the
+   live value. When no regime change straddles the capture, frame N-1's regime equals
+   frame N's live value, so the committed latch is byte-for-byte the old behavior --
+   this change is a no-op except on the exact frames that used to squeeze. */
+static s32 sGdxCapturedForceFixedAspect = -1;
+/* One-iteration-delayed feed for the committed latch above (see TIMING). Advanced
+   every frame at the top of Transition_SetBackgroundBuffer, before its SET-flag
+   early-return, so it always trails the live regime by exactly one frame -- which is
+   the regime the pixels captured this frame (the previous frame's render) were baked
+   under. -1 == not yet primed. */
+static s32 sGdxPendingCapturedFFA = -1;
+
+/* True for transition types whose Draw samples transition->backgroundBuffer (the
+   captured outgoing frame): large tiles, tiled whirl/spiral, wipe, phased strips,
+   greyscale palette. Small tiles / fade / static fade / instant draw only solid
+   fills and never sample the capture. */
+static s32 Transition_UsesCapturedBackground(s32 transitionType) {
+    switch (transitionType) {
+        case TRANSITION_TYPE_LARGE_TILES:
+        case TRANSITION_TYPE_TILED_WHIRL:
+        case TRANSITION_TYPE_TILED_SPIRAL:
+        case TRANSITION_TYPE_WIPE:
+        case TRANSITION_TYPE_PHASED_STRIPS:
+        case TRANSITION_TYPE_GREYSCALE_PALETTE:
+            return true;
+        default:
+            return false;
+    }
+}
+#endif
+
 Gfx* Transition_Draw(Gfx* gfx) {
     Transition* transition = &sTransition;
 #ifdef PORT
@@ -511,44 +596,95 @@ Gfx* Transition_Draw(Gfx* gfx) {
 #ifdef PORT
     {
         extern int CVarGetInteger(const char* name, int defaultValue);
-        extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
         /* The transition redraws a CAPTURED frame. Whenever the live game renders widescreen
            (3D Widescreen on), that capture holds a 16:9 composite and must be stretched back
            to the full viewport, or the whole screen visibly squeezes into a centered 4:3 box
            for the duration of the wipe (owner-reported main menu -> Cup Select shrink).
            This is gated on the 3D Widescreen CVar alone -- NOT WidescreenUI, which only
            governs 2D element anchoring -- and stays off for forced-4:3 editor frames so
-           their transitions match the pillarboxed content. The fixed-aspect flag is a live
-           process global (republished at the mode flip in game.c), so this read is correct
-           even on the exact frame an editor is exited. */
-        gdxWideTransition = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
-                            !gdx_get_force_fixed_aspect();
+           their transitions match the pillarboxed content.
+
+           The live fixed-aspect flag snaps to the DESTINATION mode several frames before the
+           real mode flip (gdx_fixed_aspect_publish keys on gGameMode != gQueuedGameMode), so
+           reading it live here can stretch a capture baked under the OTHER regime -> transient
+           squeeze. For transitions that actually sample the capture we therefore use the value
+           LATCHED at capture time (Transition_SetBackgroundBuffer); buffer-less color wipes
+           (fade / static fade / small tiles / instant) never sample the capture and keep the
+           live value. Before any capture this session the latch is -1, so those cases also
+           fall back to the live value. The transition's FIRST draw frame (capture still
+           pending -- see the captureStillPending note below) likewise falls back to live,
+           because on that frame the latch still belongs to a PREVIOUS capture. */
+        s32 liveForceFixedAspect = gdx_get_force_fixed_aspect();
+        s32 usesCapturedBackground = Transition_UsesCapturedBackground(transition->activeTransitionType);
+        /* ORDERING FIX (Cup-Select once-then-clean squeeze, obs follow-up to #1758):
+           within ONE frame the pipeline runs Transition_Update (PopQueue+Init sets
+           TRANSITION_FLAG_SET_BACKGROUND_BUFFER) -> Transition_Draw (HERE, bakes the
+           stretch decision into the display list) -> Transition_SetBackgroundBuffer
+           (reads back the PREVIOUS frame's completed render into backgroundBuffer AND
+           commits the latch -- see the TIMING note above sGdxCapturedForceFixedAspect).
+           So on a transition's FIRST draw frame the committed latch still holds a
+           PREVIOUS capture's value -- a different transition, possibly a different aspect
+           regime (e.g. the main-menu->Cup-Select entry wipe vs. a settled cup-to-cup
+           wipe) -- because this same frame's SetBackgroundBuffer, which commits this
+           transition's value, has not run yet (it is the LAST hook of the three). The
+           RDP task is submitted after SetBackgroundBuffer has filled the buffer, so that
+           first frame renders THIS transition's freshly-captured content. While the
+           capture is still pending we fall back to the LIVE value: it equals the captured
+           pixels' regime whenever no aspect regime change straddles the Pop, which is the
+           common case; the residual worst case is a single mis-stretched frame at the very
+           start of the wipe on a regime-change Pop (the fully-correct previous-frame regime
+           lives in sGdxPendingCapturedFFA at this instant, but per the capture/draw contract
+           the first-frame fallback is deliberately left as live). Once the flag clears
+           (every later frame of the wipe) the committed latch is this transition's own
+           previous-frame value and is used unchanged, which is what fixes the visible
+           full-duration squeeze. */
+        s32 captureStillPending = (transition->flags & TRANSITION_FLAG_SET_BACKGROUND_BUFFER) != 0;
+        s32 effectiveForceFixedAspect =
+            (usesCapturedBackground && !captureStillPending && sGdxCapturedForceFixedAspect >= 0)
+                ? sGdxCapturedForceFixedAspect
+                : liveForceFixedAspect;
+        gdxWideTransition =
+            CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) && !effectiveForceFixedAspect;
         /* GDX-DEBUG-2026-07-15: one bounded line per transition instance (fires when
            activeTransitionType changes to a new non-NONE value). Compares first vs
            subsequent Cup Select / Options visits: type, appear direction, whether the
            STRETCH scope is emitted, live Widescreen/ForceFixedAspect CVars, and the
-           game mode the transition belongs to. Remove once #3/#4 are root-caused. */
+           game mode the transition belongs to. Now also carries the live-vs-latched
+           force-fixed-aspect pair: if they ever diverge mid-wipe for a captured-background
+           transition (div=1 below) that divergence is the exact squeeze being fixed --
+           the latched value is what the STRETCH decision now uses. Remove once #3/#4 are
+           root-caused. */
         {
             extern void gdx_dbg_logf(const char* fmt, ...);
             static u32 sGdxDbgSig = 0xFFFFFFFFu;
             static s32 sGdxDbgCount = 0;
-            /* Log when the (type, appear, mode, wide) signature changes so every distinct
-               transition instance is captured -- including two consecutive wipes of the
-               same type into different game modes (the earlier type-only dedup lost the
-               Cup Select entry because it reused the title wipe's type). */
+            /* Log when the (type, appear, mode, wide, live-vs-latch divergence) signature
+               changes so every distinct transition instance is captured -- including two
+               consecutive wipes of the same type into different game modes (the earlier
+               type-only dedup lost the Cup Select entry because it reused the title wipe's
+               type). The divergence bit re-fires the line even though gdxWideTransition now
+               stays stable across the wipe, so a live/latched split is still visible. */
+            s32 ffaDiverged =
+                usesCapturedBackground && sGdxCapturedForceFixedAspect >= 0 &&
+                (liveForceFixedAspect ? 1 : 0) != (sGdxCapturedForceFixedAspect ? 1 : 0);
             u32 sig = ((u32)(transition->activeTransitionType & 0xFF) << 16) |
                       ((u32)(transition->appearType & 0xFF) << 8) |
                       ((u32)(gGameMode & 0x1F)) |
-                      ((u32)(gdxWideTransition ? 1 : 0) << 24);
+                      ((u32)(gdxWideTransition ? 1 : 0) << 24) |
+                      ((u32)(ffaDiverged ? 1 : 0) << 25) |
+                      ((u32)(captureStillPending ? 1 : 0) << 26);
             if (sig != sGdxDbgSig) {
                 sGdxDbgSig = sig;
                 if (sGdxDbgCount < 200) {
                     sGdxDbgCount++;
-                    gdx_dbg_logf("[GDX-DBG trans] type=%d appear=%d wide=%d W=%d FFA=%d mode=%02X\n",
+                    gdx_dbg_logf("[GDX-DBG trans] type=%d appear=%d wide=%d W=%d FFA=%d "
+                                 "liveFFA=%d capFFA=%d cap=%d div=%d pend=%d mode=%02X\n",
                                   transition->activeTransitionType, transition->appearType,
                                   gdxWideTransition,
                                   CVarGetInteger("gEnhancements.Graphics.Widescreen", 1),
                                   CVarGetInteger("gGdxRuntime.ForceFixedAspect", 0),
+                                  liveForceFixedAspect, sGdxCapturedForceFixedAspect,
+                                  usesCapturedBackground, ffaDiverged, captureStillPending,
                                   gGameMode & 0x1F);
                 }
             }
@@ -641,7 +777,22 @@ void Transition_SetBackgroundBuffer(void) {
     u16* backgroundBufferPtr;
     Transition* transition = &sTransition;
 #ifdef PORT
+    s32 gdxCommittedFFA;
     extern void gdx_set_native_rgba16_texture_range(void* ptr, size_t size, s32 enabled);
+#endif
+
+#ifdef PORT
+    /* Advance the one-iteration-delayed force-fixed-aspect feed EVERY frame, BEFORE the
+       SET-flag early-return below, because when the capture fires it reads back the
+       PREVIOUS frame's completed render (see the TIMING note above Transition_Draw).
+       Snapshot the regime this slot held coming in -- the previous frame's live value,
+       i.e. the regime the about-to-be-captured pixels were baked under -- then refresh
+       the slot with this frame's live regime for the next frame's capture. This runs on
+       every frame (transition active or not) so the slot is already primed one frame
+       ahead of any Pop, including the Pop frame whose capture grabs the plain outgoing
+       screen that no Transition_Draw ever touched. */
+    gdxCommittedFFA = sGdxPendingCapturedFFA;
+    sGdxPendingCapturedFFA = gdx_get_force_fixed_aspect();
 #endif
 
     if (!(transition->flags & TRANSITION_FLAG_SET_BACKGROUND_BUFFER)) {
@@ -661,6 +812,17 @@ void Transition_SetBackgroundBuffer(void) {
         extern s32 gdx_read_current_framebuffer(void* rgba16Buffer, u32 width, u32 height);
         gdx_read_current_framebuffer(gFrameBuffers[var_v0], SCREEN_WIDTH, SCREEN_HEIGHT);
     }
+    /* Commit the regime the captured pixels were ACTUALLY baked under. The capture
+       above read back the PREVIOUS frame's render, so the correct regime is that
+       previous frame's live value -- carried here in gdxCommittedFFA by the one-frame
+       feed advanced at the top of this function. Reading the live getter directly here
+       (the old code) tags the previous frame's pixels with THIS frame's regime, which
+       the republish at the top of the frame may have just flipped -> the mis-stretched
+       wipe. Transition_Draw reads this committed value when it redraws the captured
+       background; see the CAPTURE/DRAW CONTRACT above Transition_Draw. Fall back to the
+       live value only before the feed is primed (-1). Single active transition =>
+       single latch. */
+    sGdxCapturedForceFixedAspect = (gdxCommittedFFA >= 0) ? gdxCommittedFFA : gdx_get_force_fixed_aspect();
 #endif
 
     osInvalDCache(gFrameBuffers[var_v0], SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(u16));

@@ -501,60 +501,18 @@ void Audio_TriggerVoiceSEStart(u8 sfxId, u16 time) {
 
 extern s32 D_800D11C8[];
 
-#ifdef PORT
-/* PORT: gEnhancements.Audio.FinalLapAdaptive (Tier 2, docs/COMING_SOON_ROADMAP.md -- "Gameplay >
-   Adaptive final-lap audio"; proposed CVar per docs/menu/GAMEPLAY_TAB.md:236 -- Audio-owned
-   namespace even though the *trigger* is gameplay-side, per that doc's note: surface the toggle
-   in the Gameplay tab, but this atomic and its read/apply belong to Audio). Opt-in, default OFF.
-   NA_SE_18 is the game's own final-lap voice cue ("Yeah! The final lap") fired exactly once per
-   race from Hud_UpdatePlayerHudInfo (overlays/ovl_i3/hud.c:555-558, guarded by the
-   sFinalLapStarted latch) -- the same lap-vs-gTotalLapCount detection point the roadmap points
-   at, already funneled into this function's NA_SE_18 branch below. When enabled, this nudges the
-   music mix a subtle amount louder for the remainder of the race.
-
-   Mechanism: seqPlayerIndex 1 is the dedicated BGM sequence player in this engine (see every
-   AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, bgm + SEQ_DDBGM_..., ...) call in this file); seqPlayerIndex 0
-   is SFX/voice (SEQ_SOUND_EFFECTS / SEQ_GUITAR). AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE writes
-   seqPlayer->fadeVolumeScale, a plain multiplier applied on top of the player's normal fade volume
-   (Audio_SequencePlayerProcessSound: appliedFadeVolume = fadeVolume * fadeVolumeScale --
-   lib/effects.c) -- since it only touches seqPlayer 1, this is scoped to the music mix only and
-   cannot affect SFX/voice/engine sounds on seqPlayer 0. It goes through the same
-   AudioThread_QueueCmdF32 command-queue path every other runtime volume change in this file
-   already uses (AUDIOCMD_CHANNEL_SET_VOL_SCALE etc.), so it introduces no new audio-thread-safety
-   surface: the write happens on the audio thread when it drains the queue, never directly from
-   this (game-logic-thread) call.
-
-   Reversibility: fadeVolumeScale resets to 1.0f in AudioSeq_InitSequencePlayer (lib/seqplayer.c),
-   which every AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, ...) call runs through -- i.e. the boost is
-   automatically cleared the next time a BGM track (re)loads (end of race, mode change, retry),
-   with no explicit revert needed here.
-
-   Known caveat / where a richer effect would hook: fadeVolumeScale is ALSO a target of the
-   composed sequence data itself (ASEQ_OP_SEQ_VOLSCALE, lib/seqplayer.c ~:1929) -- if the currently
-   playing BGM's own binary sequence script issues that opcode after this call, it will overwrite
-   our nudge (fails safe: the boost silently reverts to normal, not a crash/desync). None of this
-   decomp's source auditing can tell which of the compiled .seq assets use that opcode. A richer,
-   asset-data-aware effect (e.g. only boosting during instrumental sections, or scaling the lift by
-   remaining race distance) would need either confirming no in-flight track relies on
-   ASEQ_OP_SEQ_VOLSCALE, or moving to a per-channel nudge on the specific melody channel(s) via
-   AUDIOCMD_CHANNEL_SET_VOL_SCALE(1, channelIndex, scale) instead of the whole-player scale used
-   here -- left as a follow-up once this flat version is validated in-game. */
-static void gdx_final_lap_audio_boost(void) {
-    extern int CVarGetInteger(const char* name, int defaultValue);
-
-    if (!CVarGetInteger("gEnhancements.Audio.FinalLapAdaptive", 0)) {
-        return;
-    }
-    /* +15% on the BGM sequence player only -- subtle, not a hard cut, and coincides with the
-       final-lap voice cue that already just fired above. */
-    AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.15f);
-}
-#endif
-
 void Audio_TriggerSystemSE(u8 sfxId) {
     u8 i;
 
     PRINTF("==BANDO== System SE = %02x\n", sfxId);
+
+#ifdef PORT
+    if (sfxId == NA_SE_46) {
+        gdx_unlock_diagf("[unlock-audio] trigger id=46 optionGate=%d optionSfx=%d player0Enabled=%d seqId=%d\n",
+                         D_80771C94, D_800D11C8[3], gAudioCtx.seqPlayers[0].enabled,
+                         gAudioCtx.seqPlayers[0].seqId);
+    }
+#endif
 
 #ifdef PORT
     /* Booster SFX investigation (task: missing NA_SE_7 boost sound). On EK
@@ -577,6 +535,11 @@ void Audio_TriggerSystemSE(u8 sfxId) {
 #endif
 
     if ((D_80771C94 == 1) && (D_800D11C8[3] == 0)) {
+#ifdef PORT
+        if (sfxId == NA_SE_46) {
+            gdx_unlock_diagf("[unlock-audio] dropped id=46 by option SFX gate\n");
+        }
+#endif
         return;
     }
 
@@ -592,9 +555,6 @@ void Audio_TriggerSystemSE(u8 sfxId) {
         Audio_TriggerVoiceSEStart(sfxId, 131);
     } else if (sfxId == NA_SE_18) {
         Audio_TriggerVoiceSEStart(sfxId, 179);
-#ifdef PORT
-        gdx_final_lap_audio_boost();
-#endif
     } else if (sfxId == NA_SE_42) {
         Audio_TriggerVoiceSEStart(sfxId, 190);
     } else if (sfxId == NA_SE_44) {
@@ -620,6 +580,11 @@ void Audio_TriggerSystemSE(u8 sfxId) {
     } else if (sfxId == NA_SE_67) {
         Audio_TriggerVoiceSEStart(sfxId, 155);
     } else {
+#ifdef PORT
+        if (sfxId == NA_SE_46) {
+            gdx_unlock_diagf("[unlock-audio] routing id=46 as system SFX\n");
+        }
+#endif
         Audio_SystemSEStart(sfxId);
     }
 }
@@ -758,6 +723,10 @@ void Audio_SEStart(u8 channelIndex, u8 ioData) {
     PRINTF("==BANDO== Na_SE_Start CALLED!! setype = %02x(hex) senum = %02x(hex) \n", channelIndex, ioData);
     AUDIOCMD_CHANNEL_SET_IO(0, channelIndex, 0, ioData);
 #ifdef PORT
+    if (channelIndex == 1 && ioData == NA_SE_46) {
+        gdx_unlock_diagf("[unlock-audio] queued player=0 channel=1 port=0 value=46 enabled=%d seqId=%d\n",
+                         gAudioCtx.seqPlayers[0].enabled, gAudioCtx.seqPlayers[0].seqId);
+    }
     /* Diagnostic (task #12): every menu/system SFX request funnels here as a
        channel-IO write to seqPlayer 0. Encodes chan*1000000 + sfx*1000 +
        p0seq*10 + enabled so one line shows the request AND whether player 0

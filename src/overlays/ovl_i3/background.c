@@ -1366,9 +1366,17 @@ Gfx* Background_DrawBackgroundSprites(Gfx* gfx) {
         gDPPipeSync(gfx++);
 
         if (sSkyboxFlags & SKYBOX_NIGHTTIME) {
+#ifdef PORT
+            gDPLoadTLUT_pal16(gfx++, 0, D_1000000.unk_2C528[backgroundSprite->replacementIndex]);
+#else
             gDPLoadTLUT_pal256(gfx++, D_1000000.unk_2C528[backgroundSprite->replacementIndex]);
+#endif
         } else {
+#ifdef PORT
+            gDPLoadTLUT_pal16(gfx++, 0, backgroundSprite->palette);
+#else
             gDPLoadTLUT_pal256(gfx++, backgroundSprite->palette);
+#endif
         }
         gDPLoadTextureBlock_4b(gfx++, backgroundSprite->texture, G_IM_FMT_CI, 64, 64, 0, G_TX_NOMIRROR | G_TX_CLAMP,
                                G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);

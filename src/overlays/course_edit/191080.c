@@ -496,8 +496,22 @@ Gfx* func_xk2_800E0988(Gfx* gfx) {
         return gfx;
     }
 
+#ifdef PORT
+    // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Companion to the
+    // skip in func_xk2_800E73DC: here the selected node's track-shape-colored line is skipped when
+    // D_800DCD04 == 0 (drawn 2 of every 3 game frames), the inverse phase of the other draw path.
+    // Same triple-framebuffer rotation blink under the port's digital present. When the reducer is
+    // on, draw the selected line every frame (steady-on) so the highlight is solid; when off, keep
+    // the stock D_800DCD04 == 0 skip byte-identical. See port/gdx_menu.cpp DrawGameplayMenu.
+    extern int CVarGetInteger(const char* name, int defaultValue);
+    s32 gdxReduceFlash = CVarGetInteger("gEnhancements.Gameplay.ReduceEditorFlashing", 0);
+#define GDX_EDIT_LINE_SKIP (gdxReduceFlash ? 0 : (D_800DCD04 == 0))
+#else
+#define GDX_EDIT_LINE_SKIP (D_800DCD04 == 0)
+#endif
+
     for (i = 0; i < D_xk2_800F7058; i++) {
-        if ((func_xk2_800E08FC(i) == D_800D6CA0.unk_0C) && (D_800DCD04 == 0) &&
+        if ((func_xk2_800E08FC(i) == D_800D6CA0.unk_0C) && GDX_EDIT_LINE_SKIP &&
             (gCreateOption != CREATE_OPTION_POINT)) {
             continue;
         }
@@ -509,6 +523,7 @@ Gfx* func_xk2_800E0988(Gfx* gfx) {
                         255);
         gSPLineW3D(gfx++, 0, 1, D_xk2_800F7070[var_a2][3], 0);
     }
+#undef GDX_EDIT_LINE_SKIP
     return gfx;
 }
 
@@ -2155,14 +2170,32 @@ Gfx* func_xk2_800E73DC(Gfx* gfx) {
         return gfx;
     }
 
+#ifdef PORT
+    // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). The selected
+    // node's connector line is skipped on a D_800DCD04 (triple-framebuffer rotation index) phase,
+    // so under Course Edit's 3-buffer rotation the highlight line is drawn only 1 of every 3 game
+    // frames — a soft pulse on console (3 physical scanout buffers + phosphor), but a hard ~6.6 Hz
+    // blink on the port's digital VI-hold present that the marker-blink reducer (D_800DCCFC) does
+    // not cover. When the reducer is on, draw the selected line every frame (steady-on) so the
+    // highlight is solid; when off, keep the stock D_800DCD04 != 0 skip byte-identical. Steady-on
+    // matches the marker fix's polarity, which keeps the highlight visible rather than hidden. See
+    // port/gdx_menu.cpp DrawGameplayMenu for the toggle.
+    extern int CVarGetInteger(const char* name, int defaultValue);
+    s32 gdxReduceFlash = CVarGetInteger("gEnhancements.Gameplay.ReduceEditorFlashing", 0);
+#define GDX_EDIT_LINE_SKIP (gdxReduceFlash ? 0 : (D_800DCD04 != 0))
+#else
+#define GDX_EDIT_LINE_SKIP (D_800DCD04 != 0)
+#endif
+
     for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
-        if ((i == D_800D6CA0.unk_0C) && (D_800DCD04 != 0)) {
+        if ((i == D_800D6CA0.unk_0C) && GDX_EDIT_LINE_SKIP) {
             continue;
         }
         gSPVertex(gfx++, &D_6000000.unk_0180[i * 6], 1, 0);
         gSPVertex(gfx++, &D_6000000.unk_0180[((i + 1) % D_802CB6D0.controlPointCount) * 6], 1, 1);
         gSPLine3D(gfx++, 0, 1, 0);
     }
+#undef GDX_EDIT_LINE_SKIP
     return gfx;
 }
 

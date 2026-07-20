@@ -25,66 +25,6 @@ s16 sCameraInfoInitialized;
 s16 D_800E5E8C;
 Vec3f sFinishedSuccessFollowRacerEye[4];
 
-#ifdef PORT
-/* G-Diffuser in-session save-state: capture of the per-view camera state (native BSS). Additive;
-   port build only. sCameraScriptMgrs entries embed pointers (settings/script/racer/focusPos/...),
-   all referencing stable BSS globals or stable native code (CameraScript.updateFunc is a host
-   function pointer, invariant within a session run), so raw-copying is safe. See gdx_savestate.c. */
-typedef struct GdxSsField { void* addr; unsigned int size; } GdxSsField;
-
-static const GdxSsField sGdxSsCamera[] = {
-    { (void*)&gCameras, (unsigned int)sizeof(gCameras) },
-    { (void*)&sCameraSettings, (unsigned int)sizeof(sCameraSettings) },
-    { (void*)&sCameraScriptMgrs, (unsigned int)sizeof(sCameraScriptMgrs) },
-    { (void*)&sSplineControlPointTimers, (unsigned int)sizeof(sSplineControlPointTimers) },
-    { (void*)&sNumCameras, (unsigned int)sizeof(sNumCameras) },
-    { (void*)&sEndingCameraMessage, (unsigned int)sizeof(sEndingCameraMessage) },
-    { (void*)&sCameraEndingFocusRacer, (unsigned int)sizeof(sCameraEndingFocusRacer) },
-    { (void*)&sCameraInfoInitialized, (unsigned int)sizeof(sCameraInfoInitialized) },
-    { (void*)&D_800E5E8C, (unsigned int)sizeof(D_800E5E8C) },
-    { (void*)&sFinishedSuccessFollowRacerEye, (unsigned int)sizeof(sFinishedSuccessFollowRacerEye) },
-};
-
-static void gdx_ss_camera_bcopy(unsigned char* d, const unsigned char* s, unsigned int n) {
-    unsigned int i;
-    for (i = 0; i < n; i++) {
-        d[i] = s[i];
-    }
-}
-
-unsigned int Gdx_SaveState_Camera_Size(void) {
-    unsigned int total = 0;
-    unsigned int i;
-    unsigned int count = (unsigned int)(sizeof(sGdxSsCamera) / sizeof(sGdxSsCamera[0]));
-    for (i = 0; i < count; i++) {
-        total += sGdxSsCamera[i].size;
-    }
-    return total;
-}
-
-void Gdx_SaveState_Camera_Capture(void* dst) {
-    unsigned int off = 0;
-    unsigned int i;
-    unsigned int count = (unsigned int)(sizeof(sGdxSsCamera) / sizeof(sGdxSsCamera[0]));
-    for (i = 0; i < count; i++) {
-        gdx_ss_camera_bcopy((unsigned char*)dst + off, (const unsigned char*)sGdxSsCamera[i].addr,
-                            sGdxSsCamera[i].size);
-        off += sGdxSsCamera[i].size;
-    }
-}
-
-void Gdx_SaveState_Camera_Restore(const void* src) {
-    unsigned int off = 0;
-    unsigned int i;
-    unsigned int count = (unsigned int)(sizeof(sGdxSsCamera) / sizeof(sGdxSsCamera[0]));
-    for (i = 0; i < count; i++) {
-        gdx_ss_camera_bcopy((unsigned char*)sGdxSsCamera[i].addr, (const unsigned char*)src + off,
-                            sGdxSsCamera[i].size);
-        off += sGdxSsCamera[i].size;
-    }
-}
-#endif /* PORT */
-
 const CameraAtEyeData kDefaultAtEyeData = {
     { { 0.0f, 0.0f, 0.0f },
       { 0.0f, 0.0f, 0.0f },

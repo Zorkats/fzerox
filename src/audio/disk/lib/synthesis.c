@@ -1,6 +1,38 @@
 #include "global.h"
 #include "audio.h"
 
+#ifdef PORT
+#define GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES 128
+
+static unsigned int sGdxUnlockAudioSynthGeneration = 0;
+static u8 sGdxUnlockAudioSynthSeen[GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES];
+static u8 sGdxUnlockAudioLoopEndSeen[GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES];
+static u8 sGdxUnlockAudioLoopApplySeen[GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES];
+
+static void gdx_unlock_audio_sync_synth_generation(void) {
+    unsigned int generation = gdx_unlock_audio_trace_generation();
+    s32 i;
+
+    if ((generation == 0) || (generation == sGdxUnlockAudioSynthGeneration)) {
+        return;
+    }
+    sGdxUnlockAudioSynthGeneration = generation;
+    for (i = 0; i < GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES; i++) {
+        sGdxUnlockAudioSynthSeen[i] = false;
+        sGdxUnlockAudioLoopEndSeen[i] = false;
+        sGdxUnlockAudioLoopApplySeen[i] = false;
+    }
+}
+
+static bool gdx_unlock_audio_synth_targets_note(s32 noteIndex) {
+    if ((noteIndex < 0) || (noteIndex >= GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES)) {
+        return false;
+    }
+    gdx_unlock_audio_sync_synth_generation();
+    return gdx_unlock_audio_trace_note_index(noteIndex) != 0;
+}
+#endif
+
 s32 D_80771930 = 0;
 
 u32 sEnvMixerOp = _SHIFTL(A_ENVMIXER, 24, 8);
@@ -718,10 +750,16 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
     s16 addr;
     s32 bookOffset;
     s32 finished;
+#ifdef PORT
+    bool gdxUnlockTargetNote;
+#endif
 
     bookOffset = noteSubEu->bitField1.bookOffset;
     finished = noteSubEu->bitField0.finished;
     note = &gAudioCtx.notes[noteIndex];
+#ifdef PORT
+    gdxUnlockTargetNote = gdx_unlock_audio_synth_targets_note(noteIndex);
+#endif
 
     if (noteSubEu->tunedSample != NULL) {
         flags = A_CONTINUE;
@@ -761,6 +799,16 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
         synthState->numParts = nParts;
         sample = noteSubEu->tunedSample->sample;
 #ifdef PORT
+        if (gdxUnlockTargetNote && !sGdxUnlockAudioSynthSeen[noteIndex]) {
+            sGdxUnlockAudioSynthSeen[noteIndex] = true;
+            gdx_unlock_diagf("[unlock-audio] synth note=%d sample=%p data=%p codec=%u medium=%u size=%u "
+                             "rate=%u gain=%u parts=%d startPos=%d loop=%u..%u count=%08X\n",
+                             noteIndex, (void*) sample, (void*) sample->sampleAddr,
+                             (unsigned) sample->codec, (unsigned) sample->medium, (unsigned) sample->size,
+                             (unsigned) noteSubEu->resamplingRateFixedPoint, (unsigned) noteSubEu->gain,
+                             nParts, synthState->samplePosInt, (unsigned) sample->loop->header.start,
+                             (unsigned) sample->loop->header.end, (unsigned) sample->loop->header.count);
+        }
         /* [boost-synth] probe (missing boost/low-energy, onion layer 4): the boost
            note allocates with instrument 8 and never hits a [note-bail] exit, so
            either it synthesizes fully but inaudibly (volume/pan zero) or it never
@@ -875,6 +923,19 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                     if (loopInfo->header.count != 0) {
                         // Loop around and restart
                         restart = true;
+#ifdef PORT
+                        if (gdxUnlockTargetNote && !sGdxUnlockAudioLoopEndSeen[noteIndex]) {
+                            sGdxUnlockAudioLoopEndSeen[noteIndex] = true;
+                            gdx_unlock_diagf("[unlock-audio] loop end note=%d samplePos=%d loop=%u..%u "
+                                             "untilEnd=%d requested=%d firstIgnore=%d firstSamples=%d "
+                                             "decodeSamples=%d frames=%d\n",
+                                             noteIndex, synthState->samplePosInt,
+                                             (unsigned) loopInfo->header.start, (unsigned) loopInfo->header.end,
+                                             nSamplesUntilLoopEnd, nSamplesToProcess,
+                                             nFirstFrameSamplesToIgnore, nSamplesInFirstFrame,
+                                             nSamplesToDecode, nFramesToDecode);
+                        }
+#endif
                     } else {
                         noteFinished = true;
                     }
@@ -981,6 +1042,33 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
 #endif
                         return aList;
                     }
+
+#ifdef PORT
+                    if (gdxUnlockTargetNote && !sGdxUnlockAudioLoopApplySeen[noteIndex] &&
+                        synthState->restart) {
+                        extern void* gdx_resolve_registered_host_address(unsigned int raw);
+                        extern void* gdx_resolve_module_host_address(unsigned int raw);
+                        u32 sourceToken = (u32) (uintptr_t) sampleData;
+                        u8* resolved = gdx_resolve_registered_host_address(sourceToken);
+                        if (resolved == NULL) {
+                            resolved = gdx_resolve_module_host_address(sourceToken);
+                        }
+                        sGdxUnlockAudioLoopApplySeen[noteIndex] = true;
+                        gdx_unlock_diagf("[unlock-audio] loop apply note=%d samplePos=%d frame=%d "
+                                         "sourceOffset=%d frames=%d frameSize=%d token=%08X resolved=%p "
+                                         "rangeEnd=%u sampleSize=%u\n",
+                                         noteIndex, synthState->samplePosInt, frameIndex, sampleDataOffset,
+                                         nFramesToDecode, frameSize, (unsigned) sourceToken, (void*) resolved,
+                                         (unsigned) (sampleDataOffset + nFramesToDecode * frameSize),
+                                         (unsigned) sample->size);
+                        if (resolved != NULL) {
+                            gdx_unlock_diagf("[unlock-audio] loop source note=%d bytes=%02X %02X %02X %02X "
+                                             "%02X %02X %02X %02X\n",
+                                             noteIndex, resolved[0], resolved[1], resolved[2], resolved[3],
+                                             resolved[4], resolved[5], resolved[6], resolved[7]);
+                        }
+                    }
+#endif
 
                     sampleDataStartPad = (u32) sampleData & 0xF;
                     aligned = ALIGN16((nFramesToDecode * frameSize) + SAMPLES_PER_FRAME);

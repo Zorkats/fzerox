@@ -262,6 +262,17 @@ void EndingCutsceneEffects_InitPodiumRacerCharacters(void) {
         sPodiumRacerCharacterTextures[1] = sPodiumRacerCharacterTextureP2;
         sPodiumRacerCharacterTextures[2] = sPodiumRacerCharacterTextureP3;
     }
+#ifdef PORT
+    /* GDX ceremony diag: one-shot at ceremony entry. Confirms whether the podium racer
+       portraits were allocated (allocationState 1 requires difficulty > NOVICE and a
+       top-3 finish) and the podium activation mask baseline -- if allocation is 0 the
+       podiums/characters cannot render regardless of the fireworks gate. Strip later. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        gdx_cki("[GDX ceremony] allocationState", (int) sPodiumRacerCharacterAllocationState);
+        gdx_cki("[GDX ceremony] gPodiumActiveFlags", (int) gPodiumActiveFlags);
+    }
+#endif
 }
 
 void EndingCutsceneEffects_UpdatePodiumRacerCharacters(void) {
@@ -774,6 +785,24 @@ void EndingCutsceneEffects_Update(void) {
             gActiveFireworks++;
         }
     }
+#ifdef PORT
+    /* GDX ceremony diag: at ~1Hz (30 frames @30Hz), when any launcher is still active dump
+       its index + state. A launcher stuck above FIREWORKS_CREATE that never recycles keeps
+       gActiveFireworks > 0 forever, so the thanks gate never opens -- this distinguishes that
+       from an empty-buffer stall (where gActiveFireworks would already be 0). Strip later. */
+    {
+        extern void gdx_cki(const char* s, int v);
+        static s32 sGdxFireworksDiagCounter = 0;
+        if (((sGdxFireworksDiagCounter++ % 30) == 0) && (gActiveFireworks > 0)) {
+            for (j = 0; j < sFireworksLauncherCount; j++) {
+                if (sFireworksLaunchers[j].state != FIREWORKS_CREATE) {
+                    gdx_cki("[GDX ceremony] launcher idx", (int) j);
+                    gdx_cki("[GDX ceremony] launcher state", (int) sFireworksLaunchers[j].state);
+                }
+            }
+        }
+    }
+#endif
 }
 
 Gfx* EndingCutsceneEffects_DrawFireworks(Gfx* gfx) {

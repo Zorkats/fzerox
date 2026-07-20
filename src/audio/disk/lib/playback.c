@@ -6,6 +6,113 @@ extern f32 gHeadsetPanVolume[];
 extern f32 gStereoPanVolume[];
 extern u16 gHaasEffectDelaySizes[];
 
+#ifdef PORT
+static s32 sGdxUnlockAudioAwaitingNote = false;
+static s32 sGdxUnlockAudioAllocationLogs = 0;
+
+void gdx_unlock_audio_expect_note(void) {
+    sGdxUnlockAudioAwaitingNote = gdx_unlock_diag_enabled();
+    sGdxUnlockAudioAllocationLogs = 0;
+}
+
+void gdx_unlock_audio_cancel_note(void) {
+    sGdxUnlockAudioAwaitingNote = false;
+}
+
+static bool gdx_unlock_audio_is_target_channel(SequenceLayer* layer) {
+    return (layer != NULL) && (layer->channel == gAudioCtx.seqPlayers[0].channels[1]);
+}
+
+static bool gdx_unlock_audio_is_target_layer(SequenceLayer* layer) {
+    return gdx_unlock_diag_enabled() && gdx_unlock_audio_is_target_channel(layer) &&
+           (sGdxUnlockAudioAwaitingNote || gdx_unlock_audio_trace_dsp_active());
+}
+
+int gdx_unlock_audio_trace_note_index(int noteIndex) {
+    Note* note;
+    SequenceLayer* layer;
+
+    if (!gdx_unlock_diag_enabled() || !gdx_unlock_audio_trace_dsp_active() ||
+        (noteIndex < 0) || (noteIndex >= gAudioCtx.numNotes)) {
+        return false;
+    }
+
+    note = &gAudioCtx.notes[noteIndex];
+    layer = note->playbackState.parentLayer;
+    if (!gdx_unlock_audio_is_target_channel(layer)) {
+        layer = note->playbackState.wantedParentLayer;
+    }
+    return gdx_unlock_audio_is_target_channel(layer);
+}
+
+static s32 gdx_unlock_audio_note_index(Note* note) {
+    if ((note == NULL) || (gAudioCtx.notes == NULL) ||
+        (note < gAudioCtx.notes) || (note >= &gAudioCtx.notes[gAudioCtx.numNotes])) {
+        return -1;
+    }
+    return (s32) (note - gAudioCtx.notes);
+}
+
+static void gdx_unlock_audio_log_allocation(SequenceLayer* layer, Note* note) {
+    TunedSample* tunedSample = layer->tunedSample;
+    Sample* sample = tunedSample != NULL ? tunedSample->sample : NULL;
+    s32 noteIndex = gdx_unlock_audio_note_index(note);
+
+    if (sGdxUnlockAudioAllocationLogs >= 48) {
+        return;
+    }
+    sGdxUnlockAudioAllocationLogs++;
+
+    gdx_unlock_diagf("[unlock-audio] note allocation event=%d result=%s note=%d instrument=%d semitone=%u "
+                     "priority=%d freqScale=%.9g noteFreqScale=%.9g tunedSample=%p\n",
+                     sGdxUnlockAudioAllocationLogs, note != NULL ? "allocated" : "failed", noteIndex,
+                     layer->instOrWave, (unsigned) layer->semitone, layer->channel->notePriority,
+                     (double) layer->freqScale, (double) layer->noteFreqScale, (void*) tunedSample);
+
+    if (sample == NULL) {
+        gdx_unlock_diagf("[unlock-audio] note sample event=%d sample=NULL\n",
+                         sGdxUnlockAudioAllocationLogs);
+        return;
+    }
+
+    gdx_unlock_diagf("[unlock-audio] note sample event=%d sample=%p data=%p codec=%u medium=%u size=%u "
+                     "tuning=%.9g loop=%p book=%p\n",
+                     sGdxUnlockAudioAllocationLogs, (void*) sample, (void*) sample->sampleAddr,
+                     (unsigned) sample->codec, (unsigned) sample->medium, (unsigned) sample->size,
+                     (double) tunedSample->tuning, (void*) sample->loop, (void*) sample->book);
+
+    if (sample->loop != NULL) {
+        gdx_unlock_diagf("[unlock-audio] note loop event=%d start=%u end=%u count=%08X\n",
+                         sGdxUnlockAudioAllocationLogs, (unsigned) sample->loop->header.start,
+                         (unsigned) sample->loop->header.end, (unsigned) sample->loop->header.count);
+    }
+    if (sample->book != NULL) {
+        gdx_unlock_diagf("[unlock-audio] note book event=%d order=%d predictors=%d coef0=%d coef1=%d\n",
+                         sGdxUnlockAudioAllocationLogs, sample->book->header.order,
+                         sample->book->header.numPredictors, sample->book->book[0], sample->book->book[1]);
+    }
+}
+
+static Note* gdx_unlock_audio_note_result(SequenceLayer* layer, Note* note) {
+    if (gdx_unlock_audio_is_target_layer(layer)) {
+        bool startsTrace = sGdxUnlockAudioAwaitingNote && (note != NULL);
+
+        gdx_unlock_audio_log_allocation(layer, note);
+        if (startsTrace) {
+            gdx_unlock_audio_trace_dsp_begin();
+        }
+        if (note != NULL) {
+            sGdxUnlockAudioAwaitingNote = false;
+        }
+    }
+    return note;
+}
+
+#define GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note) gdx_unlock_audio_note_result((layer), (note))
+#else
+#define GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note) (note)
+#endif
+
 void Audio_InitNoteSub(Note* note, NoteSubAttributes* noteAttr) {
     f32 volLeft;
     f32 volRight;
@@ -925,6 +1032,12 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
     Note* note;
     u32 policy = layer->channel->noteAllocPolicy;
 #ifdef PORT
+    if (gdx_unlock_audio_is_target_layer(layer) && (sGdxUnlockAudioAllocationLogs < 48)) {
+        gdx_unlock_diagf("[unlock-audio] note allocation attempt instrument=%d priority=%d policy=%u\n",
+                         layer->instOrWave, layer->channel->notePriority, policy);
+    }
+#endif
+#ifdef PORT
     /* [note-alloc] probe (missing boost/low-health investigation): both dead SEs
        reach seqPlayer 0 channel 10 ([sfx-req] confirmed) and both are the only SE
        scripts that lower channel notePriority (e9 02 / e9 07) -- prime suspect is
@@ -949,7 +1062,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
             Audio_NoteReleaseAndTakeOwnership(note, layer);
             Audio_AudioListRemove(&note->listItem);
             AudioSeq_AudioListPushBack(&note->listItem.pool->releasing, &note->listItem);
-            return note;
+            return GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note);
         }
     }
 
@@ -957,7 +1070,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
         if ((note = Audio_AllocNoteFromDisabled(&layer->channel->notePool, layer)) ||
             (note = Audio_AllocNoteFromDecaying(&layer->channel->notePool, layer)) ||
             (note = Audio_AllocNoteFromActive(&layer->channel->notePool, layer))) {
-            return note;
+            return GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note);
         }
     }
 
@@ -968,7 +1081,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
             (note = Audio_AllocNoteFromDecaying(&layer->channel->seqPlayer->notePool, layer)) ||
             (note = Audio_AllocNoteFromActive(&layer->channel->notePool, layer)) ||
             (note = Audio_AllocNoteFromActive(&layer->channel->seqPlayer->notePool, layer))) {
-            return note;
+            return GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note);
         }
     }
 
@@ -976,7 +1089,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
         if ((note = Audio_AllocNoteFromDisabled(&gAudioCtx.noteFreeLists, layer)) ||
             (note = Audio_AllocNoteFromDecaying(&gAudioCtx.noteFreeLists, layer)) ||
             (note = Audio_AllocNoteFromActive(&gAudioCtx.noteFreeLists, layer))) {
-            return note;
+            return GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note);
         }
     }
 
@@ -989,7 +1102,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
              (note = Audio_AllocNoteFromActive(&layer->channel->notePool, layer)) ||
              (note = Audio_AllocNoteFromActive(&layer->channel->seqPlayer->notePool, layer)) ||
              (note = Audio_AllocNoteFromActive(&gAudioCtx.noteFreeLists, layer))) {
-        return note;
+        return GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, note);
     }
 
 #ifdef PORT
@@ -1005,7 +1118,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
     }
 #endif
     layer->bit3 = true;
-    return NULL;
+    return GDX_UNLOCK_AUDIO_NOTE_RESULT(layer, NULL);
 }
 extern NoteSubEu gZeroNoteSub;
 

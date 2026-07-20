@@ -951,14 +951,25 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
     PRINTF("MEDIA INIT OK !!\n");
 
 #ifdef PORT
-    /* Port D6 guard: this routine template-formats the MFS RAM area (the write
-       burst below). Gate the whole format behind the host format predicate
+    /* Port D6 guard (terminal media-init recovery path). This routine
+       template-formats the MFS RAM area (the write burst below). It is one of the
+       two genuinely terminal not-initialized sites -- the other is
+       func_i1_80404830's second-pass failure in mfs_ram.c -- and is only ever
+       reached from the SLMFS wrappers' N64DD_MEDIA_NOT_INIT / UNRECOVERED_READ_ERROR
+       error handlers, i.e. after the mount path has already proven the on-disk
+       volume unusable. Gate the whole format behind the host format predicate
        (default off) so an uninitialized or foreign disk is never auto-formatted
        unprompted -- which, with the durable disk sidecar, would wipe the user's
-       prior saved content. When refused, skip the format entirely; both the
-       template read and its paired completion wait are skipped together, so the
-       Leo message queue stays balanced and the game continues as if the disk is
-       not yet initialized. Port-only: hardware builds keep retail behavior. */
+       prior saved content. When refused, latch the Workshop status and skip the
+       format entirely; both the template read and its paired completion wait are
+       skipped together, so the Leo message queue stays balanced and the game
+       continues as if the disk is not yet initialized. Because both callers are
+       terminal, the refusal latch here carries the same terminal-only truthfulness
+       as the func_i1_80404830 site. The one-shot opt-in is consumed at whichever
+       terminal site fires first this boot; if func_i1_80404830 already formatted
+       and returned success, no N64DD_MEDIA_NOT_INIT propagates here, so this path
+       is not reached and there is no double format. Port-only: hardware builds
+       keep retail behavior. */
     if (!gdx_disk_allow_format()) {
         gdx_disk_log_format_refused();
         return;
@@ -973,12 +984,23 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
         osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
         osWritebackDCacheAll();
 #ifdef PORT
-        /* Port: template-copy destination LBA. The retail value (3062, the
-           Mario Artist template layout target) made the port's skip-the-A-press
-           format path loop forever on errorType 6/10; 1442 was determined
-           empirically to satisfy MFS validation on the SDK-format .ndd. Kept
-           port-only so hardware builds retain retail behavior. */
-        SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, 1442 + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
+        /* Port: template-copy destination LBA. Must be a LOGICAL (user-area) LBA,
+           because the whole port disk stack -- SLLeoReadWrite_DATA -> LeoReadWrite
+           (port/n64_leo.c) -> LeoLBAToByte (leo/lib/lbatobyte.c) -- adds the 0x18
+           system-area LBAs internally when mapping an LBA to a byte offset. The
+           MFS RAM area therefore begins at logical LBA (LEORAM_START_LBA[type] -
+           0x18); this is exactly gRamAreaCapacity.startLBA, the base MFS itself
+           uses everywhere (see mfs_ram.c / mfs_copy.c) and the value LeoReadCapacity
+           reports for OS_WRITE (readcapacity.c:11, n64_leo.c:258).
+
+           The prior literal 1442 was the PHYSICAL start LEORAM_START_LBA[0] used
+           without the -0x18 bias, so the template landed 0x18 LBAs (24 blocks) past
+           the true RAM-area start and the volume header at the base was never
+           written -- Mfs_ValidateRamVolume kept reporting the save area as
+           uninitialized forever. Using LEORAM_START_LBA[LEOdisk_type] (not a fixed
+           index) also tracks the actual loaded disk type. Port-only; hardware
+           builds retain retail behavior. */
+        SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, (LEORAM_START_LBA[LEOdisk_type] - 0x18) + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
 #else
         SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, 3062 + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
 #endif

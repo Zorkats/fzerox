@@ -136,6 +136,61 @@ bool RecordsEntry_Update(void) {
             break;
     }
 
+#ifdef PORT
+    /* Same class as the spinning-letter bug (RecordsEntry_UpdateNameEntryKeyboard): these small
+       3D record-machine models are placed by uncompensated native-pixel viewport translates. The
+       interpreter scales a viewport translate linearly (RATIO_X = width/320) with no hor+
+       compression, so under widescreen each machine drifts away from the 2D texrect record panel
+       it belongs to (and the maxSpeed slot can land far off / oversized-looking). Recompute each
+       translate through the 2D hor+ mapping so the models re-align with their panels:
+           f         = (4/3) / currentAspect   (== AdjXForAspectRatio; 0.75 only at 16:9)
+           adjustedX = 160 + (nativeX - 160) * f
+       vscale is left unchanged: per-vertex AdjXForAspectRatio already compresses each model's
+       width; only the viewport center (translate) needs fixing. Gated on the 3D Widescreen CVar
+       and excluding forced-4:3 frames, matching the other port fixes. */
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue);
+        extern int gdx_get_force_fixed_aspect(void);
+        extern float WindowGetAspectRatio(void);
+        s32 gdxWideMachines = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) && !gdx_get_force_fixed_aspect();
+        f32 gdxAspectFactor = gdxWideMachines ? (4.0f / 3.0f) / WindowGetAspectRatio() : 1.0f;
+        s32 gdxNativeX;
+
+        vp = gGfxPool->recordsMachineVp;
+        for (i = 0; i < 5; i++) {
+            leftOffset = (i & 1) ? -sRecordsEntryRecordLeftOffset : sRecordsEntryRecordLeftOffset;
+
+            vp->vp.vscale[0] = (SCREEN_WIDTH / 2) << 2;
+            vp->vp.vscale[1] = (SCREEN_HEIGHT / 2) << 2;
+            vp->vp.vscale[2] = 0x1FF;
+            vp->vp.vscale[3] = 0;
+            gdxNativeX = leftOffset + sRecordsEntryRecordLeft + 45;
+            if (gdxWideMachines) {
+                vp->vp.vtrans[0] = (s32) ((160.0f + (gdxNativeX - 160) * gdxAspectFactor) * 4.0f);
+            } else {
+                vp->vp.vtrans[0] = gdxNativeX << 2;
+            }
+            vp->vp.vtrans[1] = ((sRecordsEntryRecordTop + (sRecordsEntryRecordHeight * i)) - 4) << 2;
+            vp->vp.vtrans[2] = 0x1FF;
+            vp->vp.vtrans[3] = 0;
+            vp++;
+        }
+
+        vp->vp.vscale[0] = (SCREEN_WIDTH / 2) << 2;
+        vp->vp.vscale[1] = (SCREEN_HEIGHT / 2) << 2;
+        vp->vp.vscale[2] = 0x1FF;
+        vp->vp.vscale[3] = 0;
+        gdxNativeX = sRecordsEntryRecordLeftOffset + sRecordsEntryMaxSpeedLeft + 36;
+        if (gdxWideMachines) {
+            vp->vp.vtrans[0] = (s32) ((160.0f + (gdxNativeX - 160) * gdxAspectFactor) * 4.0f);
+        } else {
+            vp->vp.vtrans[0] = gdxNativeX << 2;
+        }
+        vp->vp.vtrans[1] = (sRecordsEntryMaxSpeedTop + sRecordsEntryMaxSpeedTopMachineOffset) << 2;
+        vp->vp.vtrans[2] = 0x1FF;
+        vp->vp.vtrans[3] = 0;
+    }
+#else
     vp = gGfxPool->recordsMachineVp;
     for (i = 0; i < 5; i++) {
         leftOffset = (i & 1) ? -sRecordsEntryRecordLeftOffset : sRecordsEntryRecordLeftOffset;
@@ -159,6 +214,7 @@ bool RecordsEntry_Update(void) {
     vp->vp.vtrans[1] = (sRecordsEntryMaxSpeedTop + sRecordsEntryMaxSpeedTopMachineOffset) << 2;
     vp->vp.vtrans[2] = 0x1FF;
     vp->vp.vtrans[3] = 0;
+#endif
 
     return isOnRecordsScreen;
 }
@@ -445,8 +501,50 @@ Gfx* RecordsEntry_DrawRecords(Gfx* gfx, s32 courseIndex) {
     gSPLoadUcodeL(gfx++, gspF3DFLX2_Rej_fifo);
     gfx = Segment_SetTableAddresses(gfx);
     gSPClipRatio(gfx++, FRUSTRATIO_3);
+#ifdef PORT
+    /* Give the records-machine preview its OWN projection instead of reusing gCameras[1].
+       On console gCameras[1] is a dedicated CAMERA_MODE_RECORDS_ENTRY camera (Camera_Init sets it
+       for BOTH GAMEMODE_RECORDS and GAMEMODE_TIME_ATTACK): an orbit-at-origin menu camera built
+       from D_800D4F58 (fov 60, near 16, far 8192, distance 400, pitch 40, yaw 50, up +Y). It is the
+       ONLY camera that looks at the world origin, which is exactly where RecordsEntry_DrawRecordMachine
+       places each model (D_2028480 is a scale-only locked lookAt at (0,0,0)); gCameras[0] is the live
+       race / records-race camera and points at the racer, not the origin. In the port, gCameras[1]'s
+       projectionViewMtx is not a reliable menu projection at this draw moment, so the model rasterizes
+       as an oversized dark polygon that fills the frame at both the Time Attack results and the Records
+       menu. Rebuild the RECORDS_ENTRY projection locally from the same constants and math as
+       Camera_SettingsUpdateOrbit + Matrix_SetFrustrum, so the preview no longer depends on camera 1's
+       runtime state. unk_2B2C8[1]/[2] are the same scratch matrices the name-entry spinning letter
+       uses; that path is mutually exclusive with this one (results screen: name entry XOR records; the
+       Records menu never runs name entry), so the slots are free. Load the frustum as PROJECTION then
+       MUL the lookAt view, mirroring the proven name-entry (below) and screen-transition setups. */
+    {
+        MtxF gdxRecordsMtxF;
+        u16 gdxRecordsPerspScale;
+        s32 gdxAngle;
+        f32 gdxPlanarDist;
+        f32 gdxHeight;
+        f32 gdxEyeX;
+        f32 gdxEyeZ;
+
+        gdxAngle = Math_Round(DEG_TO_FZXANG2(40.0f)); /* pitch */
+        gdxHeight = 400.0f * SIN(gdxAngle);
+        gdxPlanarDist = 400.0f * COS(gdxAngle);
+        gdxAngle = Math_Round(DEG_TO_FZXANG2(50.0f)); /* yaw */
+        gdxEyeX = SIN(gdxAngle) * gdxPlanarDist;
+        gdxEyeZ = COS(gdxAngle) * gdxPlanarDist;
+
+        Matrix_SetFrustrum(&gGfxPool->unk_2B2C8[1], &gdxRecordsMtxF, 60.0f, 16.0f, 8192.0f, SCREEN_WIDTH, 0.0f,
+                           SCREEN_HEIGHT, 0.0f, &gdxRecordsPerspScale);
+        Matrix_SetLookAt(&gGfxPool->unk_2B2C8[2], &gdxRecordsMtxF, gdxEyeX, gdxHeight, gdxEyeZ, 0.0f, 0.0f, 0.0f, 0.0f,
+                         1.0f, 0.0f);
+        gSPPerspNormalize(gfx++, gdxRecordsPerspScale);
+        gSPMatrix(gfx++, &D_1000000.unk_2B2C8[1], G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+        gSPMatrix(gfx++, &D_1000000.unk_2B2C8[2], G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+    }
+#else
     gSPPerspNormalize(gfx++, gCameras[1].perspectiveScale);
     gSPMatrix(gfx++, &D_1000000.unk_20208[1], G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+#endif
     gSPDisplayList(gfx++, D_303A5F8);
     gSPNumLights(gfx++, NUMLIGHTS_1);
     gSPLight(gfx++, &D_20284C0.l[0], 1);
@@ -890,7 +988,34 @@ void RecordsEntry_UpdateNameEntryKeyboard(void) {
         vp->vp.vscale[1] = SCREEN_HEIGHT * 4;
         vp->vp.vscale[2] = 0x1FF;
         vp->vp.vscale[3] = 0;
+#ifdef PORT
+        {
+            extern int CVarGetInteger(const char* name, int defaultValue); // consolevariablebridge.h
+            extern int gdx_get_force_fixed_aspect(void);                   // interpreter.cpp (runtime flag)
+            extern float WindowGetAspectRatio(void);                       // libultraship windowbridge.cpp
+            /* The SELECTED keyboard letter is drawn as a dedicated 3D spinning quad through this
+               viewport, while the other 49 letters use the 2D texrect (hor+) path. The interpreter
+               positions a viewport by scaling its translate LINEARLY (RATIO_X = width/320) in
+               CalcAndSetViewport with no aspect compression, because AdjXForAspectRatio only touches
+               vertex NDC x and the quad is centered at NDC 0 (AdjX(0) == 0). So the letter's glyph
+               shape is already hor+ compressed per-vertex, but its center lands at spB8*(width/320)
+               instead of where the 2D mapping puts native x = spB8. Recompute the translate so the
+               center matches the 2D hor+ result:
+                   f         = (4/3) / currentAspect   (== AdjXForAspectRatio's factor; 0.75 only at 16:9)
+                   adjustedX = 160 + (spB8 - 160) * f
+               Only the translate needs compensating (not vscale): the glyph width is already
+               correct from the per-vertex AdjX. Gate on the 3D Widescreen CVar (not WidescreenUI)
+               and exclude forced-4:3 frames, mirroring the fade fixes in menus.c. */
+            if (CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) && !gdx_get_force_fixed_aspect()) {
+                f32 aspectFactor = (4.0f / 3.0f) / WindowGetAspectRatio();
+                vp->vp.vtrans[0] = (160.0f + (spB8 - 160.0f) * aspectFactor) * 4.0f;
+            } else {
+                vp->vp.vtrans[0] = spB8 * 4.0f;
+            }
+        }
+#else
         vp->vp.vtrans[0] = spB8 * 4.0f;
+#endif
         vp->vp.vtrans[1] = temp_fv0 * 4.0f;
         vp->vp.vtrans[2] = 0x1FF;
         vp->vp.vtrans[3] = 0;

@@ -338,13 +338,40 @@ void func_xk1_8002FA50(void) {
     gExpansionKitFontPtr = Arena_Allocate(ALLOC_FRONT, 20 * 0x80);
     D_8003BBB0 = Arena_Allocate(ALLOC_FRONT, 20 * sizeof(s32));
 
+#ifdef PORT
+    /* Arena memory is not zeroed on the port (Arena_Allocate only bumps a
+       pointer) and the hardware DMA that would fill these glyphs
+       (LeoFault_CopyFontToRam via gDriveRomHandle) never runs. Clear the whole
+       block up front so any slot left unfilled below renders as a blank 16x16
+       I4 cell instead of uninitialized-arena noise. */
+    bzero(gExpansionKitFontPtr, 20 * 0x80);
+#endif
+
     for (i = 0; i < 20; i++) {
         D_8003BBB0[i] = (D_xk1_80033808[i * 2] << 8) + D_xk1_80033808[i * 2 + 1];
 #ifndef PORT
         /* PORT: glyphs come from the 64DD drive's internal ROM via
-           gDriveRomHandle — no drive ROM on PC (see LeoFault_LoadFontSet).
-           The Arena allocations above stay: zeroed glyphs render blank. */
+           gDriveRomHandle — no drive ROM on PC (see LeoFault_LoadFontSet). */
         LeoFault_CopyFontToRam(D_8003BBB0[i], gExpansionKitFontPtr + i * 0x80);
+#else
+        /* The same font block ships inside the user-supplied 64DD IPL ROM image
+           (N64DDIPLROM.n64, loaded by port/disk_buffer.cpp). Resolve the
+           Shift-JIS code to a font-block offset with LeoGetKAdr and copy its
+           16x16 I4 cell straight out of that image — identical to the EK setup
+           font path (A2E90.c func_xk1_800260F0). LeoGetKAdr returns -1 for
+           unknown codes (fontAddr < DDROM_FONT_START) and a missing image
+           leaves gdx_ddipl_buffer NULL; either way the pre-zeroed blank cell
+           from the bzero above stands. */
+        {
+            extern unsigned char* gdx_ddipl_buffer;
+            extern unsigned int gdx_ddipl_size;
+            s32 fontAddr = LeoGetKAdr(D_8003BBB0[i]) + DDROM_FONT_START;
+
+            if (gdx_ddipl_buffer != NULL && fontAddr >= DDROM_FONT_START &&
+                (u32) fontAddr + 0x80 <= gdx_ddipl_size) {
+                bcopy(gdx_ddipl_buffer + fontAddr, gExpansionKitFontPtr + i * 0x80, 0x80);
+            }
+        }
 #endif
     };
 }

@@ -1068,13 +1068,17 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 
             gfx = Hud_UpdatePlayerHudInfo(gfx, 0, 0);
 
-            gfx = Hud_UpdateRaceIntervalInfo(gfx, 0, 0, 1.0f);
 #ifdef PORT
-            /* The L-button first-place interval shares the timer's right-edge layout. */
+            /* The lap-complete interval is center-native (base X=120) and must sit dead
+               center with Booster OK / Final Lap. Inside the timer group's ANCHOR_RIGHT
+               scope the edge-glue drifts a center-native rect visibly right of center
+               (owner-reported), so close the scope before the interval draw; the timer
+               and time label above already drew anchored. */
             if (gdxWideHud) {
                 gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
             }
 #endif
+            gfx = Hud_UpdateRaceIntervalInfo(gfx, 0, 0, 1.0f);
 
             // Best Lap Time
             gfx = Hud_DrawPracticeBestLap(gfx);
@@ -1670,24 +1674,12 @@ Gfx* Hud_UpdateRaceIntervalInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex, 
         }
     }
     if ((D_i3_80141EA8[playerIndex].lapIntervalCounter % 20) >= 5) {
+        /* The gap-to-1st interval keeps its stock center-native base X (120): it belongs
+           visually with the centered "Booster OK"/"Final Lap" messages, not the right-edge
+           timer column. Under widescreen it still draws inside Hud_DrawHud's ANCHOR_RIGHT
+           scope, but a center-native rect is only nudged slightly off center by the uniform
+           edge-glue -- the intended near-centered placement -- so no unanchoring is needed. */
         s32 intervalLeft = sIntervalPositions[numPlayersIndex][playerIndex][0];
-#ifdef PORT
-        /* WIDESCREEN-UI, 1P ONLY: the gap-to-1st interval draws inside the lap timer's
-           G_EX_WIDESCREEN_ANCHOR_RIGHT scope (Hud_DrawHud), but its native base X (120, screen
-           center) defeats the anchor -- the uniform +/-0.25 NDC edge-glue relocates an
-           edge-native rect, not a center-native one, so it only drifts from just-left to
-           just-right of center (owner: "gap timer still 4:3-centered"). Re-home the base X onto
-           the main lap-timer's right-edge digit column (sPlayerTimerPositions) so ANCHOR_RIGHT
-           glues it to the physical right edge directly beneath the timer -- the "shares the
-           timer's right-edge layout" the call site intends. Console/4:3 (#ifndef PORT) is
-           untouched, and only the 1P call (numPlayersIndex 0) draws inside an anchor scope. */
-        {
-            extern int gdx_widescreen_ui_active(void); /* port/input_bridge.c */
-            if ((numPlayersIndex == 0) && gdx_widescreen_ui_active()) {
-                intervalLeft = sPlayerTimerPositions[numPlayersIndex][playerIndex][0];
-            }
-        }
-#endif
         gfx = Hud_DrawRaceTimeInterval(gfx, sPlayerLeadInterval[playerIndex], intervalLeft,
                                        sIntervalPositions[numPlayersIndex][playerIndex][1], scale);
     }

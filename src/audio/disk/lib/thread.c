@@ -536,6 +536,17 @@ void AudioThread_ProcessCmd(AudioCmd* cmd) {
         }
 
         if (cmd->arg1 < ARRAY_COUNT(seqPlayer->channels)) {
+#ifdef PORT
+            if ((cmd->op == AUDIOCMD_OP_CHANNEL_SET_IO) && (cmd->arg0 == 0) && (cmd->arg1 == 1) &&
+                (cmd->arg2 == 0)) {
+                if (cmd->asSbyte == NA_SE_46) {
+                    gdx_unlock_diagf("[unlock-audio] applied player=0 channel=1 port=0 value=%d enabled=%d seqId=%d\n",
+                                     cmd->asSbyte, seqPlayer->enabled, seqPlayer->seqId);
+                } else {
+                    gdx_unlock_audio_cancel_note();
+                }
+            }
+#endif
             AudioThread_ProcessChannelCmd(seqPlayer->channels[cmd->arg1], cmd);
             return;
         }
