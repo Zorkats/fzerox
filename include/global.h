@@ -30,6 +30,13 @@ extern void gdx_unlock_audio_trace_dsp_begin(void);
 extern int gdx_unlock_audio_trace_dsp_active(void);
 extern unsigned int gdx_unlock_audio_trace_generation(void);
 extern int gdx_unlock_audio_trace_note_index(int noteIndex);
+extern void gdx_unlock_audio_capture_ai_buffer(const s16* buffer, unsigned int frameCount,
+                                               unsigned int sampleRate);
+extern void gdx_unlock_audio_stage_begin_command_list(unsigned int generation, const void* commandList,
+                                                      unsigned int sampleRate);
+extern void gdx_unlock_audio_stage_register_command_range(
+    unsigned int generation, int noteIndex, const void* commandStart, const void* commandEnd,
+    const void* adpcmState, const void* resampleState, unsigned int sampleRate);
 #define GDX_CK(x) gdx_ck(#x)
 #endif
 

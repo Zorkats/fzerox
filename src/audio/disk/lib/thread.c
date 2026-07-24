@@ -80,6 +80,21 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
 
     if (gAudioCtx.resetTimer < 16) {
         if (gAudioCtx.aiBufLengths[index] != 0) {
+#ifdef PORT
+            gdx_unlock_audio_capture_ai_buffer(gAudioCtx.aiBuffers[index],
+                                               (unsigned int) gAudioCtx.aiBufLengths[index],
+                                               (unsigned int) gAudioCtx.audioBufferParameters.samplingFrequency);
+            /* R2 bit-identical PCM gate (C-R2.3): stream the same pre-post-processing tap to the
+               streaming capture module. No-op unless GDX_PCM_CAPTURE is set. Runs alongside — not
+               instead of — the dormant unlock diagnostic above. See port/gdx_audio_capture.c. */
+            {
+                extern void gdx_pcm_capture_feed(const s16* frames, unsigned int frameCount,
+                                                 unsigned int sampleRate);
+                gdx_pcm_capture_feed(gAudioCtx.aiBuffers[index],
+                                     (unsigned int) gAudioCtx.aiBufLengths[index],
+                                     (unsigned int) gAudioCtx.audioBufferParameters.samplingFrequency);
+            }
+#endif
             osAiSetNextBuffer(gAudioCtx.aiBuffers[index], gAudioCtx.aiBufLengths[index] * 4);
             if (gAudioCtx.aiBuffers[index]) {}
             if (gAudioCtx.aiBufLengths[index]) {}
@@ -186,7 +201,30 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
 
     gAudioCtx.curAbiCmdBuf =
         AudioSynth_Update(gAudioCtx.curAbiCmdBuf, &abiCmdCount, curAiBuffer, gAudioCtx.aiBufLengths[index]);
+#ifdef PORT
+    /* RNG determinism pin (C-R2.3, RNG pin 2). osGetCount() is a free-running CPU-cycle counter —
+       pure hardware entropy — that feeds gAudioCtx.audioRandom, which is content-affecting (it
+       perturbs sequencer velocity/gate variance). The bit-identical PCM gate therefore cannot be
+       reached while this term varies run-to-run. Under capture-armed mode ONLY, substitute a
+       deterministic monotonic counter for osGetCount(); normal gameplay (capture inactive) keeps
+       the original hardware-entropy expression byte-for-byte, so this change is provably inert off
+       capture (gdx_pcm_capture_active() is 0 whenever GDX_PCM_CAPTURE is unset, i.e. all real play,
+       and the static counter is never touched in that branch). */
+    {
+        extern int gdx_pcm_capture_active(void);
+        u32 gdxRandTick;
+        if (gdx_pcm_capture_active()) {
+            static u32 sGdxDetCount = 0;
+            sGdxDetCount += 0x9E3779B9u; /* fixed golden-ratio step: deterministic, distinct per tick */
+            gdxRandTick = sGdxDetCount;
+        } else {
+            gdxRandTick = (u32) osGetCount();
+        }
+        gAudioCtx.audioRandom = (gAudioCtx.audioRandom + gAudioCtx.totalTaskCount) * gdxRandTick;
+    }
+#else
     gAudioCtx.audioRandom = (gAudioCtx.audioRandom + gAudioCtx.totalTaskCount) * osGetCount();
+#endif
     gAudioCtx.audioRandom = gAudioCtx.audioRandom + gAudioCtx.aiBuffers[index][gAudioCtx.totalTaskCount & 0xFF];
 
     index = gAudioCtx.rspTaskIndex;

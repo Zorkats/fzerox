@@ -403,16 +403,20 @@ void Game_ThreadEntry(void* entry) {
          * the authoritative decoded size from the MIO0 header, retaining the
          * known retail size as a guarded fallback. */
         {
-            extern unsigned char* gdx_rom_buffer;
-            extern size_t gdx_rom_size;
-            const size_t start = (size_t)PORT_machine_models_ROM_START;
-            if (gdx_rom_buffer != NULL && start + 8u <= gdx_rom_size &&
-                gdx_rom_buffer[start + 0] == 'M' && gdx_rom_buffer[start + 1] == 'I' &&
-                gdx_rom_buffer[start + 2] == 'O' && gdx_rom_buffer[start + 3] == '0') {
-                size_t decoded = ((size_t)gdx_rom_buffer[start + 4] << 24) |
-                                 ((size_t)gdx_rom_buffer[start + 5] << 16) |
-                                 ((size_t)gdx_rom_buffer[start + 6] << 8) |
-                                 (size_t)gdx_rom_buffer[start + 7];
+            /* R4 (C-R4.1): peek the MIO0 magic + decoded-size header via the single
+             * byte-source shim (archive-first, byte-identical raw fallback) instead of
+             * indexing gdx_rom_buffer directly -- the machine_models family is in the
+             * blob table. On a total miss the shim returns 0 and modelsSize keeps its
+             * retail-size default, exactly as the old NULL/OOB guard did. */
+            extern int GdxSegmentSourceRead(unsigned int romBase, unsigned int size, void* dst);
+            unsigned char peek[8];
+            const unsigned int start = (unsigned int)PORT_machine_models_ROM_START;
+            if (GdxSegmentSourceRead(start, 8u, peek) &&
+                peek[0] == 'M' && peek[1] == 'I' && peek[2] == 'O' && peek[3] == '0') {
+                size_t decoded = ((size_t)peek[4] << 24) |
+                                 ((size_t)peek[5] << 16) |
+                                 ((size_t)peek[6] << 8) |
+                                 (size_t)peek[7];
                 if (decoded != 0 && decoded <= 0x1000000u) {
                     modelsSize = decoded;
                 }
@@ -637,26 +641,41 @@ void Game_ThreadEntry(void* entry) {
 #endif
 #else /* PORT */
     {
-        /* Load race geometry segments directly from ROM into the RDRAM regions
-         * carved above. course_track_gfx is MIO0-compressed; the others are raw. */
-        extern unsigned char* gdx_rom_buffer;
-        mio0Decode(gdx_rom_buffer + PORT_course_track_gfx_ROM_START,
-                   osPhysicalToVirtual(gSegment16C8A0VramStart));
-        /* Byte-order pass (2026-07-11, exploded-decorations root cause): the
-           carve above is what gSegments[8] serves at draw time, but only the
-           bridge's separate heap image ever received the generated fixups.
-           Decoration DLs and their Vtx blocks therefore rendered from raw
-           big-endian bytes -- the interpreter read every s16 coordinate
-           byte-swapped (x256-ish values: boards exploded across the screen,
-           start arc invisible). Apply the same generated fixup pass (kind-1
-           Gfx word swaps + kind-3 Vtx swaps) to the carve so both copies of
-           the image agree. */
-        {
-            extern void gdx_fixup_asset_segment_image(unsigned char segment, unsigned int rom_base,
-                                                      unsigned char* data, unsigned int size);
-            gdx_fixup_asset_segment_image(0x08u, PORT_course_track_gfx_ROM_START,
-                                          (unsigned char*) osPhysicalToVirtual(gSegment16C8A0VramStart),
-                                          (unsigned int) PORT_course_track_gfx_DECODED_SIZE);
+        /* Load race geometry segments into the RDRAM regions carved above.
+         * course_track_gfx is MIO0-compressed; the others are raw.
+         *
+         * R1 (C-R1.3/C-R1.9 #5): stage the compressed course_track_gfx span
+         * through the single archive-first byte-source shim, then decode -- the
+         * staged bytes are verbatim ROM (archive-first, raw fallback), so the
+         * decode is byte-identical to the old `mio0Decode(gdx_rom_buffer + off)`.
+         * The setup_gfx/machine_custom_gfx DMA carves below flow through
+         * Dma_LoadAssets -> Dma_RomCopy, which is already routed to the shim
+         * (chokepoint #2), so they need no change here. Forward-declared rather
+         * than #include'd: this decomp TU's include path does not carry port/. */
+        extern int GdxSegmentSourceRead(unsigned int romBase, unsigned int size, void* dst);
+        static unsigned char sGdxCourseTrackStage[PORT_course_track_gfx_ROM_END -
+                                                  PORT_course_track_gfx_ROM_START];
+        if (GdxSegmentSourceRead((unsigned int) PORT_course_track_gfx_ROM_START,
+                                 (unsigned int) sizeof(sGdxCourseTrackStage),
+                                 sGdxCourseTrackStage)) {
+            mio0Decode(sGdxCourseTrackStage,
+                       osPhysicalToVirtual(gSegment16C8A0VramStart));
+            /* Byte-order pass (2026-07-11, exploded-decorations root cause): the
+               carve above is what gSegments[8] serves at draw time, but only the
+               bridge's separate heap image ever received the generated fixups.
+               Decoration DLs and their Vtx blocks therefore rendered from raw
+               big-endian bytes -- the interpreter read every s16 coordinate
+               byte-swapped (x256-ish values: boards exploded across the screen,
+               start arc invisible). Apply the same generated fixup pass (kind-1
+               Gfx word swaps + kind-3 Vtx swaps) to the carve so both copies of
+               the image agree. */
+            {
+                extern void gdx_fixup_asset_segment_image(unsigned char segment, unsigned int rom_base,
+                                                          unsigned char* data, unsigned int size);
+                gdx_fixup_asset_segment_image(0x08u, PORT_course_track_gfx_ROM_START,
+                                              (unsigned char*) osPhysicalToVirtual(gSegment16C8A0VramStart),
+                                              (unsigned int) PORT_course_track_gfx_DECODED_SIZE);
+            }
         }
         Dma_LoadAssets(SEGMENT_ROM_START(setup_gfx),
                        osPhysicalToVirtual(gSegment17B1E0VramStart),
@@ -710,7 +729,35 @@ void Game_ThreadEntry(void* entry) {
     GDX_CK(G8c_post_742FC);
     Matrix_SetTransRot(&D_80225800.unk_000, 0, 1.0f, 0, 0, 0, 0.0f, 0.0f, 0.0f);
 
+#ifdef PORT
+    /* RNG determinism pin (C-R2.3, RNG pin 1). gRandSeed1/2 are wall-clock-seeded here from
+       osGetTime(), so every run diverges — unreachable for the bit-identical PCM gate. When
+       GDX_RAND_SEED1 is set, seed Math_Rand1Init deterministically from it (mirroring the
+       original (a, a+a) shape with the fixed seed replacing osGetTime()); when unset, the
+       original osGetTime()-derived behavior is kept exactly. Parsed once. */
+    {
+        extern char* getenv(const char* name);
+        extern unsigned long strtoul(const char* s, char** e, int base);
+        static int sSeed1Read = 0;
+        static int sSeed1Have = 0;
+        static u32 sSeed1 = 0;
+        if (!sSeed1Read) {
+            const char* env = getenv("GDX_RAND_SEED1");
+            sSeed1Read = 1;
+            if (env != NULL && env[0] != '\0') {
+                sSeed1 = (u32) strtoul(env, NULL, 0);
+                sSeed1Have = 1;
+            }
+        }
+        if (sSeed1Have) {
+            Math_Rand1Init(sSeed1, sSeed1 + sSeed1);
+        } else {
+            Math_Rand1Init(osGetTime(), osGetTime() + osGetTime());
+        }
+    }
+#else
     Math_Rand1Init(osGetTime(), osGetTime() + osGetTime());
+#endif
 
     GDX_CK(G9_pre_controller_init);
 #ifndef EXPANSION_KIT
@@ -761,7 +808,33 @@ void Game_ThreadEntry(void* entry) {
 #endif
     GDX_CK(GD_post_timer_wait);
 
+#ifdef PORT
+    /* RNG determinism pin (C-R2.3, RNG pin 1, second seed). GDX_RAND_SEED2 overrides
+       Math_Rand2Init deterministically (mirroring the original (a+a, a) shape); unset keeps the
+       original osGetTime() seeding byte-for-byte. Parsed once. */
+    {
+        extern char* getenv(const char* name);
+        extern unsigned long strtoul(const char* s, char** e, int base);
+        static int sSeed2Read = 0;
+        static int sSeed2Have = 0;
+        static u32 sSeed2 = 0;
+        if (!sSeed2Read) {
+            const char* env = getenv("GDX_RAND_SEED2");
+            sSeed2Read = 1;
+            if (env != NULL && env[0] != '\0') {
+                sSeed2 = (u32) strtoul(env, NULL, 0);
+                sSeed2Have = 1;
+            }
+        }
+        if (sSeed2Have) {
+            Math_Rand2Init(sSeed2 + sSeed2, sSeed2);
+        } else {
+            Math_Rand2Init(osGetTime() + osGetTime(), osGetTime());
+        }
+    }
+#else
     Math_Rand2Init(osGetTime() + osGetTime(), osGetTime());
+#endif
     osSetTime(0);
     osViSwapBuffer(gFrameBuffers[0]);
     Gfx_InitBuffer();

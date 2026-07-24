@@ -4483,7 +4483,25 @@ Gfx* func_800A95B4(Gfx* gfx) {
     sCourseDisp = gfx;
     gSPDisplayList(sCourseDisp++, D_8014040);
     gSPDisplayList(sCourseDisp++, D_8014078);
+#ifdef PORT
+    /* Diagnostic toggle (interp strobe investigation): the red channel here is a per-frame
+       sawtooth (period 32) animating the rail chevron color flow. Under matrix-only frame
+       interpolation the value is frozen per tick and steps unevenly (M oscillates 2,3),
+       which is the leading suspect for the owner-reported rail strobe. GDX_RAIL_COLOR_TEST=1
+       freezes the channel to a mid-ramp constant so one attract run answers decisively:
+       strobe gone => frozen-color-animation convicted => build primcolor value-interpolation.
+       Unset (default), the expression below is byte-identical to stock. */
+    {
+        extern s32 gdx_rail_color_test_enabled(void);
+        if (gdx_rail_color_test_enabled()) {
+            gDPSetPrimColor(sCourseDisp++, 0, 0, 127, 0, 0, 255);
+        } else {
+            gDPSetPrimColor(sCourseDisp++, 0, 0, (255 - (u8) (gGameFrameCount * 8)), 0, 0, 255);
+        }
+    }
+#else
     gDPSetPrimColor(sCourseDisp++, 0, 0, (255 - (u8) (gGameFrameCount * 8)), 0, 0, 255);
+#endif
 
     sLastTrackShapeType = D_800F892C = -1;
     D_800F8958[0].chunk = D_800F8958[1].chunk = 0;
@@ -4764,7 +4782,19 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     gSPDisplayList(sCourseDisp++, D_8014008);
     gSPDisplayList(sCourseDisp++, D_8014078);
     gSPFogPosition(sCourseDisp++, sCourseFogStartDistance, 1000);
+#ifdef PORT
+    /* Same diagnostic toggle as the backward-chunk pass above (GDX_RAIL_COLOR_TEST). */
+    {
+        extern s32 gdx_rail_color_test_enabled(void);
+        if (gdx_rail_color_test_enabled()) {
+            gDPSetPrimColor(sCourseDisp++, 0, 0, 127, 0, 0, 255);
+        } else {
+            gDPSetPrimColor(sCourseDisp++, 0, 0, 255 - ((gGameFrameCount * 8) % 256), 0, 0, 255);
+        }
+    }
+#else
     gDPSetPrimColor(sCourseDisp++, 0, 0, 255 - ((gGameFrameCount * 8) % 256), 0, 0, 255);
+#endif
 
     if (1) {}
     segment = racer->segmentPositionInfo.courseSegment;

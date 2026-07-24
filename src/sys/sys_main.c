@@ -363,8 +363,13 @@ void Main_ThreadEntry(void* arg0) {
        the entire game (confirmed: AudioThread_ProcessCmds fires exactly once, then
        total silence). Only wire up the EK handlers when the Sys6Thread that services
        them is actually running; otherwise keep the defaults (osEPiStartDma/
-       LeoReadWrite), which the port's PI manager (devmgr.c) already services
-       correctly for cart-medium ROM reads. */
+       LeoReadWrite). Note: the decomp's PI manager thread (devmgr.c /
+       __osDevMgrMain) never runs under PORT -- osCreatePiManager is an empty-body
+       stub (libultraship/src/libultraship/libultra/os_pi.cpp:6) -- so
+       osEPiStartDma servicing cart-medium ROM reads correctly here means it is
+       serviced INLINE, synchronously, by libultraship's osEPiStartDma
+       (libultraship/src/libultraship/libultra/os.cpp), which routes through the
+       single byte-source shim (GdxSegmentSourceRead), not by the PI manager. */
     /* PORT update (hop 4): the state==2 gate was insufficient — with a disk
        image present this port DOES negotiate the drive, the gate passes, and
        the first audio LBA load still parks the audio fiber forever on the

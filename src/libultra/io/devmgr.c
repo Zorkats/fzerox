@@ -80,23 +80,23 @@ void __osDevMgrMain(void* args) {
 #endif
         {
 #ifdef PORT
-            /* PORT: bypass PI hardware for all DMA reads — copy from gdx_rom_buffer instead.
-             * Cart ROM lives at N64 physical 0x10000000; devAddr encodes the cart physical address
-             * (possibly with KSEG1 bits, which & 0x1FFFFFFF strips).  It can also be a raw ROM
-             * offset from the decomp's segment symbols, so accept both cart-domain addresses and
-             * raw offsets.  Zero-fill when the address is out of ROM range.  For writes, send
-             * completion immediately as a no-op — we can't write to ROM on the host.
-             * In all cases set ret = -1 so the if(ret==0) evtQueue wait below is skipped. */
+            /* PORT: DEAD CODE (R4 census). __osDevMgrMain is unreachable under PORT —
+             * osCreatePiManager links to libultraship/src/libultraship/libultra/os_pi.cpp:6,
+             * which is an empty-body stub, so no device-manager thread ever runs. The
+             * decomp's own PI manager (pimgr.c) and its EDMAREAD producer (epidma.c) are not
+             * compiled either -- port/CMakeLists.txt force-adds only this file (devmgr.c) from
+             * libultra/io. Cartridge/audio DMA is instead serviced inline, synchronously, by
+             * libultraship's osEPiStartDma (libultraship/src/libultraship/libultra/os.cpp),
+             * which routes every read through the single byte-source shim
+             * (GdxSegmentSourceRead). The former gdx_rom_buffer rom-read here has been
+             * removed for the same reason: this safe no-op is retained only to keep the
+             * switch structure intact; if a future PORT caller ever revives this path it
+             * MUST read via the shim, not gdx_rom_buffer. It zero-fills the destination
+             * and posts the completion messages so a hypothetical caller cannot hang,
+             * then sets ret = -1 to skip the evtQueue wait below. */
 #define GDX_PI_ROM_READ(mb_, dm_)                                                    \
     do {                                                                              \
-        extern unsigned char* gdx_rom_buffer;                                        \
-        extern size_t gdx_rom_size;                                                  \
-        unsigned int _phys = (unsigned int)(mb_)->devAddr & 0x1FFFFFFFu;            \
-        unsigned int _off  = (_phys >= 0x10000000u) ? _phys - 0x10000000u : _phys;  \
-        if (gdx_rom_buffer != NULL &&                                                \
-                (unsigned long long)_off + (mb_)->size <= (unsigned long long)gdx_rom_size) { \
-            memcpy((mb_)->dramAddr, gdx_rom_buffer + _off, (mb_)->size);            \
-        } else {                                                                     \
+        if ((mb_)->dramAddr != NULL && (mb_)->size > 0) {                           \
             memset((mb_)->dramAddr, 0, (mb_)->size);                                \
         }                                                                            \
         osSendMesg((mb_)->hdr.retQueue, (mb_), OS_MESG_NOBLOCK);                   \

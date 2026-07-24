@@ -2178,15 +2178,112 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
 #endif
 
 #ifdef PORT
-    /* Save-system slice (SRAM/host file) stops here: staff ghosts come from the
-       cart ROM (Save_RomCopyGhostRecord -> Dma_RomCopyAsync -> gRomSegmentPairs[13]),
-       and that EK ROM segment table isn't populated yet (separate, not-yet-done
-       slice) -- reading through it now would DMA garbage instead of real staff
-       ghost data. Keep the pre-existing safe "no record" result until it lands. */
-    (void) ghostRecord;
-    (void) ghostInfo;
-    (void) courseIndex;
-    return -1;
+    /* Staff ghost records live in the o2r archive as Torch "GhostRecord" resources,
+       NOT in host SRAM. The port registers no libultraship factory for that resource
+       type yet (port/resource/ResourceFactories.cpp R1b TODO), so the deserializing
+       loader (GDiffuser_LoadAssetBytes) cannot serve them; we pull the raw archive-file
+       bytes and parse the Torch payload here. This matters because func_i10_8012B580
+       seeds every standard-cup CPU pacing target from ghostInfo.raceTime -- the old
+       return-(-1) stub left that seed uninitialized, degenerating CPU pacing. */
+    {
+        /* AssetLoader.cpp: raw archive bytes, header included, partial copy allowed. */
+        extern s32 GDiffuser_LoadArchiveFileBytes(const char* key, void* out, size_t outSize,
+                                                  size_t* copiedSize);
+        /* courseIndex (COURSE_MUTE_CITY=0 .. COURSE_BIG_HAND=23) -> o2r key. Order
+           verified identical between the Courses enum (fzx_course.h) and
+           staff_ghost_records.yaml, and the keys exist in fzerox.o2r. */
+        static const char* const sStaffGhostKeys[] = {
+            "staff_ghost_records/aMuteCity1StaffGhost",   "staff_ghost_records/aSilence1StaffGhost",
+            "staff_ghost_records/aSandOcean1StaffGhost",  "staff_ghost_records/aDevilsForest1StaffGhost",
+            "staff_ghost_records/aBigBlue1StaffGhost",    "staff_ghost_records/aPortTown1StaffGhost",
+            "staff_ghost_records/aSectorAlphaStaffGhost", "staff_ghost_records/aRedCanyon1StaffGhost",
+            "staff_ghost_records/aDevilsForest2StaffGhost", "staff_ghost_records/aMuteCity2StaffGhost",
+            "staff_ghost_records/aBigBlue2StaffGhost",    "staff_ghost_records/aWhiteLand1StaffGhost",
+            "staff_ghost_records/aFireFieldStaffGhost",   "staff_ghost_records/aSilence2StaffGhost",
+            "staff_ghost_records/aSectorBetaStaffGhost",  "staff_ghost_records/aRedCanyon2StaffGhost",
+            "staff_ghost_records/aWhiteLand2StaffGhost",  "staff_ghost_records/aMuteCity3StaffGhost",
+            "staff_ghost_records/aRainbowRoadStaffGhost", "staff_ghost_records/aDevilsForest3StaffGhost",
+            "staff_ghost_records/aSpacePlantStaffGhost",  "staff_ghost_records/aSandOcean2StaffGhost",
+            "staff_ghost_records/aPortTown2StaffGhost",   "staff_ghost_records/aBigHandStaffGhost",
+        };
+        /* 0x40 OTR header + Torch record prefix (<= 16 + 9 name + 20 machine). */
+        u8 raw[128];
+        size_t copied = 0;
+        const u8* p;
+        u32 o;
+        u32 trackNameLen;
+        s32 i;
+
+        if (!((courseIndex >= COURSE_MUTE_CITY) && (courseIndex <= COURSE_BIG_HAND))) {
+            return 2;
+        }
+        if (!GDiffuser_LoadArchiveFileBytes(sStaffGhostKeys[courseIndex], raw, sizeof(raw), &copied)) {
+            return -1;
+        }
+        /* Need at least the 0x40 header + the 16-byte fixed record prefix. */
+        if (copied < 0x40 + 16) {
+            return -1;
+        }
+        p = raw + 0x40; /* skip the OTR/Torch header (Archive.h OTR_HEADER_SIZE == 64) */
+        o = 0;
+
+        /* Torch's GhostRecordBinaryExporter writes the payload PACKED (no struct
+           alignment) in native = little-endian order on the LE build host, and it
+           DROPS both the record checksum and the replay checksum. Read every scalar
+           explicitly little-endian -- these are NOT big-endian N64 bytes, so no
+           byte-swap. Fields land in GhostRecord exactly as func_i2_80101590 reads
+           them (the same fields the non-PORT DMA path fills). */
+        ghostRecord->checksum = 0; /* not serialized by Torch */
+        ghostRecord->ghostType = (u16) (p[o] | (p[o + 1] << 8));
+        o += 2;
+        ghostRecord->replayChecksum = 0; /* not serialized by Torch (record section) */
+        ghostRecord->encodedCourseIndex =
+            (s32) ((u32) p[o] | ((u32) p[o + 1] << 8) | ((u32) p[o + 2] << 16) | ((u32) p[o + 3] << 24));
+        o += 4;
+        ghostRecord->raceTime =
+            (s32) ((u32) p[o] | ((u32) p[o + 1] << 8) | ((u32) p[o + 2] << 16) | ((u32) p[o + 3] << 24));
+        o += 4;
+        ghostRecord->unk_10 = (u16) (p[o] | (p[o + 1] << 8));
+        o += 2;
+        trackNameLen =
+            (u32) ((u32) p[o] | ((u32) p[o + 1] << 8) | ((u32) p[o + 2] << 16) | ((u32) p[o + 3] << 24));
+        o += 4;
+
+        /* Record track name is 9 bytes (empty for standard courses); reject anything
+           larger so the offset math below stays in-bounds. */
+        if (trackNameLen > sizeof(ghostRecord->trackName)) {
+            return -1;
+        }
+        /* Ensure the variable-length name plus the 20 machine bytes are present. */
+        if (copied < (size_t) 0x40 + o + trackNameLen + 0x14) {
+            return -1;
+        }
+
+        for (i = 0; i < (s32) sizeof(ghostRecord->unk_12); i++) {
+            ghostRecord->unk_12[i] = 0; /* padding, not serialized */
+        }
+        for (i = 0; i < (s32) sizeof(ghostRecord->trackName); i++) {
+            ghostRecord->trackName[i] = ((u32) i < trackNameLen) ? p[o + i] : 0;
+        }
+        o += trackNameLen;
+
+        /* MachineInfo (0x14) has the identical packed byte layout Torch writes for
+           GhostMachineInfo (character..cockpitB), so a byte copy is layout-safe. */
+        {
+            u8* mi = (u8*) &ghostRecord->unk_20.unk_00;
+            for (i = 0; i < 0x14; i++) {
+                mi[i] = p[o + i];
+            }
+        }
+        for (i = 0; i < (s32) sizeof(ghostRecord->unk_20.unk_14); i++) {
+            ghostRecord->unk_20.unk_14[i] = 0; /* not serialized */
+        }
+
+        if (ghostInfo != NULL) {
+            func_i2_80101590(ghostRecord, ghostInfo);
+        }
+        return 0;
+    }
 #endif
 
     if (!((courseIndex >= COURSE_MUTE_CITY) && (courseIndex <= COURSE_BIG_HAND))) {

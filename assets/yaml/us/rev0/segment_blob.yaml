@@ -1,0 +1,179 @@
+# segment_blob.yaml — R1 venue/geometry raw-blob recipe (contract R1_CONTRACTS.md C-R1.1/C-R1.2)
+#
+# One `type: BLOB` entry per family, each a byte-exact ROM slice delivered verbatim.
+#
+# There is intentionally NO `:config: segments:` block. Companion::ProcessFile resets the
+# per-file compression context to CompressionType::None (torch Companion.cpp:687), and with no
+# segments block nothing sets it otherwise, so Decompressor::AutoDecode takes the None path and
+# returns buffer[offset : offset+size] verbatim. MIO0 families (course_track_gfx, machine_models,
+# podium_gfx) are therefore stored STILL-COMPRESSED — no `mio0:` key is present, so no decode
+# happens. Every consumer keeps its own decode/swap step (mio0_decode, CourseData_FromRom,
+# gdx_fixup_asset_segment_image). Correctness is provable by byte-equality against the ROM slice.
+#
+# Archive keys derive as `segment_blob/<entryName>` (yaml stem / entry key). Only the Binary
+# exporter runs under gdx-extract, so the BLOB header/code exporters never touch the build.
+#
+# All offsets/sizes are ABSOLUTE ROM byte ranges derived from decomp/include/port_segment_addrs.h
+# as size = PORT_<fam>_ROM_END - PORT_<fam>_ROM_START (each `size` documented inline). Offsets have
+# a zero top byte, so torch's TranslateAddr treats them as absolute (not segmented).
+
+# --- Beta / creation textures (raw big-endian) ---
+expansion_kit_textures_beta:
+  type: BLOB
+  offset: 0x145B70  # PORT_expansion_kit_textures_beta_ROM_START
+  size: 0xDA40      # 0x1535B0 - 0x145B70
+
+course_edit_textures_beta:
+  type: BLOB
+  offset: 0x1535B0  # PORT_course_edit_textures_beta_ROM_START
+  size: 0x130B0     # 0x166660 - 0x1535B0
+
+create_machine_textures:
+  type: BLOB
+  offset: 0x166660  # PORT_create_machine_textures_ROM_START
+  size: 0x6240      # 0x16C8A0 - 0x166660
+
+# --- MIO0 geometry/texture families (stored still-compressed, raw ROM span) ---
+course_track_gfx:
+  type: BLOB
+  offset: 0x16C8A0  # PORT_course_track_gfx_ROM_START
+  size: 0xE940      # 0x17B1E0 - 0x16C8A0 (compressed ROM span; DECODED_SIZE 0x22500 is NOT the stored size)
+
+# setup_gfx covers the FULL seg-0x03 range [0x17B1E0, 0x1B8550) per C-R1.7. The runtime performs
+# two separate carves inside this one blob: setup_gfx at +0x0 and machine_custom_gfx at +0x780.
+# There is NO separate machine_custom_gfx blob; the shim's containment lookup serves both carves.
+setup_gfx:
+  type: BLOB
+  offset: 0x17B1E0  # PORT_setup_gfx_ROM_START
+  size: 0x3D370     # 0x1B8550 - 0x17B1E0 (PORT_setup_gfx_ROM_START .. PORT_hud_gfx_ROM_START)
+
+# --- Raw big-endian gfx families ---
+hud_gfx:
+  type: BLOB
+  offset: 0x1B8550  # PORT_hud_gfx_ROM_START
+  size: 0x29EA0     # 0x1E23F0 - 0x1B8550
+
+machine_global_gfx:
+  type: BLOB
+  offset: 0x1E23F0  # PORT_machine_global_gfx_ROM_START
+  size: 0x48CB0     # 0x22B0A0 - 0x1E23F0
+
+machine_models:
+  type: BLOB
+  offset: 0x22B0A0  # PORT_machine_models_ROM_START
+  size: 0xA090      # 0x235130 - 0x22B0A0 (compressed MIO0 ROM span)
+
+# --- The 11 venue texture families (seg 0x0A, raw big-endian) ---
+mute_city_textures:
+  type: BLOB
+  offset: 0x235130  # PORT_mute_city_textures_ROM_START
+  size: 0x4950      # 0x239A80 - 0x235130
+
+port_town_textures:
+  type: BLOB
+  offset: 0x239A80  # PORT_port_town_textures_ROM_START
+  size: 0x51D0      # 0x23EC50 - 0x239A80
+
+big_blue_textures:
+  type: BLOB
+  offset: 0x23EC50  # PORT_big_blue_textures_ROM_START
+  size: 0x5140      # 0x243D90 - 0x23EC50
+
+sand_ocean_textures:
+  type: BLOB
+  offset: 0x243D90  # PORT_sand_ocean_textures_ROM_START
+  size: 0x64E0      # 0x24A270 - 0x243D90
+
+devils_forest_textures:
+  type: BLOB
+  offset: 0x24A270  # PORT_devils_forest_textures_ROM_START
+  size: 0x6580      # 0x2507F0 - 0x24A270
+
+white_land_textures:
+  type: BLOB
+  offset: 0x2507F0  # PORT_white_land_textures_ROM_START
+  size: 0x4910      # 0x255100 - 0x2507F0
+
+sector_textures:
+  type: BLOB
+  offset: 0x255100  # PORT_sector_textures_ROM_START
+  size: 0x4500      # 0x259600 - 0x255100
+
+red_canyon_textures:
+  type: BLOB
+  offset: 0x259600  # PORT_red_canyon_textures_ROM_START
+  size: 0x5D60      # 0x25F360 - 0x259600
+
+fire_field_textures:
+  type: BLOB
+  offset: 0x25F360  # PORT_fire_field_textures_ROM_START
+  size: 0x78C0      # 0x266C20 - 0x25F360
+
+silence_textures:
+  type: BLOB
+  offset: 0x266C20  # PORT_silence_textures_ROM_START
+  size: 0x6B60      # 0x26D780 - 0x266C20
+
+ending_venue_textures:
+  type: BLOB
+  offset: 0x26D780  # PORT_ending_venue_textures_ROM_START
+  size: 0x6120      # 0x2738A0 - 0x26D780
+
+# --- Podium (MIO0 despite sAssetSegmentMap.compressed=0; runtime probes the magic) ---
+podium_gfx:
+  type: BLOB
+  offset: 0x2738A0  # PORT_podium_gfx_ROM_START
+  size: 0xF50       # 0x2747F0 - 0x2738A0 (compressed MIO0 ROM span)
+
+# --- Sparse indexed families (C-R1.8): whole contiguous range in one blob ---
+# super_textures: consumers slice at D_800CD220[venue]*0x800 inside this span.
+super_textures:
+  type: BLOB
+  offset: 0x2747F0  # PORT_super_textures_ROM_START
+  size: 0x4000      # 0x2787F0 - 0x2747F0 (full indexed-table span)
+
+# course_data: consumers slice at courseIndex*sizeof(CourseData). sizeof(CourseData)=0x7E0
+# (decomp/include/fzx_course.h:34), 26 courses -> 26*0x7E0 = 0xCCC0, matching the ROM span.
+course_data:
+  type: BLOB
+  offset: 0x2AD1E0  # PORT_course_data_ROM_START
+  size: 0xCCC0      # 0x2B9EA0 - 0x2AD1E0 = 26 * 0x7E0
+
+# --- R4 additions (W-R4.S1 census): raw ROM-slice blobs joining the SAME
+# shared containment-lookup table (sSegmentBlobMap / gdx_lookup_segment_blob)
+# as the families above. Offsets/sizes verified against
+# decomp/include/port_segment_addrs.h and the named constants below.
+
+# common_assets_compressed: full raw span of the 1028 back-to-back MIO0
+# sub-asset payloads (decomp/assets/yaml/us/rev0/common_assets_compressed.yaml
+# defines each individual sub-asset symbol + its ROM offset, feeding the
+# SEPARATE sCommonAssetRomMap lookup used by func_80077CF0/object.c). This
+# entry makes the WHOLE span byte-servable from the archive as one blob;
+# consumers still carve individual sub-asset ranges out of it via the
+# sCommonAssetRomMap offsets, resolved through this shim's containment lookup.
+common_assets_compressed:
+  type: BLOB
+  offset: 0x2B9EA0  # PORT_common_assets_compressed_ROM_START
+  size: 0x26AA80    # 0x524920 - 0x2B9EA0 (PORT_common_assets_compressed_ROM_END)
+
+# kanji_tables: covers GDX_ROM_KANJI_INDEX_TBL (port/n64_leo.c:290 --
+# s16[1316] = 0xA48 bytes, ROM 0x80960..0x813A8) through the end of
+# GDX_ROM_ANK_METRICS_TBL (port/n64_leo.c:291 -- 4 bytes * 0x908 entries =
+# 0x2420 bytes, ROM 0x8142C..0x8384C) as ONE slice, including the 0x84-byte
+# gap between the two tables (0x813A8..0x8142C). Read by
+# LeoGetKAdr/LeoGetAAdr (port/n64_leo.c:297-353).
+kanji_tables:
+  type: BLOB
+  offset: 0x80960   # GDX_ROM_KANJI_INDEX_TBL
+  size: 0x2EEC      # 0x8384C - 0x80960 (0x8142C + 0x908*4 = ANK table end)
+
+# rom_boot_tuning: generous page covering the ROM_READ(...) literal offsets
+# used by Racer_InitMachineStats (decomp/src/game/racer.c) and peers
+# (decomp/src/overlays/ovl_i9/machine_draw.c:4955,
+# decomp/src/overlays/ovl_i6/E7CF0.c:12). Observed literal offsets span
+# [0x078, 0xA20], each a 4-byte ROM_READ, so the accessed byte range is
+# [0x78, 0xA24). One page (0x1000) covers it with headroom.
+rom_boot_tuning:
+  type: BLOB
+  offset: 0x0
+  size: 0x1000

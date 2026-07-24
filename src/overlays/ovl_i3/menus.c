@@ -2733,6 +2733,16 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
         s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 225 - sGeneralRaceMenuScissorBoxTimer;
+        /* WIDESCREEN: same right-anchored panel family as Menus_DrawDeathRaceEndMenu (RETRY/
+           SETTINGS/QUIT/CHANGE_MACHINE box at x 210-300). Re-center the reveal scissor about the
+           same pivot (160) the panel geometry is hor+ compressed around, so the scissor tracks the
+           panel at any aspect. Identity on 4:3 / widescreen off. */
+        extern float gdx_get_widescreen_geometry_xscale(void);
+        f32 wsx = gdx_get_widescreen_geometry_xscale();
+        if (wsx != 1.0f) {
+            ulx = 160 + (s32)((ulx - 160) * wsx);
+            lrx = 160 + (s32)((lrx - 160) * wsx);
+        }
         if (ulx > lrx) { ulx = lrx; }
         if (uly > lry) { uly = lry; }
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
@@ -2921,9 +2931,34 @@ Gfx* Menus_DrawGpResultsEndMenu(Gfx* gfx) {
     }
 
     gDPPipeSync(gfx++);
+#ifdef PORT
+    {
+        /* Same inverted-reveal-scissor bug class as Menus_DrawTimeAttackFinishMenu: clamp each
+           axis so an inverted range collapses to a zero-area rect (nothing drawn), replicating the
+           console "not yet revealed" state that an inverted RDP scissor produces. */
+        s32 ulx = sGpResultsEndMenuScissorBoxTimer + 205;
+        s32 uly = sGpResultsEndMenuScissorBoxTimer + 132;
+        s32 lrx = 305 - sGpResultsEndMenuScissorBoxTimer;
+        s32 lry = 225 - sGpResultsEndMenuScissorBoxTimer;
+        /* WIDESCREEN: same right-anchored panel family as Menus_DrawDeathRaceEndMenu (RETRY/
+           SETTINGS/CHANGE_MACHINE/CHANGE_COURSE/QUIT box at x 210-300). Re-center the reveal
+           scissor about the same pivot (160) the panel geometry is hor+ compressed around, so the
+           scissor tracks the panel at any aspect. Identity on 4:3 / widescreen off. */
+        extern float gdx_get_widescreen_geometry_xscale(void);
+        f32 wsx = gdx_get_widescreen_geometry_xscale();
+        if (wsx != 1.0f) {
+            ulx = 160 + (s32)((ulx - 160) * wsx);
+            lrx = 160 + (s32)((lrx - 160) * wsx);
+        }
+        if (ulx > lrx) { ulx = lrx; }
+        if (uly > lry) { uly = lry; }
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
+    }
+#else
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, sGpResultsEndMenuScissorBoxTimer + 205,
                   sGpResultsEndMenuScissorBoxTimer + 132, 305 - sGpResultsEndMenuScissorBoxTimer,
                   225 - sGpResultsEndMenuScissorBoxTimer);
+#endif
     gfx = Menus_DrawBeveledBox(gfx, 210, 137, 300, 220, 0, 0, 0, 180);
     gSPDisplayList(gfx++, aMenuTextTlutSetupDL);
     gDPLoadTLUT_pal256(gfx++, func_800783AC(aMenuTextTLUT));
@@ -3055,6 +3090,16 @@ Gfx* Menus_DrawRetiredEndMenu(Gfx* gfx) {
         s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 226 - sGeneralRaceMenuScissorBoxTimer;
+        /* WIDESCREEN: same right-anchored panel family as Menus_DrawDeathRaceEndMenu (RETRY/
+           SETTINGS/QUIT/CHANGE_MACHINE box at x 210-300). Re-center the reveal scissor about the
+           same pivot (160) the panel geometry is hor+ compressed around, so the scissor tracks the
+           panel at any aspect. Identity on 4:3 / widescreen off. */
+        extern float gdx_get_widescreen_geometry_xscale(void);
+        f32 wsx = gdx_get_widescreen_geometry_xscale();
+        if (wsx != 1.0f) {
+            ulx = 160 + (s32)((ulx - 160) * wsx);
+            lrx = 160 + (s32)((lrx - 160) * wsx);
+        }
         if (ulx > lrx) { ulx = lrx; }
         if (uly > lry) { uly = lry; }
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
@@ -3194,6 +3239,21 @@ Gfx* Menus_DrawDeathRaceEndMenu(Gfx* gfx) {
         s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 210 - sGeneralRaceMenuScissorBoxTimer;
+        /* WIDESCREEN: the blue RETIRE panel (Menus_DrawBeveledBox + option textures, all
+           gSPTextureRectangle) is hor+ compressed about screen center 160, but gDPSetScissor
+           maps this native box linearly across the full frame. On a widescreen frame the two
+           no longer coincide: the linear scissor sits right of the confined panel, clipping its
+           left edge and the selection cursor while leaving dead space to the right. Re-center
+           the reveal box by the same x-scale the geometry receives (identity on 4:3 / widescreen
+           off, so the stock clamp is unchanged there) so the scissor tracks the panel at any
+           aspect. Center 160 == the NDC origin AdjXForAspectRatio scales about; y is untouched
+           because the aspect correction is horizontal only. */
+        extern float gdx_get_widescreen_geometry_xscale(void);
+        f32 wsx = gdx_get_widescreen_geometry_xscale();
+        if (wsx != 1.0f) {
+            ulx = 160 + (s32)((ulx - 160) * wsx);
+            lrx = 160 + (s32)((lrx - 160) * wsx);
+        }
         if (ulx > lrx) { ulx = lrx; }
         if (uly > lry) { uly = lry; }
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);

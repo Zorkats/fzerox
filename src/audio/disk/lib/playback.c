@@ -7,20 +7,46 @@ extern f32 gStereoPanVolume[];
 extern u16 gHaasEffectDelaySizes[];
 
 #ifdef PORT
+#define GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES 128
+
 static s32 sGdxUnlockAudioAwaitingNote = false;
+static s32 sGdxUnlockAudioJingleActive = false;
 static s32 sGdxUnlockAudioAllocationLogs = 0;
+static u8 sGdxUnlockAudioJingleNotes[GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES];
+
+static int gdx_unlock_audio_is_jingle_note_index(int noteIndex);
 
 void gdx_unlock_audio_expect_note(void) {
+    sGdxUnlockAudioJingleActive = true;
     sGdxUnlockAudioAwaitingNote = gdx_unlock_diag_enabled();
     sGdxUnlockAudioAllocationLogs = 0;
 }
 
 void gdx_unlock_audio_cancel_note(void) {
+    sGdxUnlockAudioJingleActive = false;
     sGdxUnlockAudioAwaitingNote = false;
 }
 
 static bool gdx_unlock_audio_is_target_channel(SequenceLayer* layer) {
-    return (layer != NULL) && (layer->channel == gAudioCtx.seqPlayers[0].channels[1]);
+    return (layer != NULL) && (layer != NO_LAYER) &&
+           (layer->channel == gAudioCtx.seqPlayers[0].channels[1]);
+}
+
+static s32 gdx_unlock_audio_effective_inst_or_wave(SequenceLayer* layer) {
+    if ((layer == NULL) || (layer == NO_LAYER)) {
+        return -1;
+    }
+    if ((layer->instOrWave == 0xFF) && (layer->channel != NULL)) {
+        return layer->channel->instOrWave;
+    }
+    return layer->instOrWave;
+}
+
+static s32 gdx_unlock_audio_instrument_index(s32 instOrWave) {
+    if ((instOrWave >= 2) && (instOrWave < 0x80)) {
+        return instOrWave - 2;
+    }
+    return -1;
 }
 
 static bool gdx_unlock_audio_is_target_layer(SequenceLayer* layer) {
@@ -29,20 +55,11 @@ static bool gdx_unlock_audio_is_target_layer(SequenceLayer* layer) {
 }
 
 int gdx_unlock_audio_trace_note_index(int noteIndex) {
-    Note* note;
-    SequenceLayer* layer;
-
     if (!gdx_unlock_diag_enabled() || !gdx_unlock_audio_trace_dsp_active() ||
-        (noteIndex < 0) || (noteIndex >= gAudioCtx.numNotes)) {
+        !gdx_unlock_audio_is_jingle_note_index(noteIndex)) {
         return false;
     }
-
-    note = &gAudioCtx.notes[noteIndex];
-    layer = note->playbackState.parentLayer;
-    if (!gdx_unlock_audio_is_target_channel(layer)) {
-        layer = note->playbackState.wantedParentLayer;
-    }
-    return gdx_unlock_audio_is_target_channel(layer);
+    return true;
 }
 
 static s32 gdx_unlock_audio_note_index(Note* note) {
@@ -53,20 +70,30 @@ static s32 gdx_unlock_audio_note_index(Note* note) {
     return (s32) (note - gAudioCtx.notes);
 }
 
+static int gdx_unlock_audio_is_jingle_note_index(int noteIndex) {
+    if ((noteIndex < 0) || (noteIndex >= GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES)) {
+        return false;
+    }
+    return sGdxUnlockAudioJingleNotes[noteIndex] != 0;
+}
+
 static void gdx_unlock_audio_log_allocation(SequenceLayer* layer, Note* note) {
     TunedSample* tunedSample = layer->tunedSample;
     Sample* sample = tunedSample != NULL ? tunedSample->sample : NULL;
     s32 noteIndex = gdx_unlock_audio_note_index(note);
+    s32 instOrWave = gdx_unlock_audio_effective_inst_or_wave(layer);
+    s32 instrumentIndex = gdx_unlock_audio_instrument_index(instOrWave);
 
     if (sGdxUnlockAudioAllocationLogs >= 48) {
         return;
     }
     sGdxUnlockAudioAllocationLogs++;
 
-    gdx_unlock_diagf("[unlock-audio] note allocation event=%d result=%s note=%d instrument=%d semitone=%u "
-                     "priority=%d freqScale=%.9g noteFreqScale=%.9g tunedSample=%p\n",
+    gdx_unlock_diagf("[unlock-audio] note allocation event=%d result=%s note=%d instOrWave=%d "
+                     "instrumentIndex=%d semitone=%u priority=%d freqScale=%.9g noteFreqScale=%.9g "
+                     "tunedSample=%p\n",
                      sGdxUnlockAudioAllocationLogs, note != NULL ? "allocated" : "failed", noteIndex,
-                     layer->instOrWave, (unsigned) layer->semitone, layer->channel->notePriority,
+                     instOrWave, instrumentIndex, (unsigned) layer->semitone, layer->channel->notePriority,
                      (double) layer->freqScale, (double) layer->noteFreqScale, (void*) tunedSample);
 
     if (sample == NULL) {
@@ -94,6 +121,14 @@ static void gdx_unlock_audio_log_allocation(SequenceLayer* layer, Note* note) {
 }
 
 static Note* gdx_unlock_audio_note_result(SequenceLayer* layer, Note* note) {
+    s32 noteIndex = gdx_unlock_audio_note_index(note);
+
+    if (noteIndex >= 0 && noteIndex < GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES) {
+        // Tag the allocated note itself so diagnostic attribution survives release
+        // tails and cannot leak to later system effects when the note slot is reused.
+        sGdxUnlockAudioJingleNotes[noteIndex] =
+            sGdxUnlockAudioJingleActive && gdx_unlock_audio_is_target_channel(layer);
+    }
     if (gdx_unlock_audio_is_target_layer(layer)) {
         bool startsTrace = sGdxUnlockAudioAwaitingNote && (note != NULL);
 
@@ -1033,8 +1068,12 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
     u32 policy = layer->channel->noteAllocPolicy;
 #ifdef PORT
     if (gdx_unlock_audio_is_target_layer(layer) && (sGdxUnlockAudioAllocationLogs < 48)) {
-        gdx_unlock_diagf("[unlock-audio] note allocation attempt instrument=%d priority=%d policy=%u\n",
-                         layer->instOrWave, layer->channel->notePriority, policy);
+        s32 instOrWave = gdx_unlock_audio_effective_inst_or_wave(layer);
+
+        gdx_unlock_diagf("[unlock-audio] note allocation attempt instOrWave=%d instrumentIndex=%d priority=%d "
+                         "policy=%u\n",
+                         instOrWave, gdx_unlock_audio_instrument_index(instOrWave),
+                         layer->channel->notePriority, policy);
     }
 #endif
 #ifdef PORT

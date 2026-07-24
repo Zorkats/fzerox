@@ -677,6 +677,36 @@ void* AudioLoad_TrySyncLoadSampleBank(u32 sampleBankId, u32* outMedium, bool noL
 
     cachePolicy = sampleBankTable->entries[sampleBankId].cachePolicy;
     if (cachePolicy == 4 || noLoad == true) {
+#ifdef PORT
+        /* CACHEPOLICY_4 trace/disposition (contract C-R2.2 obligation).
+         *
+         * EXERCISED: the disk sample-bank table (audio/disk/audio_tables.c
+         * gSampleBankTable) has three real CACHEPOLICY_4 entries -- SAMPLE_SOUND_EFFECTS,
+         * SAMPLE_BGM and SAMPLE_DDBGM_TITLE -- all MEDIUM_CART. For those this branch
+         * returns entries[realTableId].romAddr (an ABSOLUTE cart ROM offset after
+         * AudioLoad_InitTable relocation, e.g. 0x528730 + entry offset, which lies inside
+         * the audio_blob/audio_table span 0x528730..0xF67900) with *outMedium = MEDIUM_CART.
+         *
+         * RESOLUTION -- no direct-pointer deref, so no extra handling needed. The returned
+         * romAddr is consumed ONLY as a DMA device-address base: it becomes
+         * SampleBankRelocInfo.baseAddr{1,2}, and in the host font conversion
+         * (gdx_audio_convert_font -> gdx_fontconv_sample) a per-sample rawAddr is ADDED to
+         * it while sample->medium inherits medium{1,2} == MEDIUM_CART (never MEDIUM_RAM,
+         * because the bank medium is CART). Every such sample therefore streams on demand
+         * through AudioLoad_DmaSampleData -> AudioLoad_Dma -> sDmaHandler (osEPiStartDma),
+         * i.e. back through the single byte-source shim (GdxSegmentSourceRead). The romAddr
+         * is never dereferenced as a host pointer, so the "add the blob base vs. the rom
+         * offset" hazard from C-R2.2 does not arise here: osEPiStartDma masks the offset
+         * (devAddr & 0x0FFFFFFF) and the shim's audio_table containment serves it
+         * archive-first (raw-ROM fallback otherwise) -- byte-identical to the pre-swap path.
+         *
+         * R4 IMPLICATION: because these samples reach bytes only via that DMA sink, ROM
+         * deletion is gated by the same condition as every other audio read -- the
+         * audio_table blob must be resident+registered so the sink never needs the raw-ROM
+         * fallback (C-R2.4: gdx_rom_fallback_reads audio == 0). CACHEPOLICY_4 imposes NO
+         * additional blocker beyond that, precisely because it routes through the shared
+         * sink instead of returning a pointer the caller dereferences directly. */
+#endif
         *outMedium = sampleBankTable->entries[sampleBankId].medium;
         return sampleBankTable->entries[realTableId].romAddr;
     }

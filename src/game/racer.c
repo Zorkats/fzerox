@@ -760,6 +760,14 @@ void Racer_DecreaseLife(s32 playerIndex) {
 
 void Racer_RetireRacer(Racer* racer) {
 
+#ifdef PORT
+    /* P3 frame-interpolation cut epoch (MATRIX_INTERPOLATION_PLAN.md Step 7, events #3/#6): a machine
+       being retired or knocked out (Death Race) leaves the field / is re-placed, a discontinuity the
+       per-slot referenced-set already snaps on despawn — this makes the whole frame snap on the
+       transition tick so no neighbouring matrix streaks. Render-only; no-op unless interp is on. */
+    { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+#endif
+
     if (!(racer->stateFlags & (RACER_STATE_FINISHED | RACER_STATE_RETIRED))) {
         racer->stateFlags |= RACER_STATE_RETIRED;
         racer->energy = 0.0f;
@@ -1690,6 +1698,15 @@ void Racer_Init(void) {
     GhostRacer* ghostRacer;
     MachineInfo machineInfo;
     OSMesg sp68;
+
+#ifdef PORT
+    /* P3 frame-interpolation cut epoch (MATRIX_INTERPOLATION_PLAN.md Step 7, events #1/#3): every
+       race (re)start places all machines on the grid here, invalidating the previous keyframe, so
+       snap the whole frame this tick instead of streaking from stale poses. Also covers GP
+       course-to-course, where the game mode does NOT change (mode-load hook does not fire) but the
+       grid is re-placed. Render-only; strict no-op unless interpolation is on. */
+    { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+#endif
 
     sPipeFogColors = &sVenuePipeFogColors[COURSE_CONTEXT()->courseData.venue * PIPE_MAX];
     sTunnelFogColors = &sVenueTunnelFogColors[COURSE_CONTEXT()->courseData.venue * TUNNEL_MAX];
@@ -6900,6 +6917,32 @@ block_115:
             // FAKE
             if (1) {}
 
+#ifdef PORT
+            {
+                /* Rival-icon gate probe: once/sec dump of every term in the
+                   draw condition below, so one logged GP race splits "gate
+                   never passes" (selection/LOD/state failure — log shows which
+                   term) from "gate passes but icon invisible" (see the
+                   [rival] emit line inside the block). GDX_DIAG_RIVAL=1. */
+                extern int gdx_diag_rival_enabled(void);
+                extern void gdx_cki(const char* s, int v);
+                static s32 sRivalProbeFrame = 0;
+                if ((gGameMode == GAMEMODE_GP_RACE) && gdx_diag_rival_enabled() &&
+                    ((sRivalProbeFrame++ % 60) == 0)) {
+                    gdx_cki("[rival] sRivalRacer nonnull", sRivalRacer != NULL);
+                    if (sRivalRacer != NULL) {
+                        gdx_cki("[rival] rival.points", sRivalRacer->points);
+                        gdx_cki("[rival] player.points", gRacers[0].points);
+                        gdx_cki("[rival] rival.machineLod", sRivalRacer->machineLod);
+                        gdx_cki("[rival] rival.crashed|finished",
+                                (sRivalRacer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) != 0);
+                        gdx_cki("[rival] player.position", gRacers[0].position);
+                        gdx_cki("[rival] rival.position", sRivalRacer->position);
+                    }
+                }
+            }
+#endif
+
             if ((gGameMode == GAMEMODE_GP_RACE) && (sRivalRacer != NULL) && (sRivalRacer->machineLod != 0) &&
                 !(sRivalRacer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) &&
                 (gRacers[0].position >= sRivalRacer->position)) {
@@ -6935,6 +6978,24 @@ block_115:
                 sp5C4 = ((s32) ((-camera->currentVpScaleY * sp568) + camera->currentVpTransY + 0.5f) - 0x10) << 2;
                 gSPScisTextureRectangle(gfx++, var_s7, sp5C4, var_s7 + (32 * 4 - 1), sp5C4 + (16 * 4 - 1), 0, 0, 0,
                                         1 << 10, 1 << 10);
+#ifdef PORT
+                {
+                    /* Gate passed and the texrect above was emitted: log its
+                       screen position (10.2 fixed -> px) and NDC z. Sane
+                       on-screen coords here with no visible icon convicts the
+                       draw side (prim-depth compare or interpreter texrect
+                       handling), not the gate. GDX_DIAG_RIVAL=1. */
+                    extern int gdx_diag_rival_enabled(void);
+                    extern void gdx_cki(const char* s, int v);
+                    static s32 sRivalEmitLogs = 0;
+                    if (gdx_diag_rival_enabled() && (sRivalEmitLogs < 32)) {
+                        sRivalEmitLogs++;
+                        gdx_cki("[rival] EMITTED x_px", var_s7 >> 2);
+                        gdx_cki("[rival] EMITTED y_px", sp5C4 >> 2);
+                        gdx_cki("[rival] EMITTED ndc_z_x1000", (s32) (sp564 * 1000.0f));
+                    }
+                }
+#endif
             }
             gDPPipeSync(gfx++);
         }

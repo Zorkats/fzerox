@@ -10,11 +10,28 @@ u8 sCourseMinimapTex[0x1000] = { 0 };
 u8* sCourseMinimapTex;
 #endif
 
+#ifdef PORT
+/* This TLUT is a compile-time C array, not extracted asset data, so it never
+   passes through the asset loader's 16-bit endian fixup (gdx_fixup_asset_segment_image).
+   The port's CI texture decoder reads palette bytes big-endian (correct for
+   ROM-sourced TLUTs, which end up big-endian in host memory), but a native u16
+   literal on a little-endian host is stored little-endian -- so the decoder
+   swaps every entry. That is harmless for the byte-palindromes CLEAR (0x0000)
+   and WHITE (0xFFFF), but it turns BLACK 0x0001 into 0x0100, which zeroes the
+   RGBA5551 alpha bit (LSB) and renders the minimap's black track outline fully
+   transparent (the long-missing "black border"). Store each entry pre-swapped so
+   its in-memory bytes are big-endian, matching what the decoder reads. */
+#define MINIMAP_TLUT_ENTRY(r, g, b, a) \
+    ((u16)((GPACK_RGBA5551(r, g, b, a) >> 8) | (GPACK_RGBA5551(r, g, b, a) << 8)))
+#else
+#define MINIMAP_TLUT_ENTRY(r, g, b, a) GPACK_RGBA5551(r, g, b, a)
+#endif
+
 u16 sCourseMinimapPalette[] = {
-    GPACK_RGBA5551(0, 0, 0, 0),       // MINIMAP_PALETTE_CLEAR
-    GPACK_RGBA5551(0, 0, 0, 1),       // MINIMAP_PALETTE_BLACK
-    GPACK_RGBA5551(255, 255, 255, 1), // MINIMAP_PALETTE_WHITE
-    GPACK_RGBA5551(100, 100, 100, 1), // MINIMAP_PALETTE_GREY
+    MINIMAP_TLUT_ENTRY(0, 0, 0, 0),       // MINIMAP_PALETTE_CLEAR
+    MINIMAP_TLUT_ENTRY(0, 0, 0, 1),       // MINIMAP_PALETTE_BLACK
+    MINIMAP_TLUT_ENTRY(255, 255, 255, 1), // MINIMAP_PALETTE_WHITE
+    MINIMAP_TLUT_ENTRY(100, 100, 100, 1), // MINIMAP_PALETTE_GREY
 };
 
 s32 sPlayerMinimapPositions[][4][2] = {
@@ -182,10 +199,28 @@ void Minimap_InitCourseMinimap(void) {
        arena rewind re-hands this buffer's address to the next course, so the cache
        would serve this race's outline for the next one. Evict the exact address now
        that the buffer has been re-rasterized. Covers every caller of this function
-       (including Course Edit's preview). */
+       (including Course Edit's preview).
+
+       Minimap_DrawCourseMinimap (below) uploads sCourseMinimapTex as TWO independent
+       CI8 blocks: half0 at the base address and half1 at base + MINIMAP_MAX_SIZE / 2
+       (see the "(i * MINIMAP_MAX_DIMENSION * ...) / 2" load offset in that function's
+       loop, i = 0..1). The interpreter's texture cache (TextureCacheDelete) only
+       evicts exact-address matches with no range awareness, so invalidating the base
+       address alone leaves half1's cache entry untouched -- it can keep serving the
+       PREVIOUS race's decoded texture, showing as stale content in the bottom half of
+       the minimap across races. Evict both halves explicitly. The half1 offset DEPENDS
+       ON THE DRAW SCALE: Minimap_DrawCourseMinimap computes it as
+       (MINIMAP_MAX_DIMENSION * (s32)(MINIMAP_MAX_DIMENSION * scale)) / 2, which is
+       MINIMAP_MAX_SIZE / 2 at the single-player scale (1.0) but a SMALLER offset at
+       the multiplayer scale (0.75) -- evicting only the 1.0-scale address left the
+       multiplayer half1 entry stale across course changes. Both scales are fixed by
+       the numPlayersIndex switch in that function, so evict both derived offsets. */
     {
         extern void gdx_invalidate_texture_address(const void*);
         gdx_invalidate_texture_address(sCourseMinimapTex);
+        gdx_invalidate_texture_address(sCourseMinimapTex + MINIMAP_MAX_SIZE / 2);
+        gdx_invalidate_texture_address(
+            sCourseMinimapTex + (MINIMAP_MAX_DIMENSION * (s32) (MINIMAP_MAX_DIMENSION * 0.75f)) / 2);
     }
 #endif
 }

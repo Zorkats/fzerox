@@ -595,10 +595,58 @@ void Background_Update(void) {
         angle = Math_Round(DEG_TO_FZXANG3(0.5f * camera->fov));
         depthFovRatio = TAN(angle);
 
-#ifndef EXPANSION_KIT
-        background->horizontalRange = (background->scrollDepth + sBackgroundScale) * depthFovRatio * 1.2f;
-#else
+#if defined(PORT)
+        {
+            /* Widescreen backdrop coverage fix.
+
+               The 3D backdrop quads (skybox strip, venue floor, clouds) are built at
+               4:3 proportions here, and the interpreter's hor+ correction
+               (Interpreter::AdjXForAspectRatio) then multiplies every rendered vertex
+               X by xscale = (4/3)/windowAspect, compressing that 4:3 geometry inward to
+               fit the wider framebuffer. With the stock EK factor 1.5f the skybox strip
+               reached only NDC x = +/-0.98 AFTER that compression at 16:9 (proven by a
+               clip-space draw-marker probe: pos.x/w = 6862/7000 = 0.980), leaving a ~2%
+               unwritten black gutter at the left/right screen edges -- the reported
+               "black lines at the corners of the Mute City backdrop".
+
+               Scale the horizontal factor by 1/xscale so that after the hor+
+               compression the horizontal coverage is restored to the 4:3-equivalent
+               full width (1.2f is the factor that fills 4:3 exactly), plus a 2% safety
+               margin. Overscan is free here: the skybox strip samples CLAMP and the
+               floor/clouds sample WRAP, so any extent past the screen edge clips
+               cleanly with no artifact.
+
+               gdx_get_widescreen_geometry_xscale() returns exactly 1.0f when widescreen
+               is off, at 4:3, or under a forced-fixed aspect (EK editors). The max()
+               floor keeps the stock EK 1.5f in every one of those cases, so
+               non-widescreen framing is byte-behavior-identical to before; the factor
+               only ever grows (never shrinks) coverage, so no new gutter can appear on
+               any axis.
+
+               Vertical: verticalRange = horizontalRange * aspectRatio is kept intact.
+               Y receives NO hor+ compression, so the widened horizontalRange also grows
+               verticalRange (~9% at 16:9, more at ultrawide). That is pure overscan --
+               coverage only increases -- so a top/bottom gutter is impossible; and the
+               stock geometry sat at exactly NDC y = +/-1.0 (one float-rounding step from
+               a hairline top/bottom gutter), so the added vertical margin is beneficial.
+               The skybox gradient (S axis maps across verticalRange) simply stretches
+               slightly and clamps at its top/bottom edge texels -- never black. */
+            extern float gdx_get_widescreen_geometry_xscale(void);
+            f32 xscale = gdx_get_widescreen_geometry_xscale();
+            f32 wideFactor;
+            if (xscale <= 0.0f) {
+                xscale = 1.0f;
+            }
+            wideFactor = (1.2f / xscale) * 1.02f;
+            if (wideFactor < 1.5f) {
+                wideFactor = 1.5f;
+            }
+            background->horizontalRange = (background->scrollDepth + sBackgroundScale) * depthFovRatio * wideFactor;
+        }
+#elif defined(EXPANSION_KIT)
         background->horizontalRange = (background->scrollDepth + sBackgroundScale) * depthFovRatio * 1.5f;
+#else
+        background->horizontalRange = (background->scrollDepth + sBackgroundScale) * depthFovRatio * 1.2f;
 #endif
         background->verticalRange = background->horizontalRange * background->aspectRatio;
 
@@ -1259,6 +1307,25 @@ void Background_InitBackgroundSprites(void) {
     }
 }
 
+#ifdef PORT
+/* The night flashing building-window color is computed at runtime as a native
+   u16 (host little-endian in memory), but the port's CI texture decoder reads
+   TLUT entries big-endian -- the same bug class fixed for the minimap outline
+   in minimap.c. Every other entry in this replacement palette was copied from
+   asset data and is already big-endian in host memory (so it decodes correctly),
+   which makes this runtime-written entry the lone outlier. Pre-swap it so its
+   in-memory bytes are big-endian, matching what the decoder reads. Without this,
+   the decoder byte-swaps the flashing color: e.g. PACK_5551(31,10,0,1)=0xFA81
+   becomes 0x81FA, zeroing the RGBA5551 alpha bit (LSB) -- so the lit windows
+   flicker fully transparent and wrong-colored instead of cycling. The 0xFFFF
+   white source entry it replaces is a byte-palindrome, so whiteIndex detection
+   is already endian-safe. In the stock (non-PORT) build this is an identity
+   cast, keeping the write byte-identical. */
+#define TLUT_HOST_TO_BE16(v) ((u16)(((u16)(v) >> 8) | ((u16)(v) << 8)))
+#else
+#define TLUT_HOST_TO_BE16(v) ((u16)(v))
+#endif
+
 void Background_UpdateBackgroundSprites(void) {
     s32 i;
     s32 j;
@@ -1301,7 +1368,8 @@ void Background_UpdateBackgroundSprites(void) {
         for (i = 0; i < sSpritePaletteReplacementCount; i++) {
             spritePaletteReplacement = &sBackgroundSpritePaletteReplacements[i];
             if (spritePaletteReplacement->whiteIndex != -1) {
-                spritePaletteReplacement->palette[spritePaletteReplacement->whiteIndex] = flashingPaletteColor;
+                spritePaletteReplacement->palette[spritePaletteReplacement->whiteIndex] =
+                    TLUT_HOST_TO_BE16(flashingPaletteColor);
             }
 
             for (j = 0; j < 16; j++) {

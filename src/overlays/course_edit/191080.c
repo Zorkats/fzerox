@@ -383,20 +383,32 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
 #ifdef PORT
     // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Default 0 =
     // bit-identical to stock N64 (this whole block, and every consumer below, is PORT-only). When
-    // on, the selected/checker node parity flips every two frames instead of every frame and the
-    // flagged-node size pulse advances at half rate, halving the ~20 Hz Course Edit strobe on
-    // modern displays. Read once per draw call, mirroring the file's other PORT blocks. The blink
-    // parity D_800DCCFC and the frame counter gGameFrameCount both advance once per rendered frame
-    // (sys_gfx.c), so gGameFrameCount&2 is exactly half the native flip rate. See port/gdx_menu.cpp
-    // DrawGameplayMenu for the toggle.
+    // on, the marker highlights hold STEADY instead of strobing and the flagged-node size pulse
+    // advances at half rate, calming the ~20 Hz Course Edit strobe on modern displays. Read once
+    // per draw call, mirroring the file's other PORT blocks. See port/gdx_menu.cpp DrawGameplayMenu
+    // for the toggle.
+    //
+    // Two marker indicators share the stock D_800DCCFC blink parity but want OPPOSITE polarity to be
+    // visible: the selected control-point markers (unk_1C/unk_20 below) light green on the ON phase,
+    // while the look-ahead cursor node (spC0) shows its bright white on the OFF phase and blacks out
+    // on ON. A single reduced phase therefore cannot freeze both at once — halving it merely slowed
+    // the strobe (the cursor node kept toggling black/white at ~5 Hz, still reading as flicker on a
+    // digital display). Split the phase per indicator so each holds its OWN visible state every
+    // frame when the reducer is on: selected markers steady green (ON), cursor node steady white
+    // (OFF). When off, both follow the stock D_800DCCFC parity, bit-identical. The size pulse has no
+    // polarity conflict, so it keeps the half-rate advance. gGameFrameCount advances once per
+    // rendered frame (sys_gfx.c), so gGameFrameCount/2 is exactly half the native pulse rate.
     extern int CVarGetInteger(const char* name, int defaultValue);
     s32 gdxReduceFlash = CVarGetInteger("gEnhancements.Gameplay.ReduceEditorFlashing", 0);
-    s32 gdxBlinkPhase = gdxReduceFlash ? ((gGameFrameCount & 2) != 0) : (D_800DCCFC != 0);
+    s32 gdxSelBlink = gdxReduceFlash ? 1 : (D_800DCCFC != 0);
+    s32 gdxCursorBlink = gdxReduceFlash ? 0 : (D_800DCCFC != 0);
     u32 gdxPulseFrame = gdxReduceFlash ? (gGameFrameCount / 2) : gGameFrameCount;
-#define GDX_EDIT_BLINK gdxBlinkPhase
+#define GDX_EDIT_BLINK_SEL gdxSelBlink
+#define GDX_EDIT_BLINK_CURSOR gdxCursorBlink
 #define GDX_EDIT_PULSE (gdxPulseFrame % 10)
 #else
-#define GDX_EDIT_BLINK (D_800DCCFC != 0)
+#define GDX_EDIT_BLINK_SEL (D_800DCCFC != 0)
+#define GDX_EDIT_BLINK_CURSOR (D_800DCCFC != 0)
 #define GDX_EDIT_PULSE (gGameFrameCount % 10)
 #endif
 
@@ -407,12 +419,12 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
         gDPPipeSync(gfx++);
         if (D_80128690[i].unk_08 != 0) {
             gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
-        } else if ((i == D_800D6CA0.unk_1C) && GDX_EDIT_BLINK) {
+        } else if ((i == D_800D6CA0.unk_1C) && GDX_EDIT_BLINK_SEL) {
             gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
-        } else if ((i == D_800D6CA0.unk_20) && GDX_EDIT_BLINK) {
+        } else if ((i == D_800D6CA0.unk_20) && GDX_EDIT_BLINK_SEL) {
             gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
         } else if ((i == spC0) && (D_800D6CA0.unk_00 != 1)) {
-            if (GDX_EDIT_BLINK) {
+            if (GDX_EDIT_BLINK_CURSOR) {
                 gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
             } else {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
@@ -443,7 +455,8 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
                             Math_Round(spBC + (4.0f * var_fs1)) << 2, Math_Round(spB8 + (4.0f * var_fs1)) << 2, 0, 0, 0,
                             Math_Round((1 << 10) / var_fs1), Math_Round((1 << 10) / var_fs1));
     }
-#undef GDX_EDIT_BLINK
+#undef GDX_EDIT_BLINK_SEL
+#undef GDX_EDIT_BLINK_CURSOR
 #undef GDX_EDIT_PULSE
     return gfx;
 }

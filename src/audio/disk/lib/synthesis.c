@@ -150,6 +150,14 @@ Acmd* AudioSynth_Update(Acmd* aList, s32* cmdCount, s16* aiStart, s32 aiBufLen) 
     s32 j;
     SynthesisReverb* reverb;
 
+#ifdef PORT
+    if (gdx_unlock_audio_trace_dsp_active()) {
+        gdx_unlock_audio_stage_begin_command_list(
+            gdx_unlock_audio_trace_generation(), aList,
+            (unsigned int) gAudioCtx.audioBufferParameters.samplingFrequency);
+    }
+#endif
+
     aCmdPtr = aList;
     for (i = gAudioCtx.audioBufferParameters.ticksPerUpdate; i > 0; i--) {
         AudioSeq_ProcessSequences(i - 1);
@@ -752,6 +760,7 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
     s32 finished;
 #ifdef PORT
     bool gdxUnlockTargetNote;
+    Acmd* gdxUnlockStageCommandStart;
 #endif
 
     bookOffset = noteSubEu->bitField1.bookOffset;
@@ -759,6 +768,7 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
     note = &gAudioCtx.notes[noteIndex];
 #ifdef PORT
     gdxUnlockTargetNote = gdx_unlock_audio_synth_targets_note(noteIndex);
+    gdxUnlockStageCommandStart = aList;
 #endif
 
     if (noteSubEu->tunedSample != NULL) {
@@ -1303,6 +1313,15 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
 
         aList =
             AudioSynth_ProcessEnvelope(aList, noteSubEu, synthState, aiBufLen, DMEM_TEMP, haasEffectDelaySide, flags);
+#ifdef PORT
+        if (gdxUnlockTargetNote) {
+            gdx_unlock_audio_stage_register_command_range(
+                sGdxUnlockAudioSynthGeneration, noteIndex, gdxUnlockStageCommandStart, aList,
+                synthState->synthesisBuffers->adpcmdecState,
+                synthState->synthesisBuffers->finalResampleState,
+                (unsigned int) gAudioCtx.audioBufferParameters.samplingFrequency);
+        }
+#endif
     }
 
     return aList;

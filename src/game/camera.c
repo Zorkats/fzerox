@@ -2683,6 +2683,13 @@ void Camera_UpdateMode(Camera* camera, CameraSettings* cameraSettings, CameraScr
 
                 if (cameraReadyForRace) {
                     camera->mode = CAMERA_MODE_RACE;
+#ifdef PORT
+                    /* P3 frame-interpolation cut epoch (MATRIX_INTERPOLATION_PLAN.md Step 7, events
+                       #1/#4): the intro fly-around hands off to the gameplay follow camera here — a
+                       hard camera-mode switch. Snap the whole frame this tick so the view does not
+                       whip-pan-smear across the handoff. Render-only; no-op unless interp is on. */
+                    { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+#endif
                     cameraSettings->parameters.fovLerpFactor = 0.2f;
                     cameraSettings->parameters.upLerpFactor = 1.0f;
                     cameraSettings->parameters.frustrumCenterXLerpFactor = 0.1f;

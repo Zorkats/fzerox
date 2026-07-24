@@ -1,0 +1,32 @@
+# audio_blob.yaml — R2 audio raw-blob recipe (contract R2_CONTRACTS.md C-R2.1)
+#
+# One `type: BLOB` entry per audio ROM table, each a byte-exact ROM slice delivered verbatim.
+# Same flat, no-`:config: segments:` mechanism as R1's segment_blob.yaml (see that file's header
+# for the full Torch/Companion rationale): with no segments block, Companion::ProcessFile's
+# per-file compression context stays CompressionType::None, so Decompressor::AutoDecode returns
+# buffer[offset : offset+size] verbatim. Only the Binary exporter runs under gdx-extract.
+#
+# Archive keys derive as `audio_blob/<entryName>` (yaml stem / entry key). Entries from this file
+# join the SAME generated containment-lookup table as segment_blob.yaml's entries
+# (`sSegmentBlobMap` / `gdx_lookup_segment_blob`, emitted by tools/gen_asset_bindings.py) — one
+# shared table, one shim, per C-R2.1 ("entries join the SAME generated table").
+#
+# All offsets/sizes are ABSOLUTE ROM byte ranges derived from
+# decomp/include/port_segment_addrs.h as size = PORT_audio_<name>_ROM_END -
+# PORT_audio_<name>_ROM_START (each `size` documented inline). Offsets have a zero top byte, so
+# torch's TranslateAddr treats them as absolute (not segmented).
+
+audio_bank:
+  type: BLOB
+  offset: 0x524D60  # PORT_audio_bank_ROM_START
+  size: 0x2D90      # 0x527AF0 - 0x524D60 (PORT_audio_bank_ROM_END)
+
+audio_seq:
+  type: BLOB
+  offset: 0x527AF0  # PORT_audio_seq_ROM_START
+  size: 0xC40       # 0x528730 - 0x527AF0 (PORT_audio_seq_ROM_END)
+
+audio_table:
+  type: BLOB
+  offset: 0x528730  # PORT_audio_table_ROM_START
+  size: 0xA3F1D0    # 0xF67900 - 0x528730 (PORT_audio_table_ROM_END, ~10.75 MiB)

@@ -47,6 +47,14 @@ extern void GDiffuser_RegisterLoadedAssetBuffer(const void* buffer, size_t size,
 extern void gdx_record_dma_load(unsigned int rdram_phys, unsigned int rom_offset, unsigned int size);
 extern unsigned char* gdx_rdram;
 
+/* R4 (C-R4.1): route the raw cartridge read through the single byte-source shim
+ * (port/gdx_segment_source.{h,c}) instead of touching gdx_rom_buffer directly.
+ * Forward-declared rather than #include'd -- this decomp TU's include path does
+ * not carry port/ (same pattern as dma.c). Archive-first, byte-identical raw
+ * fallback: the copied bytes equal the old memcpy whether served from the
+ * common_assets_compressed blob (verbatim ROM slice) or the raw ROM. */
+extern int GdxSegmentSourceRead(unsigned int romBase, unsigned int size, void* dst);
+
 /* Renderer staleness tracking only sees recorded writes (HostRangeChanged,
    n64_gfx_bridge.cpp). The per-mode arena rewind reuses destination addresses
    across mode transitions, so every CPU asset copy into RDRAM must be
@@ -100,20 +108,38 @@ void func_80077CF0(void* segAddr, size_t size, u8* startAddr) {
 static void GDX_LoadRawRomAsset(void* segAddr, size_t size, u8* startAddr) {
     unsigned int romOffset = gdx_lookup_common_asset_rom_offset((unsigned long long)segAddr);
     if (romOffset != 0) {
-        /* Verify ROM is loaded and range is in bounds before memcpy. */
-        if (gdx_rom_buffer == NULL) {
-            gdx_ck("[rom] FATAL: gdx_rom_buffer is NULL — no ROM loaded! Set FZEROX_ROM env var.");
-            memset(startAddr, 0, size);
-            return;
-        }
-        if (romOffset + size > gdx_rom_size) {
+        /* Archive-first, same as Dma_RomCopy (dma.c): try the shim before ever
+         * looking at gdx_rom_buffer. GdxSegmentSourceRead can serve this offset
+         * out of the mounted archive with gdx_rom_buffer == NULL -- archive-only
+         * boot is a legitimate configuration, not an error, so it must not be
+         * short-circuited into a zero-fill before the archive is even consulted.
+         * The OOB clamp below only makes sense relative to gdx_rom_size, so it
+         * is only applied when a ROM is actually loaded; the shim enforces its
+         * own bounds against the archive independently for the archive-only case. */
+        if (gdx_rom_buffer != NULL && romOffset + size > gdx_rom_size) {
             gdx_ck("[rom] WARN: read past end of ROM — clamping");
             gdx_cki("[rom]  romOffset", (int)romOffset);
             gdx_cki("[rom]  size", (int)size);
             gdx_cki("[rom]  rom_size", (int)gdx_rom_size);
             size = gdx_rom_size - romOffset;
         }
-        memcpy(startAddr, gdx_rom_buffer + romOffset, size);
+        if (!GdxSegmentSourceRead(romOffset, (unsigned int)size, startAddr)) {
+            /* Total miss: the symbol resolved to a ROM offset, but it is neither
+             * in the mounted archive nor available from a loaded ROM (or the ROM
+             * is loaded and the offset is out of range even after clamping).
+             * This is the only path that should zero-fill and warn -- an
+             * archive-only boot that successfully resolves the asset never
+             * reaches here, and its miss telemetry lives here instead of on
+             * every archive-only boot. */
+            static int sRomMissLogs = 0;
+            if (sRomMissLogs < 32) {
+                sRomMissLogs++;
+                gdx_ck("[rom] MISS: asset not found in archive and no ROM loaded (or offset out of range) — texture zero-filled. Set FZEROX_ROM env var or check archive contents.");
+                gdx_cki("[rom]  romOffset", (int)romOffset);
+                gdx_cki("[rom]  size", (int)size);
+            }
+            memset(startAddr, 0, size);
+        }
         GDX_RecordAssetWrite(startAddr, size);
     } else {
         /* Symbol not in the generated common-asset binding table. This zero
@@ -346,10 +372,68 @@ u8* func_i2_800AE578(unk_80077D50* arg0, bool arg1) {
                     var_s3 = Arena_Allocate(ALLOC_FRONT, arg0->height * arg0->width * 2);
                     header = Arena_Allocate(ALLOC_PEEK, var_s0);
                     CLEAR_DATA_CACHE(header, var_s0);
+#ifdef PORT
+                    /* PORT field-test regression fix (R5): the five callers of this
+                       function -- title Copyright (aCopyrightDDTex), the 64DD logo
+                       (aN64DDLogoTex), the credits copyright, the machine-select
+                       trophies (aNovice/Standard/Expert/MasterDDTrophyTex) and the
+                       course-select DD cup logos (aCupSelectDD1Tex/DD2Tex) -- pass
+                       arg0->unk_04 pointers that are REAL, full-sized host arrays,
+                       populated directly FROM THE DISK by gdx_ek_assets_fill
+                       (port/gen/EkAssetBindings.c). Their fill rows carry n64Address=0,
+                       so they are never registered as segmented cart addresses AND they
+                       are absent from the common-asset (o2r) table. The prior R4-A2
+                       routing (GDX_TryLoadCommonAssetO2R -> GDX_LoadRawRomAsset)
+                       therefore ALWAYS missed for them: no o2r key, no rom offset, so
+                       GDX_LoadRawRomAsset zero-filled the texture ([asset] MISS) and the
+                       copyright / logo / trophies / cup logos rendered invisible.
+                       Do NOT reintroduce the common-asset lookup here -- it can never
+                       hit for these disk-filled callers (fill mechanism, not the o2r
+                       store). These pointers are exactly what the non-PORT #else path
+                       bcopy's from, so read the raw MIO0 blob DIRECTLY from the host
+                       array, identical to #else. var_s0 tracks the MIO0 blob size
+                       (compressedSize), which is <= the fill array size
+                       (EkAssetBindings.c diskLen), so the copy stays in bounds -- the
+                       same bound the #else path relies on. The GDX_IS_MIO0 magic check
+                       below fails safe to bzero (with an [asset] trace) if the disk
+                       fill never ran and the array is still all-zero. */
+#endif
                     bcopy(arg0->unk_04, header, var_s0);
                     if (GDX_IS_MIO0(header)) {
+#ifdef PORT
+                        {
+                            u32 mioDestSize = GDX_READ_BE_U32((const u8*)header + 4);
+                            u32 allocSize   = (u32)(arg0->height * arg0->width * 2);
+                            if (mioDestSize > allocSize) {
+                                gdx_ck("[mio0] OVERFLOW PREVENTED in i2 case17/18");
+                                gdx_cki("[mio0]  dest_size", (int)mioDestSize);
+                                gdx_cki("[mio0]  alloc_size", (int)allocSize);
+                                bzero(var_s3, allocSize);
+                            } else {
+                                mio0Decode(header, var_s3);
+                            }
+                        }
+#else
                         mio0Decode(header, var_s3);
+#endif
                     } else {
+#ifdef PORT
+                        /* No MIO0 magic in the host array -> gdx_ek_assets_fill
+                           never populated it (disk-less boot). Fail safe to the
+                           zero-fill below instead of decoding garbage, and trace
+                           it once so a missing disk image is diagnosable rather
+                           than a silently invisible texture. */
+                        {
+                            extern void gdx_ck(const char*);
+                            extern void gdx_ckp(const char*, void*);
+                            static int sEkFillMissLogs = 0;
+                            if (sEkFillMissLogs < 8) {
+                                sEkFillMissLogs++;
+                                gdx_ck("[asset] EK disk-fill texture missing MIO0 magic; zero-filled (no disk image?)");
+                                gdx_ckp("[asset]  host array", arg0->unk_04);
+                            }
+                        }
+#endif
                         bzero(var_s3, arg0->height * arg0->width * 2);
                     }
                     break;

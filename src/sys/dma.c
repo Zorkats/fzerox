@@ -4,6 +4,12 @@
 extern unsigned char* gdx_rdram;
 #define GDX_DMA_RDRAM_SIZE ((size_t)0x1000000u)  /* must match GDX_RDRAM_SIZE in n64_rdram.h */
 extern void gdx_record_dma_load(unsigned int rdram_phys, unsigned int rom_offset, unsigned int size);
+/* R1 (C-R1.3/C-R1.9 #2): route the cartridge read through the single byte-source
+ * shim (port/gdx_segment_source.{h,c}) instead of touching gdx_rom_buffer here.
+ * Forward-declared rather than #include'd: this decomp TU's include path does not
+ * carry port/. The shim returns verbatim ROM bytes (archive-first, raw fallback),
+ * so the copied bytes are byte-identical to the old memcpy. */
+extern int GdxSegmentSourceRead(unsigned int romBase, unsigned int size, void* dst);
 #endif
 
 void func_80076490(void) {
@@ -53,18 +59,17 @@ void Dma_RomCopy(u8* romAddr, u8* ramAddr, size_t size) {
 
 #ifdef PORT
     {
-        extern unsigned char* gdx_rom_buffer;
-        extern size_t         gdx_rom_size;
         size_t romOffset = Dma_PortRomOffset(romAddr);
         u8* dst = Dma_PortRamPointer(ramAddr);
         if (dst == NULL) {
             return;
         }
-        if (gdx_rom_buffer == NULL || romOffset + size > gdx_rom_size) {
+        /* Archive-first via the shim; on a total miss (ROM absent / out of range)
+         * it leaves dst untouched and returns 0 -- match the old zero-fill. */
+        if (!GdxSegmentSourceRead((unsigned int)romOffset, (unsigned int)size, dst)) {
             memset(dst, 0, size);
             return;
         }
-        memcpy(dst, gdx_rom_buffer + romOffset, size);
         if (dst >= gdx_rdram && dst < gdx_rdram + GDX_DMA_RDRAM_SIZE)
             gdx_record_dma_load((unsigned int)(size_t)(dst - gdx_rdram), (unsigned int)romOffset, (unsigned int)size);
         return;
@@ -89,20 +94,24 @@ void Dma_RomCopyWithBssInit(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr
 
 #ifdef PORT
     {
-        extern unsigned char* gdx_rom_buffer;
-        extern size_t         gdx_rom_size;
+        /* DEAD CODE under PORT (R4 census): this function's only caller, Dma_LoadOverlay(),
+           early-returns under PORT before ever reaching its call site, so this body is
+           unreachable. Retained for structure and for any future PORT caller -- which now
+           routes through the single byte-source shim (GdxSegmentSourceRead), archive-first
+           with a byte-identical raw-ROM fallback, exactly like Dma_RomCopy above, NOT by
+           reintroducing gdx_rom_buffer here. */
         size_t romOffset = Dma_PortRomOffset(romAddr);
         u8* dst = Dma_PortRamPointer(ramAddr);
         if (dst == NULL) {
             bzero(bssAddr, bssSize);
             return;
         }
-        if (gdx_rom_buffer == NULL || romOffset + size > gdx_rom_size) {
+        /* Archive-first; on a total miss (ROM absent / out of range) the shim leaves dst
+           untouched and returns 0 -- match the old zero-fill. */
+        if (!GdxSegmentSourceRead((unsigned int)romOffset, (unsigned int)size, dst)) {
             memset(dst, 0, size);
-        } else {
-            memcpy(dst, gdx_rom_buffer + romOffset, size);
-            if (dst >= gdx_rdram && dst < gdx_rdram + GDX_DMA_RDRAM_SIZE)
-                gdx_record_dma_load((unsigned int)(size_t)(dst - gdx_rdram), (unsigned int)romOffset, (unsigned int)size);
+        } else if (dst >= gdx_rdram && dst < gdx_rdram + GDX_DMA_RDRAM_SIZE) {
+            gdx_record_dma_load((unsigned int)(size_t)(dst - gdx_rdram), (unsigned int)romOffset, (unsigned int)size);
         }
         bzero(bssAddr, bssSize);
         return;
