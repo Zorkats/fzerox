@@ -626,16 +626,16 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
 #endif
     } else {
 #ifdef PORT
-        /* GDX_DIAG_GADGET: race gadgets (start gate, signs, buildings) render
+        /* Diagnostic for race gadgets (start gate, signs, buildings) rendering
            invisible on PORT. Course_GadgetsDraw only draws a decorational
-           feature when decoration->loadChunk->drawState != 0 (course_gadgets.c
-           above). Three independent producers feed that condition: the
-           feature list itself (Course_FeaturesInit, at Course_Init time), the
-           per-decoration closest-chunk pointer + LookAt matrix (Course_
-           DecorationsViewInteractDataInit, at Race_Init time), and the
+           feature when decoration->loadChunk->drawState != 0 (above). Three
+           independent producers feed that condition: the feature list itself
+           (Course_FeaturesInit, at Course_Init time), the per-decoration
+           closest-chunk pointer + LookAt matrix
+           (Course_DecorationsViewInteractDataInit, at Race_Init time), and the
            per-frame camera-frustum visibility flag (Course_Draw, every frame,
-           just before this function runs). Log all three once so the next
-           run tells us which producer is empty/zero instead of guessing. */
+           just before this function runs). Log all three once to name which
+           one is empty/zero. */
         {
             static int sGdxGadgetDiagCount = 0;
             extern int gGdxRaceActive;
@@ -690,12 +690,11 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                    decorations even when drawState passed). Same fix family as
                    the racer.c modelview matrices. */
                 gSPMatrix(gfx++, decorationMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
-                /* [deco-draw] per-site census (contract audit, 2026-07-10):
-                   every static cell of this chain verifies clean yet nothing
-                   appears on screen. Log the EXACT emitted pair (matrix host
-                   pointer + this frame's gfx cursor + feature type) for the
-                   drawable decoration so the bridge-side log lines for the
-                   same frame can be matched 1:1. Capped. */
+                /* [deco-draw] per-site census: every static cell of this chain
+                   verifies clean yet nothing appears on screen. Log the EXACT
+                   emitted pair (matrix host pointer + this frame's gfx cursor +
+                   feature type) for the drawable decoration so the bridge-side
+                   log lines for the same frame can be matched 1:1. Capped. */
                 {
                     extern void gdx_ckp(const char* s, void* v);
                     extern void gdx_cki(const char* s, int v);
@@ -3815,7 +3814,7 @@ extern OSPiHandle* gCartRomHandle;
 
 void Dma_ClearRomCopy(void* romAddr, void* ramAddr, size_t size) {
 #ifdef PORT
-    // R6 EXPLORE PASS: skip ROM DMA (no cartridge handle / resource system yet). Piece 5.
+    // PORT: no ROM DMA here — every caller (e.g. sys/math.c's boot_textures blit) gets nothing back.
     (void) romAddr;
     (void) ramAddr;
     (void) size;
@@ -4162,7 +4161,7 @@ void Course_Load(s32 courseIndex) {
          * the game thread parks here forever: Course_Load(COURSE_MUTE_CITY)
          * is called unconditionally from func_800742FC during boot, so this
          * blocked every no-disk EK boot before the title screen. Same class
-         * of bug as the G2 guitar-seq and ovl_i10 cup-name gates elsewhere in
+         * of bug as the guitar-seq and ovl_i10 cup-name gates elsewhere in
          * this codebase -- gate on gLeoDriveConnectionState, not
          * gRamDDCompatible (gRamDDCompatible is set true unconditionally in
          * the EK build and is not a valid proxy for "disk present"). */

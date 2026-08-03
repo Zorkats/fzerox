@@ -761,10 +761,11 @@ void Racer_DecreaseLife(s32 playerIndex) {
 void Racer_RetireRacer(Racer* racer) {
 
 #ifdef PORT
-    /* P3 frame-interpolation cut epoch (MATRIX_INTERPOLATION_PLAN.md Step 7, events #3/#6): a machine
-       being retired or knocked out (Death Race) leaves the field / is re-placed, a discontinuity the
-       per-slot referenced-set already snaps on despawn — this makes the whole frame snap on the
-       transition tick so no neighbouring matrix streaks. Render-only; no-op unless interp is on. */
+    /* Frame-interpolation cut epoch: a machine being retired or knocked out
+       (Death Race) leaves the field or is re-placed, a discontinuity the per-slot
+       referenced-set already snaps on despawn. Snap the whole frame on the
+       transition tick so no neighbouring matrix streaks. Render-only; no-op
+       unless interpolation is on. */
     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
 #endif
 
@@ -1700,11 +1701,12 @@ void Racer_Init(void) {
     OSMesg sp68;
 
 #ifdef PORT
-    /* P3 frame-interpolation cut epoch (MATRIX_INTERPOLATION_PLAN.md Step 7, events #1/#3): every
-       race (re)start places all machines on the grid here, invalidating the previous keyframe, so
-       snap the whole frame this tick instead of streaking from stale poses. Also covers GP
-       course-to-course, where the game mode does NOT change (mode-load hook does not fire) but the
-       grid is re-placed. Render-only; strict no-op unless interpolation is on. */
+    /* Frame-interpolation cut epoch: every race (re)start places all machines on
+       the grid here, invalidating the previous keyframe, so snap the whole frame
+       this tick instead of streaking from stale poses. Also covers GP
+       course-to-course, where the game mode does NOT change (the mode-load hook
+       does not fire) but the grid is re-placed. Render-only; strict no-op unless
+       interpolation is on. */
     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
 #endif
 
@@ -3619,6 +3621,21 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         racer->shadowBaseR = racer->shadowBaseB = 91.0f;
         racer->shadowBaseG = 255.0f;
         racer->boostTimer = sInitialBoostTimer;
+#ifdef PORT
+        /* Enhancement seam. Announce the freshly-armed boost timer to port/'s event layer, which
+           may rewrite it in place (e.g. the gEnhancements.Tuning.BoostDuration knob in
+           port/enhancements/tuning/BoostDuration.cpp). Fired AFTER the stock assignment on
+           purpose: the listener receives, and overrides, the exact value the game is about to use.
+           The point of routing through an event rather than editing this line is that every future
+           boost-related enhancement now costs zero further decomp churn -- see
+           port/enhancements/events/GameEvents.h for the full rationale.
+
+           Declared inline rather than included: the gdiffuser_game target compiles decomp/ with
+           only the decomp include paths (port/CMakeLists.txt:214-219), so no libultraship or port
+           header is reachable from here. Same shim idiom as the interpolation cut hooks at
+           racer.c:763 and racer.c:1703. Strict no-op with no listeners attached. */
+        { extern void GameEvents_FireOnBoostStart(s32 racerId, s32* frames); GameEvents_FireOnBoostStart(racer->id, &racer->boostTimer); }
+#endif
         racer->soundEffectFlags |= RACER_SE_FLAGS_BOOST;
         if (gEnableRaceSfx) {
             Audio_PlayerTriggerSEStart(racer->id, NA_SE_7);
@@ -4995,7 +5012,7 @@ void Racer_Update(void) {
         if (!gGamePaused) {
             if (gRaceIntroTimer == 460) {
                 func_8007E08C();
-                /* PORT NOTE (task #21 postmortem): Audio_StartDemo() -> Audio_RomBgmStart(BGM_DEMO=28)
+                /* PORT NOTE: Audio_StartDemo() -> Audio_RomBgmStart(BGM_DEMO=28)
                    is the RACE-INTRO FANFARE, played through the SE-sequence jukebox on seqPlayer 0
                    (Audio_SEStart(0, 28) -> channel-0 IO -> dynTable[28]). It is console-correct on EK
                    hardware too. The earlier "Mute City ghost" this call was blamed for was actually the
@@ -6723,7 +6740,7 @@ block_115:
 
 #ifdef PORT
         {
-            /* #16 trace probe: exact raw pointers for this draw so the bridge-side
+            /* [countdown] trace probe: exact raw pointers for this draw so the bridge-side
                [rect]/[vtx-dropped]/[vtx-spike]/[mtx-dropped] probes can be grepped
                by matching low32 -- proves whether THIS specific matrix/vertex pair
                resolves cleanly (and, if it does, whether the resolved rect/matrix
@@ -6802,7 +6819,7 @@ block_115:
         }
 #ifdef PORT
         {
-            /* #16 trace probe: the digit texture actually selected this frame
+            /* [countdown] trace probe: the digit texture actually selected this frame
                (var_s2) plus introTimer, so the bridge's [settimg]/GDX_DIAG_SETTIMG
                resolution of this exact low32 can be found in the same log. */
             extern void gdx_cki(const char* s, int v);
@@ -6816,17 +6833,15 @@ block_115:
 #endif
 #ifdef PORT
         {
-            /* #16 phase 3: the coarse arm (set at the top of this whole countdown
-               block) stays 1 for the rest of the process once the countdown first
-               runs, so the edge-triggered render-state probe in interpreter.cpp
-               fires on the very FIRST triangle the interpreter happens to reach
-               after that transition -- which is whatever draws first in that
-               frame's entire display list (track/background/other racers), not
-               necessarily this digit quad. Tag the digit quad's own vertex
-               pointer immediately before it is drawn so the bridge can match it
-               by raw low32 (still N64-address-shaped at translate time) and
-               hand the interpreter the RESOLVED host pointer to match against at
-               GfxSpVertex time, tightening the probe to this exact draw. */
+            /* The coarse arm set at the top of this countdown block stays 1 for
+               the rest of the process once the countdown first runs, so the
+               edge-triggered render-state probe in interpreter.cpp fires on the
+               FIRST triangle the interpreter reaches after that transition --
+               whatever draws first in the frame's display list, not necessarily
+               this digit quad. Tag the digit quad's own vertex pointer immediately
+               before it is drawn so the bridge can match it by raw low32 (still
+               N64-address-shaped at translate time) and hand the interpreter the
+               RESOLVED host pointer to match at GfxSpVertex time. */
             extern unsigned int gGdxCountdownProbeVtxLow32;
             gGdxCountdownProbeVtxLow32 = (unsigned int) (uintptr_t) D_400AA28;
         }
@@ -6852,6 +6867,69 @@ block_115:
             for (var_s3 = 0; var_s3 < var_s4; var_s3++) {
 
                 racer = gRacersByPosition[var_s3];
+#ifdef PORT
+                /* In-world position-marker (1ST/2ND/3RD) gate probe, sharing the
+                   GDX_DIAG_RIVAL gate with the rival probe below. These markers
+                   draw in every ordinary race, so one GP race reproduces them.
+
+                   Reports, once per second per slot, which term of the gate
+                   rejected it, or 0 if the slot reached the texrect. That splits
+                   "the gate never passes" (naming the term) from "the gate passes
+                   but nothing is visible" -- for the latter see the [posmark]
+                   EMITTED line at the draw.
+
+                   The pair index is recomputed into a LOCAL: var_s7 is reused as
+                   an x coordinate by the draw below and must not be disturbed. */
+                {
+                    extern int gdx_diag_rival_enabled(void);
+                    extern void gdx_dbg_logf(const char* fmt, ...);
+                    static s32 sPosMarkerFrame = 0;
+                    static s32 sPosMarkerTick = 0;
+
+                    /* Latch on slot 0 so all three slots report the same frame. */
+                    if (var_s3 == 0) {
+                        sPosMarkerTick = (gdx_diag_rival_enabled() && ((sPosMarkerFrame++ % 60) == 0));
+                    }
+                    if (sPosMarkerTick) {
+                        s32 pairIdx;
+                        s32 reason = 0;
+                        s32 slotCode;
+                        s32 dist;
+
+                        if (racer->id < playerIndex) {
+                            pairIdx = ((s32) ((playerIndex - 1) * playerIndex) >> 1) + racer->id;
+                        } else {
+                            pairIdx = ((s32) (racer->id * (racer->id - 1)) >> 1) + playerIndex;
+                        }
+
+                        if (racer->machineLod == 0) {
+                            reason = 1;
+                        } else if (playerIndex == racer->id) {
+                            reason = 2;
+                        } else if (racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) {
+                            reason = 3;
+                        } else if (sRacerPairInfo[pairIdx].trailToLeadDistance < 800.0f) {
+                            reason = 4;
+                        }
+
+                        slotCode = (var_s3 * 10) + reason;
+                        dist = (s32) sRacerPairInfo[pairIdx].trailToLeadDistance;
+
+                        /* reason: 0 = reaches the texrect, 1 = machineLod is 0,
+                           2 = slot is the viewing player, 3 = crashed/finished,
+                           4 = trailToLeadDistance under 800. */
+                        gdx_dbg_logf("[posmark] slot*10+rejectReason=%d (0x%x)\n", slotCode, (unsigned) slotCode);
+                        gdx_dbg_logf("[posmark]  racer.id=%d (0x%x)\n", (int) racer->id, (unsigned) racer->id);
+                        gdx_dbg_logf("[posmark]  playerIndex=%d (0x%x)\n", (int) playerIndex, (unsigned) playerIndex);
+                        gdx_dbg_logf("[posmark]  machineLod=%d (0x%x)\n", (int) racer->machineLod,
+                                     (unsigned) racer->machineLod);
+                        gdx_dbg_logf("[posmark]  trailToLeadDistance=%d (0x%x)\n", dist, (unsigned) dist);
+                        gdx_dbg_logf("[posmark]  gTotalRacers=%d (0x%x)\n", (int) gTotalRacers,
+                                     (unsigned) gTotalRacers);
+                        gdx_dbg_logf("[posmark]  gNumPlayers=%d (0x%x)\n", (int) gNumPlayers, (unsigned) gNumPlayers);
+                    }
+                }
+#endif
                 if (racer->machineLod == 0) {
                     continue;
                 }
@@ -6912,6 +6990,30 @@ block_115:
                     gSPScisTextureRectangle(gfx++, var_s7, sp5C4, var_s7 + (16 * 4 - 1), sp5C4 + (16 * 4 - 1), 0, 0, 0,
                                             1 << 10, 1 << 10);
                 }
+#ifdef PORT
+                /* Reached only when the gate above passed and a texrect was
+                   emitted. If these lines appear but no marker is on screen, the
+                   fault is downstream of the draw decision -- check the pixel
+                   coordinates for offscreen values and ndc_z for a depth reject.
+                   Capped so a long race cannot flood the log. */
+                {
+                    extern int gdx_diag_rival_enabled(void);
+                    extern void gdx_dbg_logf(const char* fmt, ...);
+                    static s32 sPosMarkerEmitLogs = 0;
+
+                    if (gdx_diag_rival_enabled() && (sPosMarkerEmitLogs < 48)) {
+                        s32 xPx = var_s7 >> 2;
+                        s32 yPx = sp5C4 >> 2;
+                        s32 ndcZ = (s32) (sp564 * 1000.0f);
+
+                        sPosMarkerEmitLogs++;
+                        gdx_dbg_logf("[posmark] EMITTED slot=%d (0x%x)\n", (int) var_s3, (unsigned) var_s3);
+                        gdx_dbg_logf("[posmark] EMITTED x_px=%d (0x%x)\n", xPx, (unsigned) xPx);
+                        gdx_dbg_logf("[posmark] EMITTED y_px=%d (0x%x)\n", yPx, (unsigned) yPx);
+                        gdx_dbg_logf("[posmark] EMITTED ndc_z_x1000=%d (0x%x)\n", ndcZ, (unsigned) ndcZ);
+                    }
+                }
+#endif
             }
 
             // FAKE
@@ -6925,19 +7027,27 @@ block_115:
                    term) from "gate passes but icon invisible" (see the
                    [rival] emit line inside the block). GDX_DIAG_RIVAL=1. */
                 extern int gdx_diag_rival_enabled(void);
-                extern void gdx_cki(const char* s, int v);
+                extern void gdx_dbg_logf(const char* fmt, ...);
                 static s32 sRivalProbeFrame = 0;
                 if ((gGameMode == GAMEMODE_GP_RACE) && gdx_diag_rival_enabled() &&
                     ((sRivalProbeFrame++ % 60) == 0)) {
-                    gdx_cki("[rival] sRivalRacer nonnull", sRivalRacer != NULL);
+                    s32 nonNull = (sRivalRacer != NULL);
+
+                    gdx_dbg_logf("[rival] sRivalRacer nonnull=%d (0x%x)\n", nonNull, (unsigned) nonNull);
                     if (sRivalRacer != NULL) {
-                        gdx_cki("[rival] rival.points", sRivalRacer->points);
-                        gdx_cki("[rival] player.points", gRacers[0].points);
-                        gdx_cki("[rival] rival.machineLod", sRivalRacer->machineLod);
-                        gdx_cki("[rival] rival.crashed|finished",
-                                (sRivalRacer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) != 0);
-                        gdx_cki("[rival] player.position", gRacers[0].position);
-                        gdx_cki("[rival] rival.position", sRivalRacer->position);
+                        s32 down = (sRivalRacer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) != 0;
+
+                        gdx_dbg_logf("[rival] rival.points=%d (0x%x)\n", (int) sRivalRacer->points,
+                                     (unsigned) sRivalRacer->points);
+                        gdx_dbg_logf("[rival] player.points=%d (0x%x)\n", (int) gRacers[0].points,
+                                     (unsigned) gRacers[0].points);
+                        gdx_dbg_logf("[rival] rival.machineLod=%d (0x%x)\n", (int) sRivalRacer->machineLod,
+                                     (unsigned) sRivalRacer->machineLod);
+                        gdx_dbg_logf("[rival] rival.crashed|finished=%d (0x%x)\n", down, (unsigned) down);
+                        gdx_dbg_logf("[rival] player.position=%d (0x%x)\n", (int) gRacers[0].position,
+                                     (unsigned) gRacers[0].position);
+                        gdx_dbg_logf("[rival] rival.position=%d (0x%x)\n", (int) sRivalRacer->position,
+                                     (unsigned) sRivalRacer->position);
                     }
                 }
             }
@@ -6986,13 +7096,17 @@ block_115:
                        draw side (prim-depth compare or interpreter texrect
                        handling), not the gate. GDX_DIAG_RIVAL=1. */
                     extern int gdx_diag_rival_enabled(void);
-                    extern void gdx_cki(const char* s, int v);
+                    extern void gdx_dbg_logf(const char* fmt, ...);
                     static s32 sRivalEmitLogs = 0;
                     if (gdx_diag_rival_enabled() && (sRivalEmitLogs < 32)) {
+                        s32 xPx = var_s7 >> 2;
+                        s32 yPx = sp5C4 >> 2;
+                        s32 ndcZ = (s32) (sp564 * 1000.0f);
+
                         sRivalEmitLogs++;
-                        gdx_cki("[rival] EMITTED x_px", var_s7 >> 2);
-                        gdx_cki("[rival] EMITTED y_px", sp5C4 >> 2);
-                        gdx_cki("[rival] EMITTED ndc_z_x1000", (s32) (sp564 * 1000.0f));
+                        gdx_dbg_logf("[rival] EMITTED x_px=%d (0x%x)\n", xPx, (unsigned) xPx);
+                        gdx_dbg_logf("[rival] EMITTED y_px=%d (0x%x)\n", yPx, (unsigned) yPx);
+                        gdx_dbg_logf("[rival] EMITTED ndc_z_x1000=%d (0x%x)\n", ndcZ, (unsigned) ndcZ);
                     }
                 }
 #endif

@@ -21,18 +21,31 @@ extern OSPiHandle* gCartRomHandle;
 
 #ifdef PORT
 extern void* gdx_resolve_registered_host_address(unsigned int addr);
+/* Both live in port/n64_gfx_bridge.cpp beside the resolver above; forward-declared here for the
+   same reason as the shim, this TU's include path does not carry port/. */
+extern size_t gdx_registered_host_capacity(const void* host);
+extern void gdx_dma_report_short_dest(const void* dst, unsigned int size, size_t capacity,
+                                      unsigned int romOffset);
 
 static size_t Dma_PortRomOffset(u8* romAddr) {
     unsigned int phys = (unsigned int)(unsigned long long)romAddr & 0x1FFFFFFFu;
     return (phys >= 0x10000000u) ? (size_t)(phys - 0x10000000u) : (size_t)phys;
 }
 
-static u8* Dma_PortRamPointer(u8* ramAddr) {
+/* Resolve an N64 RAM pointer to a host address and report how many bytes may be written there.
+   Callers copy `size` bytes into the result, so without the extent they cannot distinguish a
+   legitimate destination from one about to overrun: every branch below previously checked only
+   that the START address was in range, never that start + size was. `*capacity` is 0 when the
+   extent is unknown -- see Dma_PortDestTooSmall for how that case is treated. */
+static u8* Dma_PortRamPointer(u8* ramAddr, size_t* capacity) {
     unsigned long long full = (unsigned long long)ramAddr;
     unsigned int low = (unsigned int)full;
 
+    *capacity = 0;
+
     /* Physical RDRAM offset (< 16MB): direct mapping. */
     if (full < (unsigned long long)GDX_DMA_RDRAM_SIZE) {
+        *capacity = GDX_DMA_RDRAM_SIZE - (size_t)full;
         return gdx_rdram + (size_t)full;
     }
 
@@ -42,15 +55,33 @@ static u8* Dma_PortRamPointer(u8* ramAddr) {
     if ((low & 0xE0000000u) == 0x80000000u) {
         unsigned int phys = low & 0x1FFFFFFFu;
         if (phys < (unsigned int)GDX_DMA_RDRAM_SIZE) {
+            *capacity = GDX_DMA_RDRAM_SIZE - (size_t)phys;
             return gdx_rdram + phys;
         }
     }
 
     if (full <= 0xFFFFFFFFull) {
-        return (u8*)gdx_resolve_registered_host_address(low);
+        u8* host = (u8*)gdx_resolve_registered_host_address(low);
+        if (host != NULL) {
+            *capacity = gdx_registered_host_capacity(host);
+        }
+        return host;
     }
 
+    /* Already a full 64-bit host pointer, so it did not come from the registry and has no
+       recorded extent. Left unknown. */
     return ramAddr;
+}
+
+/* True when the copy provably does not fit. A copy is refused ONLY when the extent is known and
+   too small; an unknown extent is allowed through unchanged, so this guard cannot regress a path
+   that works today. The goal is to stop provable overruns, not to tighten every DMA at once. */
+static int Dma_PortDestTooSmall(const u8* dst, size_t capacity, size_t size, size_t romOffset) {
+    if ((capacity != 0) && (capacity < size)) {
+        gdx_dma_report_short_dest(dst, (unsigned int)size, capacity, (unsigned int)romOffset);
+        return 1;
+    }
+    return 0;
 }
 #endif
 
@@ -60,8 +91,12 @@ void Dma_RomCopy(u8* romAddr, u8* ramAddr, size_t size) {
 #ifdef PORT
     {
         size_t romOffset = Dma_PortRomOffset(romAddr);
-        u8* dst = Dma_PortRamPointer(ramAddr);
+        size_t capacity;
+        u8* dst = Dma_PortRamPointer(ramAddr, &capacity);
         if (dst == NULL) {
+            return;
+        }
+        if (Dma_PortDestTooSmall(dst, capacity, size, romOffset)) {
             return;
         }
         /* Archive-first via the shim; on a total miss (ROM absent / out of range)
@@ -101,8 +136,13 @@ void Dma_RomCopyWithBssInit(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr
            with a byte-identical raw-ROM fallback, exactly like Dma_RomCopy above, NOT by
            reintroducing gdx_rom_buffer here. */
         size_t romOffset = Dma_PortRomOffset(romAddr);
-        u8* dst = Dma_PortRamPointer(ramAddr);
+        size_t capacity;
+        u8* dst = Dma_PortRamPointer(ramAddr, &capacity);
         if (dst == NULL) {
+            bzero(bssAddr, bssSize);
+            return;
+        }
+        if (Dma_PortDestTooSmall(dst, capacity, size, romOffset)) {
             bzero(bssAddr, bssSize);
             return;
         }

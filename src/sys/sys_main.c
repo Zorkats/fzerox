@@ -5,7 +5,7 @@
 #include "PR/leo.h"
 
 #ifdef PORT
-// R6 diagnostic checkpoints. Can't include <stdio.h> here — the decomp's libc/stdint.h defines
+// Diagnostic checkpoints. Can't include <stdio.h> here — the decomp's libc/stdint.h defines
 // uintptr_t as u32, which clashes with the system headers. Log via a port helper (n64_sched.c).
 extern void gdx_ck(const char* s);
 extern void gdx_cki(const char* s, int v);
@@ -186,7 +186,7 @@ void Main_ThreadEntry(void* arg0) {
     gResetStarted = false;
 
 #ifdef PORT
-    // S3: pre-seed D_800DCAC8 with one DP-done message so the first call to func_80067D64
+    // Pre-seed D_800DCAC8 with one DP-done message so the first call to func_80067D64
     // does not stall on osRecvMesg(&D_800DCAC8, BLOCK) before any GFX task has run.
     // On N64 the boot frame's DP interrupt would have populated this queue; on host it is empty.
     osSendMesg(&D_800DCAC8, (OSMesg)(uintptr_t)0x2A, OS_MESG_NOBLOCK);
@@ -346,40 +346,32 @@ void Main_ThreadEntry(void* arg0) {
 
 #ifdef EXPANSION_KIT
 #ifdef PORT
-    /* PORT fix for engram slice/audio-synthesis (hop 3): func_80768C08/func_80768AF0
-       (sys/disk/75000.c) route every audio DMA/Leo request through func_80767800 ->
-       sSys6Thread's command queue (D_807C6E90). That queue is only ever
-       osCreateMesgQueue'd from INSIDE sSys6Thread's own entry function
-       (func_80767958), which is only osStartThread'd a few lines above when a real
-       64DD drive is detected (gLeoDriveConnectionState becomes 2 only on that path).
-       This port can boot EXPANSION_KIT=1 against a disk-less base ROM -- a
-       combination that can't happen on real hardware, since EK software requires a
-       physical drive to boot at all -- so installing these handlers unconditionally
-       left sDmaHandler/sLeoHandler pointing at a consumer that never runs: the very
-       first audio font/sequence load (AudioLoad_Dma -> sDmaHandler -> func_80768C08
-       -> func_80767800 -> osSendMesg(&D_807C6E90, ..., OS_MESG_BLOCK) on a
-       zero-initialized, never-created queue) blocked forever. Because this port's
-       fiber scheduler is a single cooperative OS thread, that one blocked fiber froze
-       the entire game (confirmed: AudioThread_ProcessCmds fires exactly once, then
-       total silence). Only wire up the EK handlers when the Sys6Thread that services
+    /* func_80768C08/func_80768AF0 (sys/disk/75000.c) route every audio DMA/Leo
+       request through func_80767800 -> sSys6Thread's command queue (D_807C6E90).
+       That queue is only osCreateMesgQueue'd from INSIDE sSys6Thread's own entry
+       function (func_80767958), which is only osStartThread'd a few lines above when
+       a real 64DD drive is detected (gLeoDriveConnectionState reaches 2 only on that
+       path). This port can boot EXPANSION_KIT=1 against a disk-less base ROM -- a
+       combination impossible on hardware, where EK software needs a physical drive to
+       boot at all -- so installing these handlers unconditionally left
+       sDmaHandler/sLeoHandler pointing at a consumer that never runs, and the first
+       audio font/sequence load blocked forever on a zero-initialized, never-created
+       queue. With a single cooperative fiber scheduler, that one blocked fiber froze
+       the entire game. Only wire up the EK handlers when the Sys6Thread that services
        them is actually running; otherwise keep the defaults (osEPiStartDma/
-       LeoReadWrite). Note: the decomp's PI manager thread (devmgr.c /
-       __osDevMgrMain) never runs under PORT -- osCreatePiManager is an empty-body
-       stub (libultraship/src/libultraship/libultra/os_pi.cpp:6) -- so
-       osEPiStartDma servicing cart-medium ROM reads correctly here means it is
-       serviced INLINE, synchronously, by libultraship's osEPiStartDma
-       (libultraship/src/libultraship/libultra/os.cpp), which routes through the
-       single byte-source shim (GdxSegmentSourceRead), not by the PI manager. */
-    /* PORT update (hop 4): the state==2 gate was insufficient — with a disk
-       image present this port DOES negotiate the drive, the gate passes, and
-       the first audio LBA load still parks the audio fiber forever on the
-       Sys6 queue (whose servicing fiber never performs real work on host).
-       Confirmed by log signature: exactly one audio task, one drain, five
-       unanswered ScheduleProcessCmds notifications. On PORT, never install
-       the Sys6-queue handlers: the defaults are correct here — the Leo
-       handler default is the port's own LeoReadWrite (reads gdx_disk_buffer
-       with the SDK physical mapping = real sample data), and the DMA handler
-       default completes immediately via the wired osEPiStartDma. */
+       LeoReadWrite). Note the decomp's PI manager thread (devmgr.c / __osDevMgrMain)
+       never runs under PORT -- osCreatePiManager is an empty-body stub in
+       libultraship -- so osEPiStartDma here is serviced INLINE and synchronously by
+       libultraship's own osEPiStartDma, which routes through the single byte-source
+       shim (GdxSegmentSourceRead), not by the PI manager. */
+    /* A gate on state==2 is not enough: with a disk image present this port DOES
+       negotiate the drive, the gate passes, and the first audio LBA load still
+       parks the audio fiber forever on the Sys6 queue, whose servicing fiber
+       never performs real work on host. So under PORT never install the
+       Sys6-queue handlers. The defaults are correct here — the Leo handler
+       default is the port's own LeoReadWrite (reads gdx_disk_buffer with the SDK
+       physical mapping, i.e. real sample data), and the DMA handler default
+       completes immediately via the wired osEPiStartDma. */
 #else
     AudioLoad_SetDmaHandler(func_80768C08);
     AudioLoad_SetLeoHandler(func_80768AF0);
@@ -504,7 +496,7 @@ void Idle_ThreadEntry(void* arg0) {
     osSetThreadPri(NULL, OS_PRIORITY_IDLE);
 
 #ifdef PORT
-    // R6 cooperative fiber scheduler: the idle thread's busy-spin means "CPU is idle" — yield to
+    // Cooperative fiber scheduler: the idle thread's busy-spin means "CPU is idle" — yield to
     // the host loop so it can pump a window frame and post VI/SP/DP events, then resume.
     {
         extern void gdx_yield_to_host(void);

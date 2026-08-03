@@ -18,7 +18,23 @@ bool D_xk1_80032AC8 = false;
 u32 D_xk1_80032ACC = -1;
 s32 D_xk1_80032AD0 = 0;
 
+#ifdef PORT
+/* Row 4 (space / dash / END) is deliberately absent from this literal on N64.
+ * The keyboard is indexed `row * 10 + col` and row 4 is clamped to cols 6-8, so
+ * it reads indices 46-48 -- past this 41-byte string, into the adjacent
+ * `D_xk1_80032B00 = 0x202D`. Big-endian those bytes are 00 00 20 2D, which puts
+ * ' ' at 46, '-' at 47 and the END terminator at 48. On a little-endian host the
+ * same object lays out as 2D 20 00 00, shifting the row two cells: END activates
+ * one column left of where it draws, and the cell that renders END yields 0x04,
+ * so a finished 8-character name can never be saved.
+ *
+ * Spell row 4 out rather than depend on object layout and byte order. Cells match
+ * ExpansionKit_GetCharacterKeyboardPosition below: ' '->(6,4), '-'->(7,4),
+ * '\0' (END) at cols 8-9. Cols 0-5 stay NUL, as they are on hardware. */
+char sNameEntryKeyboardStr[50] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ,'& 0123456789\0\0\0\0\0\0 -";
+#else
 char sNameEntryKeyboardStr[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ,'& 0123456789";
+#endif
 UNUSED s32 D_xk1_80032B00 = 0x202D;
 
 char* func_xk1_800290D0(char* buffer, const char* fmt, size_t size) {
@@ -68,6 +84,33 @@ Gfx* func_xk1_8002924C(Gfx* gfx, s32 xPos, s32 yPos, const char* fmt, ...) {
     D_xk1_80032ACC = -1;
     charRemaining = _Printf(func_xk1_800290D0, buffer, fmt, args);
 
+#ifdef PORT
+    /* Blank Course-Edit info panels. The GDX_DIAG_NODEINFO SETTIMG probe saw ZERO
+       samples of the three seg-7 setup font sheets across a full editor route,
+       which reads as "the draw never runs" -- but the panel BACKGROUND does reach
+       the screen, and func_xk2_800E8F7C (course_edit/191080.c:2630) emits the
+       background and this text with no branch between them. Both cannot be true.
+       Logging the call itself separates the readings: no lines here means the text
+       really is gated off upstream; lines here means the draw runs and the SETTIMG
+       probe missed it (its !w1IsHostPointer guard), putting the fault downstream in
+       the blit. Note the caller passes prim alpha 0 at 191080.c:2647 and :2651. */
+    {
+        extern int gdx_dev_gate_by_name_nodeinfo(void);
+        extern void gdx_dbg_logf(const char* fmt, ...);
+        static s32 sLogged = 0;
+
+        if (gdx_dev_gate_by_name_nodeinfo() && sLogged < 24) {
+            sLogged++;
+            /* %.*s, not %s: _Printf reports a length and does NOT terminate the
+               buffer, so a plain %s runs past the emitted bytes into whatever the
+               previous call left behind and prints convincing garbage. */
+            gdx_dbg_logf("[ekprintf] at (%d,%d) len=%d text=\"%.*s\" firstCell=%d\n", xPos, yPos, charRemaining,
+                         (charRemaining > 0) ? charRemaining : 0, buffer,
+                         (charRemaining > 0) ? func_xk1_80029218(buffer[0]) : -1);
+        }
+    }
+#endif
+
     if (charRemaining > 0) {
         charPtr = (s8*) buffer;
         while (charRemaining > 0) {
@@ -96,6 +139,15 @@ void ExpansionKit_GetCharacterKeyboardPosition(char letter, s32* xPosPtr, s32* y
     s32 xPos;
     s32 yPos;
     s32 alphabetIndex;
+
+#ifdef PORT
+    /* Any character outside the switch and the two range tests below leaves both
+     * outputs unset, and callers feed them straight into gDPLoadTextureTile as
+     * tile coordinates. Default to the END cell so an unexpected byte can never
+     * produce garbage geometry. */
+    xPos = 9;
+    yPos = 4;
+#endif
 
     switch (letter) {
         case ' ':

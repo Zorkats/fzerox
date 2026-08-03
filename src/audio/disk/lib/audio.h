@@ -659,16 +659,14 @@ typedef struct AudioCmd {
     /* 0x0 */ union{
         u32 opArgs;
 #ifdef PORT
-        /* engram slice/audio-synthesis: AUDIO_MK_CMD packs opArgs as
-           (op<<24)|(arg0<<16)|(arg1<<8)|arg2 -- MSB-first, matching real N64's
-           big-endian memory layout where the bitfield-style struct below (declared
-           op-first) naturally aliases byte0=op, byte1=arg0, byte2=arg1, byte3=arg2.
-           On a little-endian host the SAME u32 store places the packed bytes in
-           the OPPOSITE order in memory (byte0=arg2 ... byte3=op), so the fields
-           must be declared in REVERSE order here to alias the correct byte.
-           Confirmed at runtime: AUDIOCMD_GLOBAL_INIT_SEQPLAYER(seqPlayerIndex,
-           seqId, 0, 0) always packs arg2==0, and the drained cmd->op read back
-           as 0 (byte0) instead of the real opcode (byte3) before this fix. */
+        /* AUDIO_MK_CMD packs opArgs as (op<<24)|(arg0<<16)|(arg1<<8)|arg2 --
+           MSB-first, matching the N64's big-endian memory layout, where the
+           bitfield struct below (declared op-first) aliases byte0=op, byte1=arg0,
+           byte2=arg1, byte3=arg2. On a little-endian host the SAME u32 store puts
+           those bytes in the OPPOSITE order (byte0=arg2 ... byte3=op), so the
+           fields must be declared in REVERSE order here to alias the right byte.
+           Without the reversal, the drained cmd->op read back as 0 (byte0) instead
+           of the real opcode (byte3). */
         struct {
             u8 arg2;
             u8 arg1;

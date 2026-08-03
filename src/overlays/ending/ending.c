@@ -661,14 +661,16 @@ s32 EndingCutscene_UpdateState(void) {
        (NONE,0) is exactly what keeps sEndingState pinned at ENDING_THANKS_FOR_PLAYING and drives
        the watchdog toward its 1200 bypass. Strip once the ceremony renders correctly. */
     {
-        extern void gdx_cki(const char* s, int v);
+        extern void gdx_dbg_logf(const char* fmt, ...);
         static s32 sGdxCeremonyDiagCounter = 0;
         if ((sGdxCeremonyDiagCounter++ % 30) == 0) {
-            gdx_cki("[GDX ceremony] sEndingState", (int) sEndingState);
-            gdx_cki("[GDX ceremony] sEndingTimer", (int) sEndingTimer);
-            gdx_cki("[GDX ceremony] sFireworksType", (int) sFireworksType);
-            gdx_cki("[GDX ceremony] gActiveFireworks", (int) gActiveFireworks);
-            gdx_cki("[GDX ceremony] thanksGateWatchdog", (int) sEndingThanksGateWatchdog);
+            gdx_dbg_logf("[GDX ceremony] sEndingState=%d (0x%x)\n", (int) sEndingState, (unsigned) sEndingState);
+            gdx_dbg_logf("[GDX ceremony] sEndingTimer=%d (0x%x)\n", (int) sEndingTimer, (unsigned) sEndingTimer);
+            gdx_dbg_logf("[GDX ceremony] sFireworksType=%d (0x%x)\n", (int) sFireworksType, (unsigned) sFireworksType);
+            gdx_dbg_logf("[GDX ceremony] gActiveFireworks=%d (0x%x)\n", (int) gActiveFireworks,
+                         (unsigned) gActiveFireworks);
+            gdx_dbg_logf("[GDX ceremony] thanksGateWatchdog=%d (0x%x)\n", (int) sEndingThanksGateWatchdog,
+                         (unsigned) sEndingThanksGateWatchdog);
         }
     }
 #endif

@@ -47,7 +47,7 @@ extern void GDiffuser_RegisterLoadedAssetBuffer(const void* buffer, size_t size,
 extern void gdx_record_dma_load(unsigned int rdram_phys, unsigned int rom_offset, unsigned int size);
 extern unsigned char* gdx_rdram;
 
-/* R4 (C-R4.1): route the raw cartridge read through the single byte-source shim
+/* Route the raw cartridge read through the single byte-source shim
  * (port/gdx_segment_source.{h,c}) instead of touching gdx_rom_buffer directly.
  * Forward-declared rather than #include'd -- this decomp TU's include path does
  * not carry port/ (same pattern as dma.c). Archive-first, byte-identical raw
@@ -176,6 +176,70 @@ void func_80077CF0(s32 segAddr, size_t size, u8* startAddr) {
 void func_80077D44(void) {
     D_800E3A20 = 0;
 }
+
+#ifdef PORT
+/* PORT: texture-registry overflow guard + occupancy probe.
+ *
+ * D_800E33E0 (object.c:27) is a FIXED 200-entry array, and the three registration
+ * sites in this file -- func_80077D50_impl, func_i2_800AE578 and func_80078104 --
+ * each wrote D_800E33E0[D_800E3A20] and incremented with NO bound of any kind.
+ *
+ * Registration is CUMULATIVE and the count is only reset by func_80077D44(),
+ * reached only from the mode-change tick (game.c:735) and machine_create.c:23 --
+ * effectively only on a gGameMode CHANGE. Two paths grow it without one:
+ *   * ovl_i2/font.c:1795 -- Font_DrawString re-enters func_80077D50_impl for
+ *     EVERY glyph EVERY frame and lazily registers any glyph not present. That
+ *     path never calls func_800783AC, so lazy registration is INVISIBLE to the
+ *     [reg-miss] probe in that function.
+ *   * course_edit/19DD60.c:338-345 -- a Course Edit "Test Course" run re-inits
+ *     the race IN PLACE with no mode change, so a whole editing run accumulates
+ *     into one registry generation.
+ *
+ * Past slot 199 the writes land on whatever the linker placed after the array: in
+ * this TU that is D_800E3A20 itself (the count, object.c:28) and gObjects[32]
+ * (object.c:29). A corrupted count then makes func_800783AC scan far past the
+ * array and return arbitrary bytes as a TexturePtr for SOME symbols while others
+ * still resolve -- and it never trips [reg-miss], because a non-NULL garbage
+ * pointer is indistinguishable from a hit there.
+ *
+ * Refusing the entry is strictly better than the OOB write: func_800783AC then
+ * returns NULL and func_80078EA0_impl (object.c:737) skips that draw, so the
+ * worst case is a MISSING glyph instead of corrupted adjacent state. The refusal
+ * is loud and always-on (bounded to 16 lines) because it means an upstream reset
+ * is missing, not because it is an expected condition.
+ *
+ * Non-PORT keeps the original unguarded three lines verbatim at all three sites. */
+extern int gdx_dev_gate_diag_texreg(void);
+extern void gdx_dbg_logf(const char* fmt, ...);
+
+#define GDX_TEXREG_CAPACITY ((s32) (sizeof(D_800E33E0) / sizeof(D_800E33E0[0])))
+
+static bool GDX_TexRegistryReserve(void* symbol) {
+    static s32 sHighWater = 0;
+    static s32 sOverflowLogs = 0;
+
+    if ((D_800E3A20 < 0) || (D_800E3A20 >= GDX_TEXREG_CAPACITY)) {
+        if (sOverflowLogs < 16) {
+            sOverflowLogs++;
+            gdx_dbg_logf(
+                "[texreg] OVERFLOW: texture registry full; refusing to register (this texture will not draw)\n");
+            gdx_dbg_logf("[texreg]  symbol=%p\n", symbol);
+            gdx_dbg_logf("[texreg]  count=%d (0x%x)\n", (int) D_800E3A20, (unsigned) D_800E3A20);
+            gdx_dbg_logf("[texreg]  capacity=%d (0x%x)\n", (int) GDX_TEXREG_CAPACITY,
+                         (unsigned) GDX_TEXREG_CAPACITY);
+        }
+        return false;
+    }
+
+    if (D_800E3A20 >= sHighWater) {
+        sHighWater = D_800E3A20 + 1;
+        if (gdx_dev_gate_diag_texreg()) {
+            gdx_dbg_logf("[texreg] high-water=%d (0x%x)\n", (int) sHighWater, (unsigned) sHighWater);
+        }
+    }
+    return true;
+}
+#endif
 
 extern uintptr_t gArenaStartPtrs[];
 
@@ -319,9 +383,18 @@ u8* func_80077D50_impl(unk_80077D50* arg0, s32 arg1, bool arg2) {
                 sp44 = var_s4;
                 var_s7 = true;
             }
+#ifdef PORT
+            /* Overflow guard — see GDX_TexRegistryReserve above. */
+            if (GDX_TexRegistryReserve(arg0->unk_04)) {
+                var_s8[D_800E3A20].unk_00 = arg0->unk_04;
+                var_s8[D_800E3A20].unk_04 = var_s4;
+                D_800E3A20++;
+            }
+#else
             var_s8[D_800E3A20].unk_00 = arg0->unk_04;
             var_s8[D_800E3A20].unk_04 = var_s4;
             D_800E3A20++;
+#endif
         }
 
 #ifdef EXPANSION_KIT
@@ -373,30 +446,30 @@ u8* func_i2_800AE578(unk_80077D50* arg0, bool arg1) {
                     header = Arena_Allocate(ALLOC_PEEK, var_s0);
                     CLEAR_DATA_CACHE(header, var_s0);
 #ifdef PORT
-                    /* PORT field-test regression fix (R5): the five callers of this
-                       function -- title Copyright (aCopyrightDDTex), the 64DD logo
-                       (aN64DDLogoTex), the credits copyright, the machine-select
-                       trophies (aNovice/Standard/Expert/MasterDDTrophyTex) and the
-                       course-select DD cup logos (aCupSelectDD1Tex/DD2Tex) -- pass
-                       arg0->unk_04 pointers that are REAL, full-sized host arrays,
-                       populated directly FROM THE DISK by gdx_ek_assets_fill
-                       (port/gen/EkAssetBindings.c). Their fill rows carry n64Address=0,
-                       so they are never registered as segmented cart addresses AND they
-                       are absent from the common-asset (o2r) table. The prior R4-A2
-                       routing (GDX_TryLoadCommonAssetO2R -> GDX_LoadRawRomAsset)
-                       therefore ALWAYS missed for them: no o2r key, no rom offset, so
-                       GDX_LoadRawRomAsset zero-filled the texture ([asset] MISS) and the
-                       copyright / logo / trophies / cup logos rendered invisible.
-                       Do NOT reintroduce the common-asset lookup here -- it can never
-                       hit for these disk-filled callers (fill mechanism, not the o2r
-                       store). These pointers are exactly what the non-PORT #else path
-                       bcopy's from, so read the raw MIO0 blob DIRECTLY from the host
-                       array, identical to #else. var_s0 tracks the MIO0 blob size
+                    /* The five callers of this function -- title Copyright
+                       (aCopyrightDDTex), the 64DD logo (aN64DDLogoTex), the
+                       credits copyright, the machine-select trophies
+                       (aNovice/Standard/Expert/MasterDDTrophyTex) and the
+                       course-select DD cup logos (aCupSelectDD1Tex/DD2Tex) --
+                       pass arg0->unk_04 pointers that are REAL, full-sized host
+                       arrays populated directly FROM THE DISK by
+                       gdx_ek_assets_fill (port/gen/EkAssetBindings.c). Their fill
+                       rows carry n64Address=0, so they are never registered as
+                       segmented cart addresses AND they are absent from the
+                       common-asset (o2r) table.
+
+                       Do NOT route these through a common-asset lookup: it can
+                       never hit for a disk-filled caller (fill mechanism, not the
+                       o2r store), and the miss zero-filled the texture, rendering
+                       the copyright, logo, trophies and cup logos invisible.
+                       These pointers are exactly what the non-PORT #else path
+                       bcopy's from, so read the raw MIO0 blob DIRECTLY from the
+                       host array. var_s0 tracks the MIO0 blob size
                        (compressedSize), which is <= the fill array size
-                       (EkAssetBindings.c diskLen), so the copy stays in bounds -- the
-                       same bound the #else path relies on. The GDX_IS_MIO0 magic check
-                       below fails safe to bzero (with an [asset] trace) if the disk
-                       fill never ran and the array is still all-zero. */
+                       (EkAssetBindings.c diskLen), so the copy stays in bounds --
+                       the same bound the #else path relies on. The GDX_IS_MIO0
+                       check below fails safe to bzero (with an [asset] trace) if
+                       the disk fill never ran and the array is still all-zero. */
 #endif
                     bcopy(arg0->unk_04, header, var_s0);
                     if (GDX_IS_MIO0(header)) {
@@ -447,9 +520,18 @@ u8* func_i2_800AE578(unk_80077D50* arg0, bool arg1) {
                 var_fp = var_s3;
                 var_s6 = true;
             }
+#ifdef PORT
+            /* Overflow guard — see GDX_TexRegistryReserve above. */
+            if (GDX_TexRegistryReserve(arg0->unk_04)) {
+                var_s7[D_800E3A20].unk_00 = arg0->unk_04;
+                var_s7[D_800E3A20].unk_04 = var_s3;
+                D_800E3A20++;
+            }
+#else
             var_s7[D_800E3A20].unk_00 = arg0->unk_04;
             var_s7[D_800E3A20].unk_04 = var_s3;
             D_800E3A20++;
+#endif
         }
         arg0++;
     }
@@ -513,9 +595,18 @@ void* func_80078104(void* arg0, s32 textureSize, s32 arg2, s32 arg3, bool arg4) 
             }
         }
         if (!arg4) {
+#ifdef PORT
+            /* Overflow guard — see GDX_TexRegistryReserve above. */
+            if (GDX_TexRegistryReserve(arg0)) {
+                var_v1[D_800E3A20].unk_00 = arg0;
+                var_v1[D_800E3A20].unk_04 = var_s0;
+                D_800E3A20++;
+            }
+#else
             var_v1[D_800E3A20].unk_00 = arg0;
             var_v1[D_800E3A20].unk_04 = var_s0;
             D_800E3A20++;
+#endif
         }
     } else {
         // FAKE
@@ -526,14 +617,40 @@ void* func_80078104(void* arg0, s32 textureSize, s32 arg2, s32 arg3, bool arg4) 
 
 TexturePtr func_800783AC(void* arg0) {
     s32 i;
+#ifdef PORT
+    /* Read-side companion to the write guard (GDX_TexRegistryReserve above): scan
+       at most the array's real extent. Normally inert, since the write guard keeps
+       D_800E3A20 inside [0, 200]. It exists so that a count smashed from outside
+       this file makes the loop read garbage *inside* the array rather than walk
+       off it: the symbol then misses and trips [reg-miss] instead of returning a
+       garbage non-NULL TexturePtr, which renders as correct-looking-but-wrong
+       glyph pixels while leaving every probe silent. */
+    s32 count = D_800E3A20;
 
+    if (count > GDX_TEXREG_CAPACITY) {
+        static s32 sClampLogs = 0;
+        if (sClampLogs < 8) {
+            sClampLogs++;
+            gdx_dbg_logf("[texreg] registry count is out of range; clamping the lookup scan\n");
+            gdx_dbg_logf("[texreg]  count=%d (0x%x)\n", (int) count, (unsigned) count);
+            gdx_dbg_logf("[texreg]  capacity=%d (0x%x)\n", (int) GDX_TEXREG_CAPACITY, (unsigned) GDX_TEXREG_CAPACITY);
+        }
+        count = GDX_TEXREG_CAPACITY;
+    }
+    if (count < 0) {
+        count = 0;
+    }
+
+    for (i = 0; i < count; i++) {
+#else
     for (i = 0; i < D_800E3A20; i++) {
+#endif
         if (arg0 == D_800E33E0[i].unk_00) {
             return D_800E33E0[i].unk_04;
         }
     }
 #ifdef PORT
-    /* [reg-miss] (2026-07-11 contract audit): a NULL return here becomes a
+    /* [reg-miss]: a NULL return here becomes a
        NULL palette in func_8007E410, which SKIPS the TLUT upload and draws
        CI text against whatever palette was last loaded -- the pause-menu
        stripe mechanism. Every miss names the symbol and the registry size

@@ -268,9 +268,11 @@ void EndingCutsceneEffects_InitPodiumRacerCharacters(void) {
        top-3 finish) and the podium activation mask baseline -- if allocation is 0 the
        podiums/characters cannot render regardless of the fireworks gate. Strip later. */
     {
-        extern void gdx_cki(const char* s, int v);
-        gdx_cki("[GDX ceremony] allocationState", (int) sPodiumRacerCharacterAllocationState);
-        gdx_cki("[GDX ceremony] gPodiumActiveFlags", (int) gPodiumActiveFlags);
+        extern void gdx_dbg_logf(const char* fmt, ...);
+        gdx_dbg_logf("[GDX ceremony] allocationState=%d (0x%x)\n", (int) sPodiumRacerCharacterAllocationState,
+                     (unsigned) sPodiumRacerCharacterAllocationState);
+        gdx_dbg_logf("[GDX ceremony] gPodiumActiveFlags=%d (0x%x)\n", (int) gPodiumActiveFlags,
+                     (unsigned) gPodiumActiveFlags);
     }
 #endif
 }
@@ -791,13 +793,14 @@ void EndingCutsceneEffects_Update(void) {
        gActiveFireworks > 0 forever, so the thanks gate never opens -- this distinguishes that
        from an empty-buffer stall (where gActiveFireworks would already be 0). Strip later. */
     {
-        extern void gdx_cki(const char* s, int v);
+        extern void gdx_dbg_logf(const char* fmt, ...);
         static s32 sGdxFireworksDiagCounter = 0;
         if (((sGdxFireworksDiagCounter++ % 30) == 0) && (gActiveFireworks > 0)) {
             for (j = 0; j < sFireworksLauncherCount; j++) {
                 if (sFireworksLaunchers[j].state != FIREWORKS_CREATE) {
-                    gdx_cki("[GDX ceremony] launcher idx", (int) j);
-                    gdx_cki("[GDX ceremony] launcher state", (int) sFireworksLaunchers[j].state);
+                    gdx_dbg_logf("[GDX ceremony] launcher idx=%d (0x%x)\n", (int) j, (unsigned) j);
+                    gdx_dbg_logf("[GDX ceremony] launcher state=%d (0x%x)\n", (int) sFireworksLaunchers[j].state,
+                                 (unsigned) sFireworksLaunchers[j].state);
                 }
             }
         }

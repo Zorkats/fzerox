@@ -1212,6 +1212,11 @@ extern Machine gMachines[];
  * emit a bit-identical display list to stock (the interpreter re-checks the CVars when it
  * consumes the mode bits; gating both sides is deliberate defense in depth). */
 extern int gdx_widescreen_ui_active(void);
+/* Split-screen HUD anchoring, a strict subset of the above -- see gdx_widescreen_split_ui_active
+   in port/input_bridge.c for why the 2P/3P/4P layouts get their own switch. Declared inline
+   because this overlay compiles with only the decomp include paths (port/CMakeLists.txt:214-219),
+   so no port or libultraship header is reachable from here. Same idiom as racer.c:763. */
+extern int gdx_widescreen_split_ui_active(void);
 #endif
 
 Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
@@ -1221,14 +1226,30 @@ Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
     s32 playerIndex;
     s8* temp_a3;
     s32 i;
-
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
-        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
-    }
+    u32 gdxAnchor = 0;
 #endif
 
     playerIndex = statsObj->cmdId - OBJECT_MACHINE_SELECT_STATS_0;
+
+#ifdef PORT
+    /* SELECT MACHINE is the 1P stat cluster duplicated per player, so it anchors per player rather
+       than needing a 1P special case. The screen's own layout already says which edge each slot
+       belongs to, twice over:
+         - D_i4_8011D694 (machine.c:468) is {19,60, 19,136, 299,60, 299,136, ...}: slots 0 and 1 sit
+           at native x=19, slots 2 and 3 at x=299 of a 320-wide frame.
+         - the playerIndex < 2 branch below draws left-aligned from temp_fp, while the else branch
+           draws from temp_fp - 20 and right-aligns the value with Font_GetStringWidth.
+       Both agree, so the discriminator is exactly playerIndex < 2 -> left edge, else right edge.
+       1P is slot 0 and therefore still ANCHOR_LEFT: byte-identical to the previous behaviour.
+       Guarded by the split predicate only for slots >= 1, so the 1P screen keeps answering to the
+       1P switch alone. */
+    if (gdx_widescreen_ui_active() &&
+        ((playerIndex == 0) || gdx_widescreen_split_ui_active())) {
+        gdxAnchor = (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : G_EX_WIDESCREEN_ANCHOR_RIGHT;
+        gSPSetExtraGeometryMode(gfx++, gdxAnchor);
+    }
+#endif
 
     s32 character = gRacers[playerIndex].character;
     if (character < 0) character = 0;
@@ -1259,8 +1280,8 @@ Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
         }
     }
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
-        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    if (gdxAnchor != 0) {
+        gSPClearExtraGeometryMode(gfx++, gdxAnchor);
     }
 #endif
     return gfx;
@@ -1268,12 +1289,22 @@ Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
 
 Gfx* MachineSelect_PortraitDraw(Gfx* gfx, Object* portraitObj) {
     s32 playerIndex;
+#ifdef PORT
+    u32 gdxAnchor = 0;
+#endif
 
     playerIndex = portraitObj->cmdId - OBJECT_MACHINE_SELECT_PORTRAIT_0;
 
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
-        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    /* Same per-slot rule as MachineSelect_StatsDraw above: the portrait belongs to the same cluster
+       as the stats under it, so anchoring them differently would tear the pair apart at 16:9.
+       Both the portrait and its player-number badge are emitted inside one anchor bracket so the
+       badge keeps its D_i4_8011D674 offset from the portrait corner -- an anchor is a uniform
+       affine map, so their relative placement survives any window aspect. */
+    if (gdx_widescreen_ui_active() &&
+        ((playerIndex == 0) || gdx_widescreen_split_ui_active())) {
+        gdxAnchor = (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : G_EX_WIDESCREEN_ANCHOR_RIGHT;
+        gSPSetExtraGeometryMode(gfx++, gdxAnchor);
     }
 #endif
     gfx = func_80078F80_impl(gfx, &D_800E3F28[OBJECT_CACHE_INDEX(portraitObj)], OBJECT_LEFT(portraitObj),
@@ -1282,8 +1313,8 @@ Gfx* MachineSelect_PortraitDraw(Gfx* gfx, Object* portraitObj) {
                              D_i4_8011D674[playerIndex * 2 + 0] + OBJECT_LEFT(portraitObj),
                              D_i4_8011D674[playerIndex * 2 + 1] + OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
-        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    if (gdxAnchor != 0) {
+        gSPClearExtraGeometryMode(gfx++, gdxAnchor);
     }
 #endif
     return gfx;
@@ -1291,14 +1322,19 @@ Gfx* MachineSelect_PortraitDraw(Gfx* gfx, Object* portraitObj) {
 
 Gfx* MachineSelect_CursorNumDraw(Gfx* gfx, Object* portraitObj) {
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+    /* The "1P".."4P" badge rides on the selection splat, so it takes the same DISTRIBUTE treatment
+       as MachineSelect_CursorDraw below -- anchoring the two differently would peel the label off
+       the splat it labels. Set and clear conditions are identical by construction. */
+    if (gdx_widescreen_ui_active() &&
+        ((gNumPlayers == 1) || gdx_widescreen_split_ui_active())) {
         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
     }
 #endif
     gfx = func_80078EA0_impl(gfx, sPlayerNumIconCompTexInfos[portraitObj->cmdId - OBJECT_MACHINE_SELECT_CURSOR_NUM_0],
                              OBJECT_LEFT(portraitObj), OBJECT_TOP(portraitObj), 0, 0, 0, 1.0f, 1.0f, true);
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+    if (gdx_widescreen_ui_active() &&
+        ((gNumPlayers == 1) || gdx_widescreen_split_ui_active())) {
         gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
     }
 #endif
@@ -1316,7 +1352,14 @@ Gfx* MachineSelect_CursorDraw(Gfx* gfx, Object* cursorObj) {
     s32 blue;
 
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+    /* The selection splat is a 2D texrect placed on the same 6-column grid as the machines
+       (OBJECT_LEFT = (index % 6) * 40 + 40 below), but the machines themselves are 3D and keep
+       their spread under hor+ while a plain 2D rect is compressed toward screen centre. DISTRIBUTE
+       is what keeps the splat tracking the grid, and it was gated to 1P -- so in VS the splat drifted
+       inboard of the machine it marks. The loop already covers all four cursors, so lifting the
+       player-count gate is the whole fix. */
+    if (gdx_widescreen_ui_active() &&
+        ((gNumPlayers == 1) || gdx_widescreen_split_ui_active())) {
         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
     }
 #endif
@@ -1350,7 +1393,10 @@ Gfx* MachineSelect_CursorDraw(Gfx* gfx, Object* cursorObj) {
         }
     }
 #ifdef PORT
-    if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
+    /* Condition must mirror the set above exactly: a set without its clear leaks DISTRIBUTE into
+       every rect drawn after this object for the rest of the frame. */
+    if (gdx_widescreen_ui_active() &&
+        ((gNumPlayers == 1) || gdx_widescreen_split_ui_active())) {
         gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
     }
 #endif
@@ -1530,6 +1576,27 @@ Gfx* MachineSettings_MachineDraw(Gfx* gfx, Object* machineObj) {
     gSPDisplayList(gfx++, D_90186C8);
 
     Light_SetLookAtSource(&gGfxPool->unk_21B28, &gCameras[0].viewMtx);
+#ifdef PORT
+    /* Known-good reference for the [lookat] comparison — this screen renders the
+       same reflection pass over the same part display lists correctly. See
+       gdx_diag_lookat_enabled (port/n64_sched.c). */
+    {
+        extern int gdx_diag_lookat_enabled(void);
+        extern void gdx_dbg_logf(const char* fmt, ...);
+        static s32 sLogged = 0;
+        MtxF* src = &gCameras[0].viewMtx;
+        LookAt* la = &gGfxPool->unk_21B28;
+
+        if (gdx_diag_lookat_enabled() && sLogged < 3) {
+            sLogged++;
+            gdx_dbg_logf("[lookat] machinesettings src col0=(%.4f,%.4f,%.4f) col1=(%.4f,%.4f,%.4f) "
+                         "-> dir0=(%d,%d,%d) dir1=(%d,%d,%d)\n",
+                         src->m[0][0], src->m[1][0], src->m[2][0], src->m[0][1], src->m[1][1], src->m[2][1],
+                         la->l[0].l.dir[0], la->l[0].l.dir[1], la->l[0].l.dir[2], la->l[1].l.dir[0],
+                         la->l[1].l.dir[1], la->l[1].l.dir[2]);
+        }
+    }
+#endif
     gSPLookAt(gfx++, &gGfxPool->unk_21B28);
 
     gSPTexture(gfx++, D_i4_8011D4E0, D_i4_8011D4E0, 0, G_TX_RENDERTILE, G_ON);

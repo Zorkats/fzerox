@@ -251,7 +251,7 @@ void AudioLoad_InitSampleDmaBuffers(s32 numNotes) {
     gAudioCtx.sampleDmaReuseQueue2RdPos = 0;
     gAudioCtx.sampleDmaReuseQueue2WrPos = gAudioCtx.sampleDmaCount - gAudioCtx.sampleDmaListSize1;
 #ifdef PORT
-    /* [dma-pool] streaming-sample pool census (audio audit A1): 48/71 SE-font
+    /* [dma-pool] streaming-sample pool census: 48/71 SE-font
        instruments stream per-note from the cart BGM bank through
        AudioLoad_DmaSampleData; a NULL return there (pool exhausted or
        zero-sized under heap pressure) aborts the note's synthesis setup and
@@ -409,7 +409,7 @@ static s32 AudioLoad_GetSampleBankIdForFont(s32 fontId, s32 medium) {
 }
 
 #ifdef PORT
-/* [sample-census] one log block per UNIQUE sample load (audio-audit phase 4):
+/* [sample-census] one log block per UNIQUE sample load:
    pairs every audible garbage SFX with the exact sample entry that fed it --
    caller tag/font, source medium/address, and the first 8 loaded bytes
    (all-zero or implausible ADPCM frames name a bad source directly). Shared
@@ -595,14 +595,13 @@ s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
     s32 numFonts;
     s32 fontId;
 #ifdef PORT
-    /* Diagnostic for engram slice/audio-synthesis follow-up: PRINTF is a compiled-out
-       no-op in this build (macros.h), so the original "==BANDO==" traces never fire.
-       gdx_cki/gdx_ck are the port's existing PORT-only log shims for decomp .c files
-       that can't include <stdio.h>/<windows.h> (see port/n64_sched.c) -- reused here,
-       not new infrastructure. This traces whether the sequencer ever actually enables
-       a seqPlayer (and with which seqId), or whether every BGM-start request silently
-       fails at the disk sequence load (seqData == NULL), which would explain
-       persistent all-zero audio output with zero interpreter-side errors. */
+    /* PRINTF is a compiled-out no-op in this build (macros.h), so the original
+       "==BANDO==" traces never fire. gdx_cki/gdx_ck are the port's PORT-only log shims
+       for decomp .c files that can't include <stdio.h>/<windows.h> (see port/n64_sched.c).
+       This traces whether the sequencer ever enables a seqPlayer, and with which seqId,
+       or whether every BGM-start request fails silently at the disk sequence load
+       (seqData == NULL) -- which would explain all-zero audio output with no
+       interpreter-side errors. */
     extern void gdx_cki(const char* s, int v);
 #endif
 
@@ -678,34 +677,22 @@ void* AudioLoad_TrySyncLoadSampleBank(u32 sampleBankId, u32* outMedium, bool noL
     cachePolicy = sampleBankTable->entries[sampleBankId].cachePolicy;
     if (cachePolicy == 4 || noLoad == true) {
 #ifdef PORT
-        /* CACHEPOLICY_4 trace/disposition (contract C-R2.2 obligation).
-         *
-         * EXERCISED: the disk sample-bank table (audio/disk/audio_tables.c
-         * gSampleBankTable) has three real CACHEPOLICY_4 entries -- SAMPLE_SOUND_EFFECTS,
-         * SAMPLE_BGM and SAMPLE_DDBGM_TITLE -- all MEDIUM_CART. For those this branch
-         * returns entries[realTableId].romAddr (an ABSOLUTE cart ROM offset after
-         * AudioLoad_InitTable relocation, e.g. 0x528730 + entry offset, which lies inside
-         * the audio_blob/audio_table span 0x528730..0xF67900) with *outMedium = MEDIUM_CART.
-         *
-         * RESOLUTION -- no direct-pointer deref, so no extra handling needed. The returned
-         * romAddr is consumed ONLY as a DMA device-address base: it becomes
-         * SampleBankRelocInfo.baseAddr{1,2}, and in the host font conversion
-         * (gdx_audio_convert_font -> gdx_fontconv_sample) a per-sample rawAddr is ADDED to
-         * it while sample->medium inherits medium{1,2} == MEDIUM_CART (never MEDIUM_RAM,
-         * because the bank medium is CART). Every such sample therefore streams on demand
-         * through AudioLoad_DmaSampleData -> AudioLoad_Dma -> sDmaHandler (osEPiStartDma),
-         * i.e. back through the single byte-source shim (GdxSegmentSourceRead). The romAddr
-         * is never dereferenced as a host pointer, so the "add the blob base vs. the rom
-         * offset" hazard from C-R2.2 does not arise here: osEPiStartDma masks the offset
-         * (devAddr & 0x0FFFFFFF) and the shim's audio_table containment serves it
-         * archive-first (raw-ROM fallback otherwise) -- byte-identical to the pre-swap path.
-         *
-         * R4 IMPLICATION: because these samples reach bytes only via that DMA sink, ROM
-         * deletion is gated by the same condition as every other audio read -- the
-         * audio_table blob must be resident+registered so the sink never needs the raw-ROM
-         * fallback (C-R2.4: gdx_rom_fallback_reads audio == 0). CACHEPOLICY_4 imposes NO
-         * additional blocker beyond that, precisely because it routes through the shared
-         * sink instead of returning a pointer the caller dereferences directly. */
+        /* CACHEPOLICY_4 disposition. gSampleBankTable (audio/disk/audio_tables.c) has three
+         * CACHEPOLICY_4 entries -- SAMPLE_SOUND_EFFECTS, SAMPLE_BGM, SAMPLE_DDBGM_TITLE --
+         * all MEDIUM_CART, so this branch returns an ABSOLUTE cart ROM offset (post
+         * AudioLoad_InitTable relocation, inside the audio_table span 0x528730..0xF67900)
+         * with *outMedium = MEDIUM_CART. That offset is only ever a DMA device-address
+         * base: it becomes SampleBankRelocInfo.baseAddr{1,2}, and gdx_fontconv_sample adds
+         * a per-sample rawAddr to it while sample->medium inherits medium{1,2} ==
+         * MEDIUM_CART (never MEDIUM_RAM, because the bank medium is CART). Every such
+         * sample therefore streams on demand through AudioLoad_DmaSampleData ->
+         * AudioLoad_Dma -> sDmaHandler (osEPiStartDma), back through the single
+         * byte-source shim (GdxSegmentSourceRead). It is never dereferenced as a host
+         * pointer -- osEPiStartDma masks the offset (devAddr & 0x0FFFFFFF) and the shim's
+         * audio_table containment serves it archive-first -- so no extra handling belongs
+         * here, and dropping the ROM is gated by the same condition as every other audio
+         * read: the audio_table blob must be resident and registered so the shim never
+         * needs its raw-ROM fallback. */
 #endif
         *outMedium = sampleBankTable->entries[sampleBankId].medium;
         return sampleBankTable->entries[realTableId].romAddr;
@@ -1042,7 +1029,7 @@ static void gdx_fontconv_remember(GdxFontConvEntry* list, s32* count, u32 offset
     }
 }
 
-/* Task 3: capped diagnostic when a converted envelope would overrun the copied window --
+/* Capped diagnostic when a converted envelope would overrun the copied window --
    either an ADSR_GOTO whose target index lands outside [0, GDX_FONTCONV_ENV_POINTS) (the runtime
    would index neighbor font bytes as envelope data) or an envelope with no terminator within the
    cap (its tail is truncated). Names the font (fontId) and localizes the point. */
@@ -1081,7 +1068,7 @@ static EnvelopePoint* gdx_fontconv_envelope(GdxFontConv* conv, u32 offset) {
         env[i].delay = gdx_rd_s16(conv->data + offset + i * 4);
         env[i].arg = gdx_rd_s16(conv->data + offset + i * 4 + 2);
     }
-    /* Task 3: bound-check the copied window. Scan up to the first terminator (delay <= 0). Clamp any
+    /* Bound-check the copied window. Scan up to the first terminator (delay <= 0). Clamp any
        ADSR_GOTO target that points outside the window so playback (effects.c ADSR_GOTO) can never
        index past the cap into neighbor font bytes, and warn if the envelope never terminates within
        the cap (its real tail is longer than we copied). */

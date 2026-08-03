@@ -108,4 +108,21 @@ extern u32 gdx_rom_read32(u32 addr);
 #define OS_MSEC_TO_CYCLES(n)    OS_USEC_TO_CYCLES((n) * 1000LL)
 #define OS_SEC_TO_CYCLES(n)     OS_MSEC_TO_CYCLES((n) * 1000LL)
 
+/* Array bound for Expansion Kit text the port binds from the loaded 64DD disk.
+ *
+ * The fan-translated disk carries English for these strings in its own overlay
+ * .data; gdx_ek_strings_apply() copies it in once the disk is loaded. English is
+ * longer than the Japanese it replaces (43 bytes against the retail 20 for the
+ * longest), so an array still sized by its Japanese initializer would be overrun.
+ * This bound must stay equal to GDX_EK_TEXT_CAP in
+ * port/gen/EkTranslatedStrings.h, which the generator writes from the longest
+ * string it recovered.
+ *
+ * Empty outside the port, so a plain decomp build keeps the original layout. */
+#ifdef PORT
+#define GDX_EK_TEXT_CAP 48
+#else
+#define GDX_EK_TEXT_CAP
+#endif
+
 #endif // MACROS_H

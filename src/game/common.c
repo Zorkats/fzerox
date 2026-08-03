@@ -376,6 +376,27 @@ void func_8070DAD4(s32 bgm) {
 }
 #endif
 
+/* D_8076CCA0 (EK menu-exit BGM race, fixed in audio/disk/external.c): upstream's
+   record of "which source owns the BGM", set true by func_8070DAD4 (ROM) and
+   false by every stop below, used by the three stop helpers to pick exactly ONE
+   of Audio_RomBgmStop / Audio_DDBgmStop. It is not sufficient:
+
+   1. It only tracks starts that go through this file. The EK menu music is
+      started by Audio_EditorInit's delayed path, which never touches it. So while
+      an editor track plays on seq player 1 the boolean still says "ROM", the exit
+      takes Audio_RomBgmStop(), and all DD-side state (D_80771C74, the D_80771C98
+      deferred start, the armed editor counters) is left uncleared -- only
+      Audio_DDBgmStop() clears those.
+   2. Even for a source it does track, one bool cannot answer "which source is
+      playing" while an async disk load is in flight: the answer at stop time is
+      "ROM, plus a disk start that has not landed yet".
+
+   The cancellation therefore lives on the audio side, in Audio_EditorExit and in
+   the epoch guard on the two delayed editor starts, where the pending-request
+   state actually is. Widening this to "stop both sources" was rejected: an
+   unconditional Audio_DDBgmStop() here would issue DISABLE_SEQPLAYER(1, 120) on
+   every BGM transition, and func_8007E0CC is called all over the race code
+   (racer.c) where disk BGM is the correct and current source. */
 void func_8007E0CC(void) {
     Audio_BetaBgmStop();
 #ifdef EXPANSION_KIT

@@ -6,7 +6,7 @@
 #include ASSET_HEADER(staff_ghost_records.h)
 
 #ifdef PORT
-/* R7 save-system slice: host-backed SRAM image (port/sram_buffer.cpp) replaces the
+/* Host-backed SRAM image (port/sram_buffer.cpp) replaces the
    N64 PI/DMA path in Sram_Init/Sram_ReadWrite below. Raw extern declarations only
    (no header include) -- decomp-target C files can't include the MSVC CRT headers
    port/sram_buffer.cpp uses; this mirrors the existing Dma_RomCopy PORT pattern in
@@ -2170,6 +2170,47 @@ void Sram_ReadWrite(s32 direction, u32 offset, void* dramAddr, size_t size) {
     osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
 }
 
+#ifdef PORT
+/* AssetLoader.cpp: raw archive bytes, header included, partial copy allowed. */
+extern s32 GDiffuser_LoadArchiveFileBytes(const char* key, void* out, size_t outSize, size_t* copiedSize);
+
+/* courseIndex (COURSE_MUTE_CITY=0 .. COURSE_BIG_HAND=23) -> o2r key. Order
+   verified identical between the Courses enum (fzx_course.h) and
+   staff_ghost_records.yaml, and the keys exist in fzerox.o2r. Shared by
+   Save_LoadStaffGhostRecord (the record half) and Save_RomCopyGhostData (the
+   replay half) -- both parse the same archive entry. */
+static const char* const sStaffGhostKeys[] = {
+    "staff_ghost_records/aMuteCity1StaffGhost",     "staff_ghost_records/aSilence1StaffGhost",
+    "staff_ghost_records/aSandOcean1StaffGhost",    "staff_ghost_records/aDevilsForest1StaffGhost",
+    "staff_ghost_records/aBigBlue1StaffGhost",      "staff_ghost_records/aPortTown1StaffGhost",
+    "staff_ghost_records/aSectorAlphaStaffGhost",   "staff_ghost_records/aRedCanyon1StaffGhost",
+    "staff_ghost_records/aDevilsForest2StaffGhost", "staff_ghost_records/aMuteCity2StaffGhost",
+    "staff_ghost_records/aBigBlue2StaffGhost",      "staff_ghost_records/aWhiteLand1StaffGhost",
+    "staff_ghost_records/aFireFieldStaffGhost",     "staff_ghost_records/aSilence2StaffGhost",
+    "staff_ghost_records/aSectorBetaStaffGhost",    "staff_ghost_records/aRedCanyon2StaffGhost",
+    "staff_ghost_records/aWhiteLand2StaffGhost",    "staff_ghost_records/aMuteCity3StaffGhost",
+    "staff_ghost_records/aRainbowRoadStaffGhost",   "staff_ghost_records/aDevilsForest3StaffGhost",
+    "staff_ghost_records/aSpacePlantStaffGhost",    "staff_ghost_records/aSandOcean2StaffGhost",
+    "staff_ghost_records/aPortTown2StaffGhost",     "staff_ghost_records/aBigHandStaffGhost",
+};
+
+/* Read a little-endian u32 out of the packed Torch payload. */
+#define GDX_GHOST_RD32(p, o) \
+    ((u32) (p)[o] | ((u32) (p)[(o) + 1] << 8) | ((u32) (p)[(o) + 2] << 16) | ((u32) (p)[(o) + 3] << 24))
+
+/* Byte offset of the machine-info block inside the Torch payload (past the 0x40
+   OTR header), given the track-name length. Layout, from
+   torch/src/factories/fzerox/GhostRecordFactory.cpp's Export():
+     u16 ghostType | u32 courseEncoding | u32 raceTime | u16 unk10
+     u32 trackNameLen | u32 stringPrefixLen | trackName[trackNameLen]
+     u8  machineInfo[0x14]
+     s32 lapTimes[3] | s32 replayEnd | u32 replaySize | u32 replayDataLen
+     u8  replayData[replayDataLen]
+   Note the doubled name length: an explicit write plus BinaryWriter's own
+   string prefix. */
+#define GDX_GHOST_MACHINE_INFO_OFF(nameLen) (2u + 4u + 4u + 2u + 4u + 4u + (nameLen))
+#endif
+
 s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
 #ifndef EXPANSION_KIT
     GhostRecord* ghostRecord = (GhostRecord*) gSaveBuffer;
@@ -2180,33 +2221,13 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
 #ifdef PORT
     /* Staff ghost records live in the o2r archive as Torch "GhostRecord" resources,
        NOT in host SRAM. The port registers no libultraship factory for that resource
-       type yet (port/resource/ResourceFactories.cpp R1b TODO), so the deserializing
+       type yet (see port/resource/ResourceFactories.cpp), so the deserializing
        loader (GDiffuser_LoadAssetBytes) cannot serve them; we pull the raw archive-file
        bytes and parse the Torch payload here. This matters because func_i10_8012B580
        seeds every standard-cup CPU pacing target from ghostInfo.raceTime -- the old
        return-(-1) stub left that seed uninitialized, degenerating CPU pacing. */
     {
-        /* AssetLoader.cpp: raw archive bytes, header included, partial copy allowed. */
-        extern s32 GDiffuser_LoadArchiveFileBytes(const char* key, void* out, size_t outSize,
-                                                  size_t* copiedSize);
-        /* courseIndex (COURSE_MUTE_CITY=0 .. COURSE_BIG_HAND=23) -> o2r key. Order
-           verified identical between the Courses enum (fzx_course.h) and
-           staff_ghost_records.yaml, and the keys exist in fzerox.o2r. */
-        static const char* const sStaffGhostKeys[] = {
-            "staff_ghost_records/aMuteCity1StaffGhost",   "staff_ghost_records/aSilence1StaffGhost",
-            "staff_ghost_records/aSandOcean1StaffGhost",  "staff_ghost_records/aDevilsForest1StaffGhost",
-            "staff_ghost_records/aBigBlue1StaffGhost",    "staff_ghost_records/aPortTown1StaffGhost",
-            "staff_ghost_records/aSectorAlphaStaffGhost", "staff_ghost_records/aRedCanyon1StaffGhost",
-            "staff_ghost_records/aDevilsForest2StaffGhost", "staff_ghost_records/aMuteCity2StaffGhost",
-            "staff_ghost_records/aBigBlue2StaffGhost",    "staff_ghost_records/aWhiteLand1StaffGhost",
-            "staff_ghost_records/aFireFieldStaffGhost",   "staff_ghost_records/aSilence2StaffGhost",
-            "staff_ghost_records/aSectorBetaStaffGhost",  "staff_ghost_records/aRedCanyon2StaffGhost",
-            "staff_ghost_records/aWhiteLand2StaffGhost",  "staff_ghost_records/aMuteCity3StaffGhost",
-            "staff_ghost_records/aRainbowRoadStaffGhost", "staff_ghost_records/aDevilsForest3StaffGhost",
-            "staff_ghost_records/aSpacePlantStaffGhost",  "staff_ghost_records/aSandOcean2StaffGhost",
-            "staff_ghost_records/aPortTown2StaffGhost",   "staff_ghost_records/aBigHandStaffGhost",
-        };
-        /* 0x40 OTR header + Torch record prefix (<= 16 + 9 name + 20 machine). */
+        /* 0x40 OTR header + Torch record prefix (<= 16 + 4 + 9 name + 20 machine). */
         u8 raw[128];
         size_t copied = 0;
         const u8* p;
@@ -2247,6 +2268,28 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
         o += 2;
         trackNameLen =
             (u32) ((u32) p[o] | ((u32) p[o + 1] << 8) | ((u32) p[o + 2] << 16) | ((u32) p[o + 3] << 24));
+        o += 4;
+
+        /* Torch writes the track-name length TWICE. GhostRecordFactory.cpp emits an
+           explicit `writer.Write((uint32_t)mTrackName.length())`, and the very next
+           `writer.Write(mTrackName)` goes through BinaryWriter::Write(const
+           std::string&), which emits its OWN u32 length prefix before the characters.
+           Skipping only the first one reads every later field 4 bytes early, so
+           machineInfo.character lands on the second prefix (0) and every staff ghost
+           races as character 0 = Blue Falcon. Cross-check the two lengths rather than
+           blindly stepping over, so a future serializer change fails loudly instead of
+           silently mis-parsing. */
+        if (copied < (size_t) 0x40 + o + 4) {
+            return -1;
+        }
+        {
+            u32 stringPrefixLen =
+                (u32) ((u32) p[o] | ((u32) p[o + 1] << 8) | ((u32) p[o + 2] << 16) | ((u32) p[o + 3] << 24));
+
+            if (stringPrefixLen != trackNameLen) {
+                return -1;
+            }
+        }
         o += 4;
 
         /* Record track name is 9 bytes (empty for standard courses); reject anything
@@ -2409,6 +2452,80 @@ s32 Save_LoadStaffGhost_impl(s32 courseIndex, s32 encodedCourseIndex) {
 }
 
 void Save_RomCopyGhostData(GhostData* ghostData, s32 courseIndex) {
+#ifdef PORT
+    /* The replay half of the staff-ghost load. Its sibling
+       Save_LoadStaffGhostRecord reads the o2r payload, but this one was left on
+       the ROM path, and D_i2_80106DF0 holds HOST BSS pointers under PORT (the
+       zero-filled stubs in port/gen/LinkStubs.c), not ROM-segment offsets. Adding
+       a host pointer to a ROM base and masking it produced an address far outside
+       the ROM, so both DMAs missed and replayInfo came back zero-filled:
+       lapTimes {0,0,0} and replaySize 0. Every ghost then reported 00'00"000 and
+       despawned on the first frame after the race start, where racer.c checks
+       `replayIndex >= replaySize` (0 >= 0). Parse the same archive entry the
+       record half reads. */
+    {
+        /* 0x40 OTR header + record prefix + the 16200-byte replayData ceiling
+           GhostData declares, with slack for the length fields. */
+        static u8 sGdxGhostPayload[0x40 + 128 + sizeof(((GhostData*) 0)->replayData)];
+        size_t copied = 0;
+        const u8* p;
+        u32 o;
+        u32 trackNameLen;
+        u32 replayLen;
+        u32 i;
+
+        /* Fail closed: a ghost with a zeroed replayInfo simply does not run,
+           which is what happens today anyway. Never leave it stale. */
+        for (i = 0; i < sizeof(GhostReplayInfo); i++) {
+            ((u8*) &ghostData->replayInfo)[i] = 0;
+        }
+
+        if (!((courseIndex >= COURSE_MUTE_CITY) && (courseIndex <= COURSE_BIG_HAND))) {
+            return;
+        }
+        if (!GDiffuser_LoadArchiveFileBytes(sStaffGhostKeys[courseIndex], sGdxGhostPayload,
+                                            sizeof(sGdxGhostPayload), &copied)) {
+            return;
+        }
+        if (copied < (size_t) 0x40 + GDX_GHOST_MACHINE_INFO_OFF(0)) {
+            return;
+        }
+        p = sGdxGhostPayload + 0x40;
+
+        trackNameLen = GDX_GHOST_RD32(p, 12);
+        if (trackNameLen > sizeof(((GhostRecord*) 0)->trackName)) {
+            return;
+        }
+        /* machineInfo (0x14) + lapTimes (12) + end (4) + size (4) + dataLen (4). */
+        o = GDX_GHOST_MACHINE_INFO_OFF(trackNameLen) + 0x14;
+        if (copied < (size_t) 0x40 + o + 24) {
+            return;
+        }
+
+        ghostData->replayInfo.lapTimes[0] = (s32) GDX_GHOST_RD32(p, o + 0);
+        ghostData->replayInfo.lapTimes[1] = (s32) GDX_GHOST_RD32(p, o + 4);
+        ghostData->replayInfo.lapTimes[2] = (s32) GDX_GHOST_RD32(p, o + 8);
+        ghostData->replayInfo.end = (s32) GDX_GHOST_RD32(p, o + 12);
+        ghostData->replayInfo.size = GDX_GHOST_RD32(p, o + 16);
+        replayLen = GDX_GHOST_RD32(p, o + 20);
+        o += 24;
+
+        /* Torch drops both checksums, so leave them zero rather than inventing
+           values -- nothing in the staff-ghost path verifies them. */
+        if ((replayLen > sizeof(ghostData->replayData)) || (copied < (size_t) 0x40 + o + replayLen)) {
+            ghostData->replayInfo.size = 0;
+            ghostData->replayInfo.end = 0;
+            return;
+        }
+        if (ghostData->replayInfo.size > replayLen) {
+            ghostData->replayInfo.size = replayLen;
+        }
+        for (i = 0; i < replayLen; i++) {
+            ghostData->replayData[i] = p[o + i];
+        }
+        return;
+    }
+#else
     uintptr_t* offsets = D_i2_80106DF0[courseIndex];
     RomOffset romOffset;
 
@@ -2421,6 +2538,7 @@ void Save_RomCopyGhostData(GhostData* ghostData, s32 courseIndex) {
     Dma_RomCopyAsync(gRomSegmentPairs[13][0] + offsets[1], &ghostData->replayInfo, sizeof(GhostReplayInfo));
     Dma_RomCopyAsync(gRomSegmentPairs[13][0] + offsets[2], ghostData->replayData,
                      ALIGN_2(ghostData->replayInfo.size + 1));
+#endif
 #endif
 }
 

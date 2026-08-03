@@ -632,7 +632,7 @@ void func_8009DB28(CourseSegment* segment, f32* arg1, f32* arg2) {
     CourseSegment* nextNextSegment;
 
 #ifdef PORT
-    /* Task #20 guard: this walks segment->prev, segment->next and
+    /* Guard: this walks segment->prev, segment->next and
      * nextSegment->next unconditionally. The circular list is only fully
      * linked once func_80074428()/func_i2_800B39B4() finish building it from
      * the just-DMA'd CourseData; if a caller reaches here first (observed via
@@ -721,7 +721,7 @@ s32 Course_SplineCalculateTensions(CourseInfo* courseInfo) {
     f32 alpha2;
     CourseSegment* segment = courseInfo->courseSegments;
 #ifdef PORT
-    /* Task #20 guard: courseSegments is a shared static buffer reused across
+    /* Guard: courseSegments is a shared static buffer reused across
      * course loads (func_800A4B54/func_80074428) — it is only a valid closed
      * loop once the course's segmentCount/next/prev links have been (re)built
      * for THIS course. A caller that reaches this before that finishes (the
@@ -1343,7 +1343,7 @@ s32 func_i2_800B39B4(CourseInfo* courseInfo) {
     CourseSegment* prevSegment;
     CourseSegment* segment = courseInfo->courseSegments;
 #ifdef PORT
-    /* Task #20 guard: same unguarded circular-list walk as
+    /* Guard: same unguarded circular-list walk as
      * Course_SplineCalculateTensions/func_8009DB28 above, and this is the
      * function func_80074428() actually calls (under EXPANSION_KIT) for
      * every course load, including the title screen's auto-triggered
@@ -4484,13 +4484,13 @@ Gfx* func_800A95B4(Gfx* gfx) {
     gSPDisplayList(sCourseDisp++, D_8014040);
     gSPDisplayList(sCourseDisp++, D_8014078);
 #ifdef PORT
-    /* Diagnostic toggle (interp strobe investigation): the red channel here is a per-frame
-       sawtooth (period 32) animating the rail chevron color flow. Under matrix-only frame
+    /* Diagnostic toggle for the rail strobe: the red channel here is a per-frame sawtooth
+       (period 32) animating the rail chevron color flow. Under matrix-only frame
        interpolation the value is frozen per tick and steps unevenly (M oscillates 2,3),
-       which is the leading suspect for the owner-reported rail strobe. GDX_RAIL_COLOR_TEST=1
-       freezes the channel to a mid-ramp constant so one attract run answers decisively:
-       strobe gone => frozen-color-animation convicted => build primcolor value-interpolation.
-       Unset (default), the expression below is byte-identical to stock. */
+       which is the leading suspect. GDX_RAIL_COLOR_TEST=1 freezes the channel to a mid-ramp
+       constant: if the strobe then disappears, the frozen color animation is the cause and
+       primcolor value interpolation is the fix. Unset (the default), the expression below is
+       byte-identical to stock. */
     {
         extern s32 gdx_rail_color_test_enabled(void);
         if (gdx_rail_color_test_enabled()) {
@@ -4574,14 +4574,13 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     Camera* camera;
     s32 i;
 #ifdef PORT
-    // G-Diffuser Tier-3 "Extended draw distance" (gEnhancements.Graphics.DrawDistance, a percentage,
-    // default 100). Cached once per Course_Draw call (there is one call per active camera per
-    // frame) so the per-chunk cull loop below -- up to SEGMENT_CHUNK_COUNT iterations -- never
-    // calls into the CVar bridge per-chunk. Applied ONLY at the chunk-depth cull comparison further
-    // down: sCourseFarRenderDistance itself (the course's own, per-venue value set in
-    // Course_SegmentsInit) is left untouched, so nothing else that reads it is affected. At the
-    // default 100 the multiplier is exactly 1.0f, which is a no-op multiply (IEEE-754 exact) --
-    // stock 1:1 rendering is preserved bit-for-bit.
+    // "Extended draw distance" (gEnhancements.Graphics.DrawDistance, a percentage, default 100).
+    // Cached once per Course_Draw call -- one call per active camera per frame -- so the per-chunk
+    // cull loop below, up to SEGMENT_CHUNK_COUNT iterations, never enters the CVar bridge. Applied
+    // ONLY at the chunk-depth cull comparison further down; sCourseFarRenderDistance itself (the
+    // course's own per-venue value, set in Course_SegmentsInit) is left untouched, so nothing else
+    // that reads it is affected. At the default 100 the multiplier is exactly 1.0f, an IEEE-754
+    // exact no-op multiply, so stock rendering is preserved bit-for-bit.
     f32 gdxFarRenderDistanceScale;
 #endif
 
@@ -4591,13 +4590,12 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     {
         extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
         s32 drawDistancePercent = CVarGetInteger("gEnhancements.Graphics.DrawDistance", 100);
-        // Defensive range clamp independent of the menu slider (the CVar can be hand-edited in the
-        // config file): never shrink below stock, and cap at 200%. 200% is the EFFECTIVE ceiling,
-        // not an arbitrary limit: the track is streamed as a fixed set of chunks built only out to a
-        // bounded horizon (gSegmentChunks, capped at SEGMENT_CHUNK_COUNT), so once the scaled cull
-        // threshold (sCourseFarRenderDistance * scale) clears the furthest built chunk -- which
-        // happens by ~200% -- a larger multiplier un-culls nothing. Feeding it beyond 200% is inert,
-        // so clamp there and keep the menu slider honest (see gdx_menu.cpp DrawGraphicsMenu).
+        // Clamp independently of the menu slider, since the CVar can be hand-edited in the config
+        // file: never shrink below stock, and cap at 200%. 200% is the EFFECTIVE ceiling, not an
+        // arbitrary one -- the track streams as a fixed set of chunks built only out to a bounded
+        // horizon (gSegmentChunks, capped at SEGMENT_CHUNK_COUNT), so once the scaled cull threshold
+        // (sCourseFarRenderDistance * scale) clears the furthest built chunk, which happens by
+        // ~200%, a larger multiplier un-culls nothing.
         if (drawDistancePercent < 100) {
             drawDistancePercent = 100;
         } else if (drawDistancePercent > 200) {
@@ -4873,7 +4871,7 @@ s32 func_i2_800BE8BC(CourseInfo* courseInfo) {
     f32 alpha2;
     CourseSegment* segment = courseInfo->courseSegments;
 #ifdef PORT
-    /* Task #20 guard: same reasoning as func_i2_800B39B4/
+    /* Guard: same reasoning as func_i2_800B39B4/
      * Course_SplineCalculateTensions above — this is the second-chance path
      * func_80074428() calls when func_i2_800B39B4() finds nothing, so it
      * runs on every EK course load too. */

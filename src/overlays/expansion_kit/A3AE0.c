@@ -9,6 +9,23 @@
 
 extern s32 D_80119890;
 
+/* LINE strip recovery: sDecalMenuItems below used to reference D_4001B00/
+ * D_4001D40/D_4001F80/D_40021C0/D_4002400, whose create_machine_textures.yaml
+ * offsets (0x1B00-0x2400) collide with the MARK emblem strip's US-cart rebased
+ * offsets (see create_machine_textures.yaml's D_4002640 comment: MARK's real
+ * content sits at symbol_addr - 0x900). That mis-binding is why the LINE menu
+ * always rendered emblem art (shield/eagle/eye/bull) instead of line patterns.
+ * The correct LINE tiles already exist as separate, unused symbols at exactly
+ * (old offset - 0x900): D_4001200/D_4001440/D_4001680/D_40018C0/D_4001B00,
+ * decoded and verified (progressive white-stripe pattern 1-5 bars, matching
+ * ares' LINE slot 1 = plain white bar reference). Re-pointing here (instead of
+ * editing the yaml offsets of D_4001D40 etc.) avoids introducing NEW duplicate-
+ * offset collisions with those pre-existing symbols; see
+ * tools/gen_asset_bindings.py's duplicate-offset lint. */
+extern u16 D_4001200[];
+extern u16 D_4001440[];
+extern u16 D_4001680[];
+extern u16 D_40018C0[];
 extern u16 D_4001B00[];
 extern u16 D_4001D40[];
 extern u16 D_4001F80[];
@@ -18,7 +35,10 @@ extern u16 D_4002640[];
 extern u16 D_4002880[];
 extern u16 D_4002AC0[];
 extern u16 D_4002D00[];
-extern u16 D_4002F40[];
+/* US-cart offset rebase (see create_machine_textures.yaml): D_4002F40 is the
+ * vanilla stats Body icon (IA8, machine_create_stats.c's own -0x900 alias).
+ * MARK icon 5's real RGBA16 content lives at the disambiguated symbol below. */
+extern u16 D_4002F40_2640[];
 extern u16 D_4003180[];
 extern u16 D_40033C0[];
 extern u16 D_4003600[];
@@ -34,6 +54,12 @@ extern u16 aCreateMachineClearTex[];
 extern u16 aCreateMachinePartsTex[];
 extern u16 aCreateMachineDesignTex[];
 extern u16 aCreateMachineSettingsTex[];
+#ifdef PORT
+/* Cart-resident "SAVE AS" label, I8 24x16 (create_machine_textures + 0xD80).
+ * Only referenced by the translated-disk registration-widget retarget below. */
+extern u8 aCreateMachineSaveAsTex[];
+extern int gdx_ek_disk_is_translated(void);
+#endif
 
 s32 D_xk1_8003A550;
 s32 D_xk1_8003A554;
@@ -405,15 +431,15 @@ s32 gMachineCreateEntryOption = INVALID_OPTION;
 
 MenuDropItem sDecalMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
-      aExpansionKitMenu1Tex, D_4001B00, NULL, func_xk3_8013298C, 16, 16, NULL, NULL },
+      aExpansionKitMenu1Tex, D_4001200, NULL, func_xk3_8013298C, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
-      aExpansionKitMenu2Tex, D_4001D40, NULL, func_xk3_801329A4, 16, 16, NULL, NULL },
+      aExpansionKitMenu2Tex, D_4001440, NULL, func_xk3_801329A4, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
-      aExpansionKitMenu3Tex, D_4001F80, NULL, func_xk3_801329BC, 16, 16, NULL, NULL },
+      aExpansionKitMenu3Tex, D_4001680, NULL, func_xk3_801329BC, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
-      aExpansionKitMenu4Tex, D_40021C0, NULL, func_xk3_801329D4, 16, 16, NULL, NULL },
+      aExpansionKitMenu4Tex, D_40018C0, NULL, func_xk3_801329D4, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
-      aExpansionKitMenu5Tex, D_4002400, NULL, func_xk3_801329EC, 16, 16, NULL, NULL },
+      aExpansionKitMenu5Tex, D_4001B00, NULL, func_xk3_801329EC, 16, 16, NULL, NULL },
 };
 
 MenuWidget sDecalWidget = { 5,   INVALID_OPTION, INVALID_OPTION, 72, 52, 0, 16, sDecalMenuItems, 104, 56, 104,
@@ -429,7 +455,7 @@ MenuDropItem sLogoMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu4Tex, D_4002D00, NULL, func_xk3_80132AC8, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
-      aExpansionKitMenu5Tex, D_4002F40, NULL, func_xk3_80132AE0, 16, 16, NULL, NULL },
+      aExpansionKitMenu5Tex, D_4002F40_2640, NULL, func_xk3_80132AE0, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu6Tex, D_4003180, NULL, func_xk3_80132AF8, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
@@ -490,6 +516,44 @@ MenuWidget sMachineRegistrationWidget = { 3,
                                           200,
                                           80,
                                           &gMachineRegistrationOption };
+
+#ifdef PORT
+/* The fan-translation disk is a recompile whose registration-widget item table
+ * differs from retail JP (verified by disassembling both disks' xk1 .data at
+ * sMachineRegistrationMenuItems, 0x80031C5C): item[0], blank on JP, points at
+ * the disk's "LOAD" art (D_xk3_80138B30), and item[1] moves to the
+ * cart-resident "SAVE AS" label at create_machine_textures + 0xD80, which is
+ * the aCreateMachineSaveAsTex binding (the gfx bridge resolves that stub to
+ * the live segment-4 bytes at draw time — the host array itself stays empty,
+ * so it must not be read here). This build compiles the JP table, so the same
+ * retargets are applied when the translated disk is active.
+ *
+ * GEOMETRY: the SAVE AS art is I4 48x16, exactly like
+ * every other label in that widget, so the shared drop-item draw path below
+ * handles it with no special case. create_machine_textures.yaml (and the
+ * dump/manifest.tsv row derived from it) labels this whole family "I8 24x16";
+ * that label is wrong. Both readings consume the same 384 bytes
+ * (48*16/2 == 24*16), which is why the mislabel went unnoticed, but only the
+ * I4 48x16 reading decodes to legible text -- proven by decoding ROM
+ * 0x1673E0..0x167560 (all 384 bytes) both ways, see
+ * tools/ek_translated_validate/aCreateMachineSaveAsTex__COMPARISON.png. The
+ * cart's own draw of the sibling label aCreateMachineUseTex agrees: it goes
+ * through MachineCreate_DrawTextureBlockI4 at 48x16
+ * (machine_create_draw.c:1010). An earlier fix drew this label as I8 24x16
+ * magnified 2x horizontally (dsdx = 1 << 9), which is what made SAVE AS render
+ * blurry next to a crisp LOAD and DELETE. */
+static void MachineRegistration_ApplyTranslatedArt(void) {
+    static s32 sApplied = 0;
+
+    if (sApplied || !gdx_ek_disk_is_translated()) {
+        return;
+    }
+    sApplied = 1;
+
+    sMachineRegistrationMenuItems[0].contentsTex = D_xk3_80138B30;
+    sMachineRegistrationMenuItems[1].contentsTex = aCreateMachineSaveAsTex;
+}
+#endif
 
 MenuDropItem sMachineCreateEntryMenuItems[] = {
     { aExpansionKitMenuPurpleBorderBackgroundTex, aExpansionKitMenuPurpleBorderHighlightBackgroundTex,
@@ -844,6 +908,12 @@ void func_xk1_80026B44(Gfx** gfxP, MenuWidget* widget, s32 cursorPosX, s32 curso
     s32 i;
 
     gfx = *gfxP;
+
+#ifdef PORT
+    if (widget == &sMachineRegistrationWidget) {
+        MachineRegistration_ApplyTranslatedArt();
+    }
+#endif
 
     highlightedIndex = func_xk1_80026958(widget, cursorPosX, cursorPosY);
 

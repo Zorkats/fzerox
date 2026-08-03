@@ -369,24 +369,15 @@ void Audio_PlayerLevelSEStop(u8 playerIndex, u8 sfxId) {
 
 void Audio_PlayerTriggerSE(u8 racerId, u8 sfxId) {
 #ifdef PORT
-    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). Confirms
-       the game-side boost trigger (racer.c Racer_UpdateFromControls) actually
-       reaches the audio layer's per-racer trigger queue. If this never logs
-       when boosting, the break is upstream in racer.c's boost-state gating,
-       not in audio; if it DOES log, the break is downstream (queue pop /
+    /* NA_SE_7 (boost) never plays: confirm the game-side boost trigger
+       (racer.c Racer_UpdateFromControls) reaches the audio layer's per-racer
+       trigger queue. Silent here means the break is upstream in racer.c's
+       boost-state gating; logging here means it is downstream (queue pop, or the
        engine-sound-state gate in Audio_PlayerSEStart).
 
-       Probe-design fix: this used to be a single counter shared by every
-       racerId, capped at 8 total logs for the whole race. AI racers boost far
-       more often than the human (F-Zero X's CPU racers boost almost
-       constantly), so in practice the cap was exhausted by AI activity within
-       the first couple of seconds -- a prior Release trace showed exactly 8
-       AI racerIds (1,2,3,5,6,7,14,25) and ZERO human (racerId < gNumPlayers)
-       entries, even though the human demonstrably boosted that race. That is
-       a probe budget exhaustion artifact, not proof the human's boost never
-       reached this function. Human and AI racers now get independent
-       budgets so the human's own boost-queue events can never be crowded out
-       by AI spam. */
+       Human and AI racers get independent log budgets. CPU racers boost almost
+       constantly, so a single shared budget was exhausted by AI traffic within
+       the first seconds of a race and the human's own events never appeared. */
     if (sfxId == NA_SE_7) {
         extern void gdx_cki(const char* s, int v);
         extern s32 gNumPlayers;
@@ -515,13 +506,11 @@ void Audio_TriggerSystemSE(u8 sfxId) {
 #endif
 
 #ifdef PORT
-    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). On EK
-       builds, NA_SE_11 is the ONLY thing that starts the per-racer engine
-       sound state (via func_800BAE5C), which Audio_PlayerSEStart requires
-       before it will play non-whitelisted trigger SEs like the boost sound.
-       This probe shows whether NA_SE_11 is even received here, and whether
-       the OPTION-save SE-disable gate (D_80771C94/D_800D11C8[3]) drops it
-       before func_800BAE5C ever runs. */
+    /* On EK builds NA_SE_11 is the ONLY thing that starts the per-racer engine
+       sound state (via func_800BAE5C), which Audio_PlayerSEStart requires before
+       it will play non-whitelisted trigger SEs such as the boost sound. Shows
+       whether NA_SE_11 is received here, and whether the OPTION-save SE-disable
+       gate (D_80771C94/D_800D11C8[3]) drops it before func_800BAE5C runs. */
     if (sfxId == NA_SE_11) {
         extern void gdx_cki(const char* s, int v);
         static s32 sNaSe11Logs = 0;
@@ -700,10 +689,9 @@ void func_800BAE5C(u8 playerIndex) {
     Audio_PlayerEngineStart(playerIndex);
     sPlayerEngineSoundState[playerIndex] = 1;
 #ifdef PORT
-    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). Confirms
-       sPlayerEngineSoundState[playerIndex] actually gets set to 1 -- this is
-       the flag Audio_PlayerSEStart's gate checks before allowing the boost
-       (and other non-whitelisted) trigger SEs through. */
+    /* Confirms sPlayerEngineSoundState[playerIndex] actually gets set to 1 --
+       the flag Audio_PlayerSEStart's gate checks before allowing the boost and
+       other non-whitelisted trigger SEs through. */
     {
         extern void gdx_cki(const char* s, int v);
         static s32 sEngineStartLogs = 0;
@@ -727,10 +715,10 @@ void Audio_SEStart(u8 channelIndex, u8 ioData) {
         gdx_unlock_diagf("[unlock-audio] queued player=0 channel=1 port=0 value=46 enabled=%d seqId=%d\n",
                          gAudioCtx.seqPlayers[0].enabled, gAudioCtx.seqPlayers[0].seqId);
     }
-    /* Diagnostic (task #12): every menu/system SFX request funnels here as a
-       channel-IO write to seqPlayer 0. Encodes chan*1000000 + sfx*1000 +
-       p0seq*10 + enabled so one line shows the request AND whether player 0
-       was actually running the SE sequence to receive it. */
+    /* Every menu/system SFX request funnels here as a channel-IO write to
+       seqPlayer 0. Encodes chan*1000000 + sfx*1000 + p0seq*10 + enabled so one
+       line shows the request AND whether player 0 was actually running the SE
+       sequence to receive it. */
     {
         extern void gdx_cki(const char* s, int v);
         gdx_cki("[sfx-req] chan/sfx/p0seq/en",
@@ -881,11 +869,51 @@ void Audio_RomBgmReadyTaiki(void) {
     }
 }
 
+#ifdef PORT
+/* EK menu-exit BGM race: leave Course Edit / Create Machine "too fast" and the
+   editor track keeps playing while the main-menu track never comes up.
+
+   Audio_EditorInit / Audio_Editor2Init only ARM a frame counter (D_80771C8C /
+   D_80771C90); the INIT_SEQPLAYER is issued later by Audio_EditorBgmDelaySet /
+   Audio_Editor2BgmDelaySet, once the counter has passed 180 / 150 frames AND the
+   async sample-bank load has retired (D_80771C7C == 0). Both tick unconditionally
+   from Audio_SetupCreateTask() regardless of game mode, and Audio_EditorExit()
+   clears only D_80771C94, never the armed counters. An exit inside the arming
+   window therefore leaves a live editor-sequence start in flight: func_80068DCC
+   starts the ROM menu track on seq player 1, and the leftover delayed start then
+   re-inits the SAME player and silences it.
+
+   Part 1 of 2 (part 2 is the explicit disarm in Audio_EditorExit): every ROM BGM
+   start that claims seq player 1 bumps this epoch, and the two delayed editor
+   starts snapshot it when they arm and refuse to fire if it moved. That also
+   covers exits that never reach Audio_EditorExit, since every route back to the
+   main menu goes through func_80068DCC -> func_8070DAD4 -> Audio_RomBgmStart.
+
+   Only TITLE / SELECT / OPTION bump it (including the D_80771C54 deferral of the
+   latter two): they are the ROM BGMs that actually run INIT_SEQPLAYER on player 1.
+   The default case is a player-0 jingle that coexists with disk BGM rather than
+   displacing it, so it is not a change of ownership. Nothing bumps the epoch
+   inside the EK menus, because func_80068DCC early-returns for
+   GAMEMODE_COURSE_EDIT / GAMEMODE_CREATE_MACHINE. */
+static u32 sPortRomBgmStartEpoch = 0;
+static u32 sPortEditorBgmArmEpoch = 0;
+static u32 sPortEditor2BgmArmEpoch = 0;
+#endif
+
 // Na_ROMBgm_Start
 void Audio_RomBgmStart(u8 bgm) {
     s32 pad;
 
     PRINTF("==BANDO== Na_ROMBgm_Start Called num = %02x\n", bgm);
+
+#ifdef PORT
+    /* See sPortRomBgmStartEpoch above: these are the ROM BGMs that claim seq
+       player 1, so the ROM side is taking BGM ownership and any disk-side editor
+       BGM start still armed from an EK menu is now stale. */
+    if ((bgm == BGM_TITLE) || (bgm == BGM_SELECT) || (bgm == BGM_OPTION)) {
+        sPortRomBgmStartEpoch++;
+    }
+#endif
 
     AUDIOCMD_CHANNEL_SET_VOL_SCALE(0, 0, 1.0f);
 
@@ -1279,7 +1307,7 @@ void Audio_GuitarSeqStart(void) {
     D_80771C88 = 1;
 #ifdef PORT
     {
-        /* [seq-load] Task 2 probe: guitar-riff start-gate trace. gdx_ck timestamps every line
+        /* [seq-load] guitar-riff start-gate trace. gdx_ck timestamps every line
            (port_log.h ms prefix), so this plus the func_807427C0 transition probes below give ONE
            boot log of the whole guitar-seq load-state progression -- correlatable against the
            ckG2 checkpoint and [ai] submit timestamps to see when the seqplayer actually starts and
@@ -1321,13 +1349,12 @@ void func_807427C0(void) {
                 sSEBankLoadStatus |= BANK_SE_LOAD_COMPLETE;
             }
             if (sSEBankLoadStatus == (BANK_GUITAR_LOAD_COMPLETE | BANK_SE_LOAD_COMPLETE)) {
-/* PORT NOTE: an earlier attempt modeled 64DD seek latency here by delaying
-                   SEQ_GUITAR's start ~3s. That inverted the player-0 startup order (the SE
-                   sequence had already started off the title BGM window, and the delayed
-                   guitar init then REPLACED it, silencing all SFX for the session). The
-                   console-faithful stage for the riff is the boot-logo hold, restored in
-                   sys_gfx.c (GD timer wait) — the riff plays over the logo BEFORE the title
-                   BGM exists, exactly as on hardware. No delay needed here. */
+/* Ruled out: modelling 64DD seek latency here by delaying SEQ_GUITAR's start
+   ~3s. That inverted the player-0 startup order -- the SE sequence had already
+   started off the title BGM window, and the delayed guitar init then REPLACED
+   it, silencing all SFX for the session. The console-faithful stage for the riff
+   is the boot-logo hold, restored in sys_gfx.c (GD timer wait): the riff plays
+   over the logo BEFORE the title BGM exists, as on hardware. No delay needed. */
                 PRINTF("==BANDO== GUITOR & SE ROM WAVE DMA END\n");
                 AUDIOCMD_GLOBAL_INIT_SEQPLAYER(0, SEQ_GUITAR, 0, 0);
 #ifdef PORT
@@ -1549,6 +1576,12 @@ void Audio_EditorInit(void) {
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 200);
     Audio_DDBgmReadyInter(BGM_COURSE_EDITOR);
     D_80771C8C = 1;
+#ifdef PORT
+    /* Arm-time snapshot for the stale-start guard in Audio_EditorBgmDelaySet
+       (see sPortRomBgmStartEpoch). D_80771C8C = 1 above is the arming; the
+       actual seq-player init happens up to 3 s later. */
+    sPortEditorBgmArmEpoch = sPortRomBgmStartEpoch;
+#endif
     Audio_SetPlayerMode(0);
 }
 
@@ -1560,8 +1593,28 @@ void Audio_EditorBgmDelaySet(void) {
         return;
     }
 
+#ifdef PORT
+    /* Stale pending start: a ROM BGM start happened after this delayed editor
+       start was armed, i.e. we already left the EK menu and seq player 1 now
+       belongs to the menu/ROM track. Disarm silently and leave sActiveBgm,
+       D_80771C74 and D_80771C94 alone -- that is exactly the post-state
+       Audio_EditorExit() establishes, so the ROM track keeps the player. */
+    if (sPortEditorBgmArmEpoch != sPortRomBgmStartEpoch) {
+        extern void gdx_cki(const char* s, int v);
+        gdx_cki("[audio-diag] editor BGM delayed start dropped (stale) frames", (int) D_80771C8C);
+        D_80771C8C = 0;
+        return;
+    }
+#endif
+
     D_80771C8C++;
     if ((D_80771C8C > 180) && (D_80771C7C == 0)) {
+#ifdef PORT
+        {
+            extern void gdx_cki(const char* s, int v);
+            gdx_cki("[audio-diag] editor BGM delayed start FIRING bgmOptionOn", (int) (D_800D11C8[2] == 1));
+        }
+#endif
         if (D_800D11C8[2] == 1) {
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, SEQ_DDBGM_COURSE_EDITOR, 0, 0);
             D_80771C74 = 1;
@@ -1578,6 +1631,11 @@ void Audio_Editor2Init(void) {
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 100);
     Audio_DDBgmReadyInter(BGM_MACHINE_EDITOR);
     D_80771C90 = 1;
+#ifdef PORT
+    /* Same arming/snapshot pairing as Audio_EditorInit, for Create Machine's
+       150-frame delayed start (see sPortRomBgmStartEpoch). */
+    sPortEditor2BgmArmEpoch = sPortRomBgmStartEpoch;
+#endif
     Audio_SetPlayerMode(0);
 }
 
@@ -1588,6 +1646,16 @@ void Audio_Editor2BgmDelaySet(void) {
     if (D_80771C90 == 0) {
         return;
     }
+
+#ifdef PORT
+    /* Stale pending start -- see the matching guard in Audio_EditorBgmDelaySet. */
+    if (sPortEditor2BgmArmEpoch != sPortRomBgmStartEpoch) {
+        extern void gdx_cki(const char* s, int v);
+        gdx_cki("[audio-diag] editor2 BGM delayed start dropped (stale) frames", (int) D_80771C90);
+        D_80771C90 = 0;
+        return;
+    }
+#endif
 
     D_80771C90++;
     if ((D_80771C90 > 150) && (D_80771C7C == 0)) {
@@ -1606,6 +1674,50 @@ void Audio_EditorExit(void) {
     PRINTF("==BANDO== Na_Exit_Editor Called\n");
     Audio_TriggerSystemSE(NA_SE_16);
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 100);
+#ifdef PORT
+    /* Part 2 of 2 for the EK menu-exit BGM race (mechanism at
+       sPortRomBgmStartEpoch above). Upstream this function clears D_80771C94 but
+       leaves every PENDING editor BGM start armed, and the tickers that consume
+       them (Audio_EditorBgmDelaySet, Audio_Editor2BgmDelaySet, func_8074252C) run
+       every audio frame regardless of game mode. Anything still armed here fires
+       after the main-menu ROM track has taken seq player 1 and steals it back.
+       Both EK menus do call this function (course_edit/19DD60.c func_xk2_800EC3AC
+       and machine_create/machine_create.c MachineCreate_Update), so cancelling
+       here kills the race at the source; the epoch guard is the backstop for exit
+       routes that never reach it.
+
+       Cancelled, in the order they can bite:
+       - D_80771C8C / D_80771C90: the 180 / 150-frame delayed editor starts. Also
+         gated on D_80771C7C == 0, so a slow async sample-bank load can push the
+         fire arbitrarily far past the nominal frame count -- which is why the
+         counter must be cleared rather than allowed to expire.
+       - D_80771C98 / D_80771C9C: the 30-frame deferred start armed by
+         Audio_DDBgmStart2 and consumed by func_8074252C. Its only caller is the
+         editor's own BGM-preview widget (expansion_kit/A3AE0.c
+         func_xk1_80028F94), so it is always an editor-scoped request and always
+         wrong to honour after the exit. Audio_DDBgmStop() clears these;
+         Audio_RomBgmStop() does not, and the EK exit takes the
+         Audio_RomBgmStop() branch (see the D_8076CCA0 note in game/common.c).
+       - sDDBgmReadyQueuedBgm / sDDBgmQueuedBgm: deferred requests waiting on the
+         in-flight async load, drained by func_80742654. Only dropped when they
+         hold an editor BGM, so a legitimate course/DD request survives.
+
+       Deliberately NOT touched: D_80771C7C / D_80771C78, the in-flight async
+       sample-bank load itself. Letting it retire is harmless -- it loads a sample
+       bank and its completion handler can no longer reassert an editor BGM.
+       Tearing it down would mean reaching into the audio thread's load state from
+       the game thread, a bigger hazard than the leak it would close. */
+    D_80771C8C = 0;
+    D_80771C90 = 0;
+    D_80771C98 = false;
+    D_80771C9C = 0;
+    if ((sDDBgmReadyQueuedBgm == (BGM_COURSE_EDITOR + 1)) || (sDDBgmReadyQueuedBgm == (BGM_MACHINE_EDITOR + 1))) {
+        sDDBgmReadyQueuedBgm = 0;
+    }
+    if ((sDDBgmQueuedBgm == (BGM_COURSE_EDITOR + 1)) || (sDDBgmQueuedBgm == (BGM_MACHINE_EDITOR + 1))) {
+        sDDBgmQueuedBgm = 0;
+    }
+#endif
     Audio_DDBgmReady(BGM_SELECT);
     D_80771C94 = 0;
     AudioThread_ScheduleProcessCmds();
@@ -1935,27 +2047,19 @@ void Audio_PlayerSEStart(u8 racerId, u8 sfxId) {
     u8 pan;
 
 #ifdef PORT
-    /* Booster SFX investigation (task: missing NA_SE_7 boost sound). This gate
-       is the ONLY place a queued per-racer trigger SE (boost, wall hit, jump
-       boost, etc.) gets silently dropped after Audio_PlayerTriggerSEStart
-       queues it -- it requires sPlayerEngineSoundState[racerId] != 0 unless
-       sfxId is on the whitelist below (which NA_SE_7/boost is NOT on).
-       sPlayerEngineSoundState is only set by func_800BAE5C, which on EK
-       builds is reached exclusively via Audio_TriggerSystemSE(NA_SE_11) fired
-       from Racer_Draw's countdown code (racer.c ~6735). If this probe shows
-       engineState==0 and dropped==1 for sfxId==NA_SE_7, the fix is to ensure
-       NA_SE_11 actually fires / func_800BAE5C actually runs before the race
-       starts, not anything in this function.
+    /* The ONLY place a queued per-racer trigger SE (boost, wall hit, jump boost)
+       is silently dropped after Audio_PlayerTriggerSEStart queues it: this gate
+       requires sPlayerEngineSoundState[racerId] != 0 unless sfxId is on the
+       whitelist below, and NA_SE_7 (boost) is not. sPlayerEngineSoundState is
+       only set by func_800BAE5C, reached on EK builds exclusively via
+       Audio_TriggerSystemSE(NA_SE_11) fired from Racer_Draw's countdown code
+       (racer.c ~6735). engineState==0 with dropped==1 for NA_SE_7 means the fix
+       belongs at NA_SE_11 / func_800BAE5C, not in this function.
 
-       Probe-design fix: this was a single counter shared by every racerId and
-       every sfxId, capped at 40 total logs for the whole race. sRacerActiveSE
-       traffic from up to 30 racers (mostly AI, which fire non-whitelisted SEs
-       constantly) can exhaust that budget before the human racer (racerId <
-       gNumPlayers) ever gets a line logged -- so a prior trace showing OOB
-       garbage engineState values (17, 67) for AI racerIds 9/10 passing the
-       gate says nothing about whether the human's own NA_SE_7 gate check was
-       ever captured. Human and AI racers now get independent budgets, and the
-       human budget is reserved for going forward. */
+       Human and AI racers get independent log budgets, and the human budget is
+       reserved: up to 30 racers -- mostly AI, firing non-whitelisted SEs
+       constantly -- can otherwise exhaust a shared budget before the human racer
+       gets a single line. */
     {
         extern void gdx_cki(const char* s, int v);
         extern s32 gNumPlayers;
@@ -2712,12 +2816,10 @@ AudioTask* Audio_SetupCreateTask(void) {
     AudioTask* curAudioTask;
 
 #ifdef PORT
-    /* Progressive-distortion accumulator probe: the user reports audio
-       degrading the longer a race runs. Every ~30s log the active-note count
-       and how many active notes are flagged finished-but-enabled — a growing
-       count = voice leak (notes never released), the leading accumulation
-       candidate; flat count pushes the investigation to per-voice state or
-       the reverb ring instead. */
+    /* Progressive-distortion accumulator probe: audio degrades the longer a race
+       runs. Every ~30s log the active-note count and how many active notes are
+       flagged finished-but-enabled. A growing count is a voice leak (notes never
+       released); a flat count points at per-voice state or the reverb ring. */
     {
         extern void gdx_cki(const char*, int);
         static s32 sGdxHealthTick = 0;

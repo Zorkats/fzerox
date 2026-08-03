@@ -197,13 +197,21 @@ D_4002400:
   offset: 0x2400
   symbol: D_4002400
 
+# PORT NOTE (US-cart offset rebase, see machine_create_stats.c:165-178 for the
+# sibling collision this documents): the translated EK overlay (A3AE0.c) keeps
+# JP-cart numeric names for its 8-icon MARK strip (D_4002640..D_4003600), but on
+# the US cart the strip's real content sits 0x900 bytes earlier (verified by
+# decoding: -0x900 turns "shield/kanji/X/N64" into the correct
+# eagle/Y-emblem/eye/bull ordering ares shows for slots 1-4). Offsets below are
+# bound by semantic payload (actual US ROM position), not by the JP address the
+# symbol happens to be named after.
 D_4002640:
   type: TEXTURE
   ctype: u16
   format: RGBA16
   width: 24
   height: 12
-  offset: 0x2640
+  offset: 0x1D40
   symbol: D_4002640
 
 D_4002880:
@@ -212,7 +220,7 @@ D_4002880:
   format: RGBA16
   width: 24
   height: 12
-  offset: 0x2880
+  offset: 0x1F80
   symbol: D_4002880
 
 D_4002AC0:
@@ -221,7 +229,7 @@ D_4002AC0:
   format: RGBA16
   width: 24
   height: 12
-  offset: 0x2AC0
+  offset: 0x21C0
   symbol: D_4002AC0
 
 D_4002D00:
@@ -230,8 +238,22 @@ D_4002D00:
   format: RGBA16
   width: 24
   height: 12
-  offset: 0x2D00
+  offset: 0x2400
   symbol: D_4002D00
+
+# D_4002F40 (the JP-cart name for MARK icon 5) collides with the vanilla stats
+# Body icon, which already legitimately owns this offset/format on the US cart
+# (see machine_create_stats.c:172-177's own -0x900 alias). Icon 5's real
+# content (US offset 0x2640, same bytes the pre-rebase D_4002640 used to read)
+# gets a disambiguated symbol instead of reusing the D_4002F40 name.
+D_4002F40_2640:
+  type: TEXTURE
+  ctype: u16
+  format: RGBA16
+  width: 24
+  height: 12
+  offset: 0x2640
+  symbol: D_4002F40_2640
 
 D_4002F40:
   type: TEXTURE
@@ -241,6 +263,36 @@ D_4002F40:
   height: 16
   offset: 0x2F40
   symbol: D_4002F40
+
+# MARK icons 6-8: previously unbound (EkLinkStubs.c placeholders). Real content
+# reused from the same US-cart offsets the pre-rebase D_4002880/AC0/D00 used
+# to read (kanji / X / N64 logo) -- see the PORT NOTE above.
+D_4003180:
+  type: TEXTURE
+  ctype: u16
+  format: RGBA16
+  width: 24
+  height: 12
+  offset: 0x2880
+  symbol: D_4003180
+
+D_40033C0:
+  type: TEXTURE
+  ctype: u16
+  format: RGBA16
+  width: 24
+  height: 12
+  offset: 0x2AC0
+  symbol: D_40033C0
+
+D_4003600:
+  type: TEXTURE
+  ctype: u16
+  format: RGBA16
+  width: 24
+  height: 12
+  offset: 0x2D00
+  symbol: D_4003600
 
 D_4003140:
   type: TEXTURE

@@ -5504,6 +5504,83 @@ extern s32 gSettingVsSlot;
 extern s32 gRaceTimeIntervalToggle;
 extern s32 sEADDemoQueueState;
 
+#ifdef PORT
+/* G-Diffuser: widescreen anchor selection for the three per-player race overlays emitted from
+ * Menus_Draw's player loop (minimap, position, speed). Returning the mode bit rather than
+ * branching at each call site keeps every Set paired with an identical Clear and puts the
+ * layout reasoning in one place.
+ *
+ * WHY THE ANSWER DEPENDS ON THE PLAYER COUNT. The N64 split-screen viewports are 4:3 in native
+ * space (aVpTopHalf/aVpBottomHalf are a full 320x240 offset in Y; the quarter viewports are
+ * 160x120), and AdjustVIewportOrScissor maps native coordinates linearly onto the window, so
+ * every one of them ends up with the WINDOW's aspect ratio -- 2P halves span the full window
+ * width, 3P/4P quadrants span exactly half of it (NDC x [-1,0] for the left column, [0,+1] for
+ * the right). An element therefore has to be glued to a different edge depending on which
+ * column its sub-viewport occupies:
+ *   full-width sub-viewport (1P, 2P) : screen left = ANCHOR_LEFT, screen right = ANCHOR_RIGHT
+ *   quadrant, OUTER edge             : same two bits (the outer edge IS a screen edge)
+ *   quadrant, INNER edge             : NO bit -- AdjXForAspectRatio already scales about NDC 0,
+ *                                      which is precisely the column boundary, so an unscoped
+ *                                      rect near native x=160 stays glued to it. Adding an
+ *                                      anchor here would drag it out to a screen edge.
+ * Native X values quoted below come from the layout tables: sPlayerMinimapPositions
+ * (minimap.c:37), sPositionPositions and sSpeedPositions (hud.c).
+ *
+ * `wide1p` is the existing 1P switch (gEnhancements.Graphics.WidescreenUI) and `wideSplit` the
+ * separate split-screen switch, so the 1P display list is unaffected by the split-screen work
+ * and either can be turned off independently. With both off every helper returns 0 and the
+ * emitted display list is bit-identical to stock. */
+static u32 GdxRaceMinimapAnchor(s32 numPlayers, s32 playerIndex, s32 wide1p, s32 wideSplit) {
+    if (numPlayers == 1) {
+        return wide1p ? G_EX_WIDESCREEN_ANCHOR_RIGHT : 0; /* x=232, right safe-area edge */
+    }
+    if (!wideSplit) {
+        return 0;
+    }
+    if (numPlayers == 2) {
+        return G_EX_WIDESCREEN_ANCHOR_RIGHT; /* x=246 in a full-width half -> screen right */
+    }
+    /* Quadrants: players 0/1 are the left column at x=106 (inner edge, unscoped); players 2/3
+       are the right column at x=248 (outer edge). */
+    return (playerIndex >= 2) ? G_EX_WIDESCREEN_ANCHOR_RIGHT : 0;
+}
+
+static u32 GdxRacePositionAnchor(s32 numPlayers, s32 playerIndex, s32 wide1p, s32 wideSplit) {
+    (void)wide1p;
+    if (numPlayers == 1) {
+        return 0; /* x=118: centre-native, deliberately unanchored in the shipped 1P HUD */
+    }
+    if (!wideSplit) {
+        return 0;
+    }
+    if (numPlayers == 2) {
+        return G_EX_WIDESCREEN_ANCHOR_LEFT; /* x=-4, hard against the left edge */
+    }
+    /* Left column x=4 is the outer edge. The right column's table entry is x=146, which is
+       BELOW the 160 column boundary and so straddles it -- there is no defensible edge to glue
+       it to, and guessing one would move it off its quadrant. Left unscoped: report this as a
+       known residual rather than inventing a placement. */
+    return (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : 0;
+}
+
+static u32 GdxRaceSpeedAnchor(s32 numPlayers, s32 playerIndex, s32 wide1p, s32 wideSplit) {
+    if (numPlayers == 1) {
+        return wide1p ? G_EX_WIDESCREEN_ANCHOR_RIGHT : 0; /* x=226, right safe-area edge */
+    }
+    if (!wideSplit) {
+        return 0;
+    }
+    if (numPlayers == 2) {
+        return G_EX_WIDESCREEN_ANCHOR_RIGHT; /* x=226 in a full-width half -> screen right */
+    }
+    /* Quadrants: players 0/1 at x=24 is the left column's outer edge; players 2/3 at x=168 sit
+       8px past the boundary, i.e. the right column's INNER edge -> unscoped. This slot is
+       shared with the lap-flash timer (Hud_UpdatePlayerHudInfo), which hud.c anchors the same
+       way, so the two never disagree about where the slot lives. */
+    return (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : 0;
+}
+#endif
+
 Gfx* Menus_Draw(Gfx* gfx) {
     s32 i = 0;
     s32 j;
@@ -5513,12 +5590,17 @@ Gfx* Menus_Draw(Gfx* gfx) {
     f32 intervalTime;
     s32 playerIndex = 0;
 #ifdef PORT
-    extern int gdx_photo_mode_active(void);    // port/input_bridge.c
-    extern int gdx_widescreen_ui_active(void); // port/input_bridge.c
+    extern int gdx_photo_mode_active(void);          // port/input_bridge.c
+    extern int gdx_widescreen_ui_active(void);       // port/input_bridge.c
+    extern int gdx_widescreen_split_ui_active(void); // port/input_bridge.c
     s32 gdxPhotoActive = gdx_photo_mode_active();
     /* Read once so every anchor Set below pairs with its Clear even if the CVar toggles
      * mid-build. With this false (stock default) the display list is bit-identical. */
     s32 gdxWideHud = gdx_widescreen_ui_active();
+    /* Separate switch for the 2P/3P/4P layouts; see gdx_widescreen_split_ui_active in
+     * port/input_bridge.c for why the split-screen policy does not ride the 1P CVar. */
+    s32 gdxWideSplitHud = gdx_widescreen_split_ui_active();
+    u32 gdxRaceAnchor;
 #endif
 
     gRacersRemaining = gTotalRacers - gRacersRetired;
@@ -5626,33 +5708,52 @@ Gfx* Menus_Draw(Gfx* gfx) {
                     if ((gGameMode != GAMEMODE_DEATH_RACE) && (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE) &&
                         !(gRacers[i].stateFlags & RACER_STATE_FINISHED)) {
 #ifdef PORT
-                        if ((gNumPlayers == 1) && gdxWideHud) {
-                            gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                        gdxRaceAnchor = GdxRaceMinimapAnchor(gNumPlayers, i, gdxWideHud, gdxWideSplitHud);
+                        if (gdxRaceAnchor != 0) {
+                            gSPSetExtraGeometryMode(gfx++, gdxRaceAnchor);
                         }
 #endif
                         gfx = Minimap_DrawCourseMinimap(gfx, gNumPlayers - 1, i);
 #ifdef PORT
-                        if ((gNumPlayers == 1) && gdxWideHud) {
-                            gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                        if (gdxRaceAnchor != 0) {
+                            gSPClearExtraGeometryMode(gfx++, gdxRaceAnchor);
                         }
 #endif
                     }
                     if (gNumPlayers == 3) {
+                        /* The 3P layout draws a fourth minimap into the empty bottom-right
+                           quadrant (sPlayerMinimapPositions[2][3] = {210,152}). That entry sits
+                           mid-column rather than on either edge, and the quadrant holds no 3D
+                           view to align against, so it is deliberately left on the stock centred
+                           path -- anchoring it would only move it away from where the other
+                           three minimaps land. */
                         gfx = Minimap_DrawCourseMinimap(gfx, gNumPlayers - 1, 3);
                     }
+#ifdef PORT
+                    gdxRaceAnchor = GdxRacePositionAnchor(gNumPlayers, i, gdxWideHud, gdxWideSplitHud);
+                    if (gdxRaceAnchor != 0) {
+                        gSPSetExtraGeometryMode(gfx++, gdxRaceAnchor);
+                    }
+#endif
                     gfx = Hud_DrawPosition(gfx, gNumPlayers - 1, i);
+#ifdef PORT
+                    if (gdxRaceAnchor != 0) {
+                        gSPClearExtraGeometryMode(gfx++, gdxRaceAnchor);
+                    }
+#endif
                 }
                 if (((gNumPlayers != 1) || (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE)) &&
                     !(gRacers[i].stateFlags & RACER_STATE_FINISHED)) {
 #ifdef PORT
-                    if ((gNumPlayers == 1) && gdxWideHud) {
-                        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    gdxRaceAnchor = GdxRaceSpeedAnchor(gNumPlayers, i, gdxWideHud, gdxWideSplitHud);
+                    if (gdxRaceAnchor != 0) {
+                        gSPSetExtraGeometryMode(gfx++, gdxRaceAnchor);
                     }
 #endif
                     gfx = Hud_DrawPlayerSpeed(gfx, gNumPlayers - 1, i);
 #ifdef PORT
-                    if ((gNumPlayers == 1) && gdxWideHud) {
-                        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+                    if (gdxRaceAnchor != 0) {
+                        gSPClearExtraGeometryMode(gfx++, gdxRaceAnchor);
                     }
 #endif
                 }

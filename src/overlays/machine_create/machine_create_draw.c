@@ -9,6 +9,16 @@
 #include ASSET_HEADER_EK(expansion_kit_textures.h)
 #include ASSET_HEADER_EK(overlays/machine_create/machine_create_assets.h)
 
+#ifdef PORT
+// port/disk_buffer.cpp: non-zero when the currently loaded 64DD disk
+// image is the fan-translated (LuigiBlood/Zoinkity) release, whose recompile moved and/or reshaped
+// three Create-Machine label textures (Machine Name, Settings, Weight -- see
+// port/gen/EkTranslatedOverrides.c). The retail-JP disk, and any unrecognized disk, report 0 here and
+// keep the original literal blit dimensions below (gdx_ek_assets_fill already serves the right bytes
+// for those cases via the retail-JP-derived offset table).
+extern int gdx_ek_disk_is_translated(void);
+#endif
+
 Vp gMachinePartViewports[3][7];
 unk_801413F0 D_xk3_801413F0[2];
 unk_801413F0* D_xk3_801414B0;
@@ -19,6 +29,14 @@ Gfx* sCustomMachinePartDLs[][7] = {
     { D_90186C0, D_9017B18, D_9018230, D_9017BF0, D_90183F0, D_9017D20, D_9017EC8 },
 };
 
+/* Driver names in machine-number order, as the retail-JP disk has them.
+ *
+ * The entries are mutable pointers on purpose: on the fan-translated 64DD disk
+ * this table's English lives in the disk's own machine_create .data, and
+ * gdx_ek_strings_apply() (port/gdx_ek_strings.c) repoints each entry at that
+ * text once the disk is loaded. Nothing here is translated by hand -- if no disk
+ * is present, or the disk is the retail-JP one, these Japanese names stand.
+ */
 const char* sCharacterNamesByNumber[] = {
     "MM \245\254\245\274\245\353",
     "\245\270\245\347\245\307\245\243 \245\265\245\336\241\274",
@@ -380,7 +398,29 @@ Gfx* MachineCreate_DrawWeight(Gfx* gfx, s32 left, s32 top, s32 weight) {
     gSPDisplayList(gfx++, D_xk3_801373F0);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
 
+#ifdef PORT
+    /* The fan-translated disk reshaped this WEIGHT caption from 32x16 to 40x12 (see
+       port/gen/EkTranslatedOverrides.c); the JP retail disk, and any unrecognized disk, keeps
+       the original 32x16 geometry gdx_ek_assets_fill() already serves.
+
+       The ORIGIN moves with the reshape. The disk's own recompiled
+       MachineCreate_DrawWeight (VRAM 0x8012FAF4-0x8012FB14) blits the 40x12 caption at
+       (left - 8, top + 4), not at (left, top):
+         - x: the caption grew 32 -> 40 px, so it is pulled back 8 px to keep its RIGHT edge on
+           left+32. The digit advances below are unchanged from retail (left += 41 under
+           1000 kg, left += 33 at or above it), so a caption left at `left` would end at
+           left+40 and a four-digit weight starting at left+33 would run seven pixels INTO it
+           -- the "Weight1000 kg" collision; the three-digit case was one pixel from the same.
+         - y: the caption lost four rows, 16 -> 12, and the digits beside it are still 16 tall,
+           so it is pushed down 4 px to stay vertically centred against them. */
+    if (gdx_ek_disk_is_translated()) {
+        gfx = MachineCreate_DrawTextureBlockI8(gfx, D_xk3_80138930, left - 8, top + 4, 40, 12);
+    } else {
+        gfx = MachineCreate_DrawTextureBlockI8(gfx, D_xk3_80138930, left, top, 32, 16);
+    }
+#else
     gfx = MachineCreate_DrawTextureBlockI8(gfx, D_xk3_80138930, left, top, 32, 16);
+#endif
     if (weight < 1000) {
         left += 41;
     } else {
@@ -513,6 +553,26 @@ Gfx* func_xk3_80130698(Gfx* gfx, s32 arg1) {
         case 0:
             Matrix_FromMtx(gGfxPool->unk_20108, &sp80);
             Light_SetLookAtSource(&gGfxPool->unk_21B28, &sp80);
+#ifdef PORT
+            /* See gdx_diag_lookat_enabled (port/n64_sched.c). Compare against the
+               [lookat] machine-settings line, which is the same pass on the same
+               display lists but sourced from a real camera view matrix. */
+            {
+                extern int gdx_diag_lookat_enabled(void);
+                extern void gdx_dbg_logf(const char* fmt, ...);
+                static s32 sLogged = 0;
+                LookAt* la = &gGfxPool->unk_21B28;
+
+                if (gdx_diag_lookat_enabled() && sLogged < 3) {
+                    sLogged++;
+                    gdx_dbg_logf("[lookat] createmachine src col0=(%.4f,%.4f,%.4f) col1=(%.4f,%.4f,%.4f) "
+                                 "-> dir0=(%d,%d,%d) dir1=(%d,%d,%d)\n",
+                                 sp80.m[0][0], sp80.m[1][0], sp80.m[2][0], sp80.m[0][1], sp80.m[1][1],
+                                 sp80.m[2][1], la->l[0].l.dir[0], la->l[0].l.dir[1], la->l[0].l.dir[2],
+                                 la->l[1].l.dir[0], la->l[1].l.dir[1], la->l[1].l.dir[2]);
+                }
+            }
+#endif
             gSPLookAt(gfx++, &gGfxPool->unk_21B28);
             break;
         case 1:
@@ -568,16 +628,62 @@ Gfx* func_xk3_80130920(Gfx* gfx) {
                        kSuperMachineEnvColors[D_800333F4][2], 255);
         gfx = sSuperMachineDrawFuncs[D_800333F4](gfx);
     } else {
+#ifdef PORT
+        /* Flat-navy preview probe: report the record this draw actually reads.
+           See gdx_diag_custommachine_enabled (port/n64_sched.c) for why. */
+        {
+            extern int gdx_diag_custommachine_enabled(void);
+            extern void gdx_dbg_logf(const char* fmt, ...);
+            static u32 sLastKey = 0;
+            static s32 sKeySeen = 0;
+            /* FNV-1a over exactly the fields the line prints: a logo/number/decal-only key
+               deduplicated away the colour edits this probe exists to catch. */
+            const u8 keyFields[] = {
+                gCustomMachine.logo,      gCustomMachine.number,   gCustomMachine.decal,
+                gCustomMachine.red,       gCustomMachine.green,    gCustomMachine.blue,
+                gCustomMachine.cockpitR,  gCustomMachine.cockpitG, gCustomMachine.cockpitB,
+                gCustomMachine.decalR,    gCustomMachine.decalG,   gCustomMachine.decalB,
+                gCustomMachine.numberR,   gCustomMachine.numberG,  gCustomMachine.numberB,
+                gCustomMachine.frontType, gCustomMachine.rearType, gCustomMachine.wingType,
+            };
+            u32 key = 2166136261u;
+            s32 keyIdx;
+
+            for (keyIdx = 0; keyIdx < (s32) sizeof(keyFields); keyIdx++) {
+                key = (key ^ (u32) keyFields[keyIdx]) * 16777619u;
+            }
+
+            if (gdx_diag_custommachine_enabled() && (!sKeySeen || (key != sLastKey))) {
+                sKeySeen = 1;
+                sLastKey = key;
+                gdx_dbg_logf("[cmrec] logo=%d number=%d decal=%d -> idx %d/%d/%d  "
+                             "body=(%d,%d,%d) cockpit=(%d,%d,%d) decalRGB=(%d,%d,%d) "
+                             "numberRGB=(%d,%d,%d) parts f/r/w=%d/%d/%d\n",
+                             gCustomMachine.logo, gCustomMachine.number, gCustomMachine.decal,
+                             gCustomMachine.logo - 1, gCustomMachine.number - 1, gCustomMachine.decal - 1,
+                             gCustomMachine.red, gCustomMachine.green, gCustomMachine.blue,
+                             gCustomMachine.cockpitR, gCustomMachine.cockpitG, gCustomMachine.cockpitB,
+                             gCustomMachine.decalR, gCustomMachine.decalG, gCustomMachine.decalB,
+                             gCustomMachine.numberR, gCustomMachine.numberG, gCustomMachine.numberB,
+                             gCustomMachine.frontType, gCustomMachine.rearType, gCustomMachine.wingType);
+            }
+        }
+#endif
         gfx = Machine_DrawLoadCustomTextures(gfx, gCustomMachine.logo - 1, gCustomMachine.number - 1,
                                              gCustomMachine.decal - 1);
-        gDPSetEnvColor(gfx++, gCustomMachine.red, gCustomMachine.green, gCustomMachine.blue, 255);
-        gfx = Machine_DrawCustom(gfx, 0, gCustomMachine.frontType, gCustomMachine.rearType, gCustomMachine.wingType,
-                                 gCustomMachine.decalR, gCustomMachine.decalG, gCustomMachine.decalB,
-                                 gCustomMachine.numberR, gCustomMachine.numberG, gCustomMachine.numberB, 255, 255, 255,
-                                 gCustomMachine.cockpitR, gCustomMachine.cockpitG, gCustomMachine.cockpitB);
+        {
+            gDPSetEnvColor(gfx++, gCustomMachine.red, gCustomMachine.green, gCustomMachine.blue, 255);
+            gfx = Machine_DrawCustom(gfx, 0, gCustomMachine.frontType, gCustomMachine.rearType,
+                                     gCustomMachine.wingType, gCustomMachine.decalR, gCustomMachine.decalG,
+                                     gCustomMachine.decalB, gCustomMachine.numberR, gCustomMachine.numberG,
+                                     gCustomMachine.numberB, 255, 255, 255, gCustomMachine.cockpitR,
+                                     gCustomMachine.cockpitG, gCustomMachine.cockpitB);
+        }
     }
     gfx = func_xk3_80130698(gfx, 0);
-    gDPSetRenderMode(gfx++, G_RM_ZB_OVL_SURF, G_RM_ZB_OVL_SURF2);
+        {
+            gDPSetRenderMode(gfx++, G_RM_ZB_OVL_SURF, G_RM_ZB_OVL_SURF2);
+        }
 
     if (D_xk1_800333F0 != 0) {
         switch (D_800333F4) {
@@ -592,9 +698,11 @@ Gfx* func_xk3_80130920(Gfx* gfx) {
                 break;
         }
     } else {
-        gSPDisplayList(gfx++, sCustomMachinePartDLs[MACHINE_PART_FRONT][gCustomMachine.frontType]);
-        gSPDisplayList(gfx++, sCustomMachinePartDLs[MACHINE_PART_REAR][gCustomMachine.rearType]);
-        gSPDisplayList(gfx++, sCustomMachinePartDLs[MACHINE_PART_WING][gCustomMachine.wingType]);
+        {
+            gSPDisplayList(gfx++, sCustomMachinePartDLs[MACHINE_PART_FRONT][gCustomMachine.frontType]);
+            gSPDisplayList(gfx++, sCustomMachinePartDLs[MACHINE_PART_REAR][gCustomMachine.rearType]);
+            gSPDisplayList(gfx++, sCustomMachinePartDLs[MACHINE_PART_WING][gCustomMachine.wingType]);
+        }
     }
     if (gWorksMachineMode != MACHINE_MODE_PARTS) {
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);
@@ -803,10 +911,33 @@ Gfx* func_xk3_80131494(Gfx* gfx) {
 
         gSPDisplayList(gfx++, D_xk3_801373F0);
 
+#ifdef PORT
+        /* The fan-translated disk swapped and reshaped these two captions (Machine Name
+           48x12 -> 96x9, Settings 72x12 -> 48x12; see port/gen/EkTranslatedOverrides.c and its
+           docstring for the recovery evidence). x/y are left at the JP retail literals on BOTH
+           variants: each is a left-aligned single-line header drawn above its own content box,
+           and the translated widths (96, 48) both still fit inside the panel's existing
+           right-column bounds starting at x=170, so no repositioning was needed. Note that no
+           tool in tools/ek_recovery/ extracts the translated overlay's own compiled x/y
+           blit-call literals -- only texture geometry is recovered there -- so unlike the
+           weight caption these positions were NOT re-derived from the disk. */
+        if (gdx_ek_disk_is_translated()) {
+            gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateMachineNameTex, 170, 82, 96, 9, 255,
+                                                                255, 0, 255, 120, 0);
+            gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateSettingsTex, 170, 118, 48, 12, 255,
+                                                                255, 0, 255, 120, 0);
+        } else {
+            gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateMachineNameTex, 170, 82, 48, 12, 255,
+                                                                255, 0, 255, 120, 0);
+            gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateSettingsTex, 170, 118, 72, 12, 255, 255,
+                                                                0, 255, 120, 0);
+        }
+#else
         gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateMachineNameTex, 170, 82, 48, 12, 255,
                                                             255, 0, 255, 120, 0);
         gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateSettingsTex, 170, 118, 72, 12, 255, 255,
                                                             0, 255, 120, 0);
+#endif
         gSPDisplayList(gfx++, D_xk3_80137378);
         if (D_xk1_800333F0 != 0) {
             gfx = MachineCreate_DrawTextureTileRGBA16(gfx, D_xk3_8013B280, 178, 97, 120, 16, 0, 0, 59, 15);

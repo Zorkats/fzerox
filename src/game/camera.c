@@ -1008,19 +1008,19 @@ extern s32 D_800CCFB0;
 // pause state. We reuse the pause so the simulation is already frozen and introduce no new
 // time-freeze.
 //
-// Reversibility is by construction: this helper only ever transforms the PRIMARY camera's
-// eye/at/fov for the current frame's matrix build. Camera_UpdateProjectionViewMtx saves those three
-// fields before calling it and restores them immediately after the matrices are built (see the call
-// site), so gCameras[0] is byte-identical once the function returns -- and Camera_UpdateFromSettings
-// rewrites them from the game's own settings every frame anyway (camera.c: Camera_UpdateMode). No
-// persistent camera state is modified, so there is no separate "restore on exit" step to get wrong;
-// leaving photo mode simply stops the per-frame transform. When the CVar is 0 the very first branch
-// returns 0 without touching anything, so the default path is a byte-for-byte no-op.
+// This helper only ever transforms the PRIMARY camera's eye/at/fov for the current frame's matrix
+// build. Camera_UpdateProjectionViewMtx saves those three fields before calling it and restores
+// them immediately after the matrices are built (see the call site), so gCameras[0] is
+// byte-identical once the function returns, and Camera_UpdateFromSettings rewrites them from the
+// game's own settings every frame anyway (Camera_UpdateMode). No persistent camera state is
+// modified, so there is no separate "restore on exit" step to get wrong -- leaving photo mode just
+// stops the per-frame transform. With the CVar at 0 the first branch returns 0 without touching
+// anything.
 extern int gdx_photo_mode_active(void); // port/input_bridge.c
 extern float sinf(float angle); // PR/gu.h
 extern float cosf(float angle); // PR/gu.h
 
-// Per-session free-camera offsets, accumulated while engaged and cleared on every enter/exit edge so
+// Free-camera offsets: accumulated while engaged, cleared on every enter/exit edge so
 // each entry starts exactly on the live game camera.
 static s32 sGdxPhotoActive = 0;
 static Vec3f sGdxPhotoPos = { 0.0f, 0.0f, 0.0f }; // world-space translation applied to eye and at
@@ -1086,7 +1086,7 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
         return 0;
     }
 
-    // Enter edge: begin the session exactly on the live game camera (all offsets zero).
+    // Enter edge: begin exactly on the live game camera (all offsets zero).
     if (sGdxPhotoActive == 0) {
         GdxPhotoCamera_ResetOffsets();
         sGdxPhotoActive = 1;
@@ -1210,9 +1210,9 @@ void Camera_UpdateProjectionViewMtx(GfxPool* gfxPool, Camera* camera) {
     f32 var_fv1;
 #ifdef PORT
     // Photo mode free camera (default off). Save the game camera, let the helper transiently
-    // override eye/at/fov for this frame's matrix build, and restore below. When the CVar is 0 the
-    // helper returns 0 without touching the camera, gdxPhotoActive stays 0, the restore is skipped,
-    // and the three saved reads have no observable effect -- a byte-for-byte no-op.
+    // override eye/at/fov for this frame's matrix build, and restore below. With the CVar at 0 the
+    // helper returns 0 without touching the camera, gdxPhotoActive stays 0 and the restore is
+    // skipped, so the three saved reads have no observable effect.
     Vec3f gdxSavedEye = camera->eye;
     Vec3f gdxSavedAt = camera->at;
     f32 gdxSavedFov = camera->fov;
@@ -2684,10 +2684,10 @@ void Camera_UpdateMode(Camera* camera, CameraSettings* cameraSettings, CameraScr
                 if (cameraReadyForRace) {
                     camera->mode = CAMERA_MODE_RACE;
 #ifdef PORT
-                    /* P3 frame-interpolation cut epoch (MATRIX_INTERPOLATION_PLAN.md Step 7, events
-                       #1/#4): the intro fly-around hands off to the gameplay follow camera here — a
-                       hard camera-mode switch. Snap the whole frame this tick so the view does not
-                       whip-pan-smear across the handoff. Render-only; no-op unless interp is on. */
+                    /* Frame-interpolation cut: the intro fly-around hands off to the gameplay
+                       follow camera here — a hard camera-mode switch. Snap the whole frame this
+                       tick so the view does not whip-pan-smear across the handoff. Render-only;
+                       a no-op unless interpolation is on. */
                     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
 #endif
                     cameraSettings->parameters.fovLerpFactor = 0.2f;

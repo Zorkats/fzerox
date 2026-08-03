@@ -13,13 +13,12 @@ void Audio_ThreadEntry(void* arg0) {
     static AudioTask* sCurAudioTask = NULL;
     (void) arg0;
 #ifdef PORT
-    // R7: previously this branch only drained gAudioTaskMesgQueue without ever calling Audio_Init,
-    // because audio data used to be uninitialized (ROM DMA no-op'd). That's no longer true:
-    // gRomSegmentPairs[0..2] (audio_seq/audio_bank/audio_table) are populated synchronously by
-    // DiskDrive_InitRomSegmentPairs() in decomp/src/sys/sys_main.c's Idle_ThreadEntry, well before
-    // osCreateThread(&sAudioThread, ...) runs (same function, sequential — no race), and
-    // AudioLoad_Init (audio/disk/lib/load.c) safely handles heap==NULL via the static gAudioHeap.
-    // Run the real init + per-frame task loop so the sequence engine actually ticks.
+    // This branch once only drained gAudioTaskMesgQueue and never called Audio_Init, because the
+    // audio data was uninitialized (ROM DMA no-op'd). gRomSegmentPairs[0..2] (audio_seq/audio_bank/
+    // audio_table) are now populated synchronously by DiskDrive_InitRomSegmentPairs() in sys_main.c's
+    // Idle_ThreadEntry, before the same function's osCreateThread(&sAudioThread, ...) — sequential,
+    // no race — and AudioLoad_Init handles heap==NULL via the static gAudioHeap. So run the real
+    // init and per-frame task loop; that is what ticks the sequence engine.
     AudioThread_InitMesgQueues();
 #ifndef EXPANSION_KIT
     Audio_Init();
@@ -30,11 +29,11 @@ void Audio_ThreadEntry(void* arg0) {
     while (true) {
         osRecvMesg(&gAudioTaskMesgQueue, &sAudioTaskMsg, OS_MESG_NOBLOCK);
         osRecvMesg(&gAudioTaskMesgQueue, &sAudioTaskMsg, OS_MESG_BLOCK);
-        /* Diagnostic for engram slice/audio-synthesis follow-up (hop 3): one-shot log (first 10
-           wakeups) proving whether the audio thread's own loop keeps cycling after boot (VI ->
-           gAudioTaskMesgQueue -> this blocking recv). If this stops logging early while the game
-           keeps running, the wake chain (main thread's EVENT_MESG_VI handling or the fiber
-           scheduler) is the break, not anything inside Audio_SetupCreateTask/CreateTaskImpl. */
+        /* One-shot diagnostic (first 10 wakeups): does the audio thread's own loop keep cycling
+           after boot (VI -> gAudioTaskMesgQueue -> this blocking recv)? If it stops logging early
+           while the game keeps running, the break is in the wake chain (the main thread's
+           EVENT_MESG_VI handling, or the fiber scheduler) — not inside
+           Audio_SetupCreateTask/CreateTaskImpl. */
         {
             extern void gdx_cki(const char* s, int v);
             static s32 sAudioThreadWakeLogCount = 0;
@@ -43,13 +42,13 @@ void Audio_ThreadEntry(void* arg0) {
                 sAudioThreadWakeLogCount++;
             }
         }
-        /* Phase 3 (port/gdx_audio_thread.cpp): kill-switch gate so exactly one producer ever
-           touches gAudioCtx's task-creation state (see gdx_audio_thread.cpp's cross-thread
-           touchpoint enumeration for why running both at once would be a real race, not just a
-           redundant one). Declared locally (no header) -- same extern-without-include pattern
-           already used two lines above for gdx_cki, since port/ is outside gdiffuser_game's
-           include path (only decomp/ is). GDX_AUDIO_THREAD=0 / --no-audio-thread reverts this
-           to unconditionally producing every VI tick, byte-for-byte the pre-Phase-3 behavior. */
+        /* Gate so exactly one producer ever touches gAudioCtx's task-creation state: running the
+           dedicated audio thread alongside this loop is a real race, not a redundant one (see
+           port/gdx_audio_thread.cpp for the cross-thread touchpoints). Declared locally, no header
+           -- the same extern-without-include pattern used two lines above for gdx_cki, since port/
+           is outside gdiffuser_game's include path (only decomp/ is). GDX_AUDIO_THREAD=0 /
+           --no-audio-thread reverts to producing on every VI tick, byte-for-byte the behavior from
+           before the dedicated thread existed. */
         {
             extern int gdx_audio_thread_active(void);
             if (gdx_audio_thread_active()) {

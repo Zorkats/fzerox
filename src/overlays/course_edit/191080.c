@@ -7,6 +7,96 @@
 #include ASSET_HEADER_EK(expansion_kit_textures.h)
 #include ASSET_HEADER_EK(course_edit_textures.h)
 
+#ifdef PORT
+/* Node-panel labels served from the loaded 64DD disk.
+ *
+ * The retail build has no symbol for these: they are inline initializers and
+ * printf arguments right here in the source, which the compiler pools into
+ * .rodata. The fan-translated disk replaced each pooled constant with an English
+ * string at the same address, so the port keeps storage of its own (defined in
+ * port/gen/EkTranslatedStrings.c) and gdx_ek_strings_apply() fills it at disk-load
+ * time. Declared locally rather than by including that generated header, which
+ * lives outside the decomp's include path.
+ *
+ * Empty means no translated disk is loaded -- retail JP, or none at all -- and the
+ * Japanese below draws unchanged. That is the whole switch: there is no build flag
+ * and no second translation, just whichever disk the user actually put in. */
+extern char gdx_ek_label_grid[];
+extern char gdx_ek_label_boost[];
+extern char gdx_ek_label_jump[];
+extern char gdx_ek_label_trap[];
+extern char gdx_ek_label_object[];
+extern char gdx_ek_label_size[];
+extern char gdx_ek_label_bank[];
+extern char gdx_ek_label_width[];
+#define GDX_EK_LABEL(bound, jp) ((bound)[0] != 0 ? (u8*) (bound) : (u8*) (jp))
+
+/* Non-zero when the loaded 64DD image is the fan-translated release
+   (port/gdx_ek_disk_overrides.c). Used for the two places in this file where the
+   translation changed GEOMETRY rather than text -- a bound label string is the
+   wrong test there, because the retail-JP disk must keep the retail layout. */
+extern int gdx_ek_disk_is_translated(void);
+
+/* Where the geometry below comes from.
+ *
+ * Retail draws the label at `left` and then draws a RIGHT-ALIGNED, space-padded
+ * numeric field starting at the SAME `left` (func_xk2_800EDE68 pads,
+ * func_xk2_800EDAD0 skips a space instead of drawing one -- 19F3F0.c:144 and
+ * :60), so the label sits inside the field's own leading padding and costs the
+ * row nothing. "Bank" (32 px) plus a 7-cell field at `left` whose digits land at
+ * left+36..left+42 and sign at left+40 ends at left+48, four pixels inside the
+ * panel. English labels therefore fit at retail coordinates.
+ *
+ * The fan-translated .ndd was disassembled directly (course_edit overlay at
+ * physical 0x0C39100 = VRAM 0x800D6D90) and every coordinate below was read out
+ * of the disk's own recompiled code. The translation is NOT a data-only patch: it
+ * rebuilt these overlays, so wherever its geometry differs from the retail
+ * decompilation the port must follow it explicitly, because the port compiles
+ * this file and only substitutes the disk's DATA. Three places differ, and only
+ * three:
+ *
+ *   - the node-panel header (translated 0x800E2708-0x800E27D4): the caption
+ *     texture moved to the LEFT of the digits;
+ *   - the track-shape name (translated 0x800E3314-0x800E3348): bounded to the
+ *     row's 8 bytes and centred on the panel;
+ *   - the Create Machine weight caption, in machine_create_draw.c.
+ *
+ * Everything else -- Bank, Width, L/R, X/Y/Z, the course-length "M" row and all
+ * five count rows in the info box -- is retail geometry to the pixel on the
+ * translated disk (verified at 0x800E35BC, 0x800E3734, 0x800E37B0-0x800E3884,
+ * 0x800E3928, 0x800E4B10, 0x800E4C7C, 0x800E4DEC, 0x800E4FC8, 0x800E5148), with
+ * only the string pointer changed.
+ */
+
+/* Pixel width of an EK setup-font string, bounded to `max` bytes: that font is a
+   flat 8 px per byte (A6340.c:125 advances xPos by 8 and :60 draws an 8x8 cell).
+   The bound exists because D_xk2_800F7090 is [][8] and the English disk fills two
+   of its rows to all eight bytes with no terminator. */
+static s32 GdxEkTextWidth(const u8* src, s32 max) {
+    s32 len = 0;
+
+    while ((len < max) && (src[len] != '\0')) {
+        len++;
+    }
+    return len * 8;
+}
+
+/* NUL-terminated copy of at most `max` bytes, so a row of D_xk2_800F7090 can be
+   handed to _Printf as a %s argument without running into the next row. `out`
+   needs max+1 bytes. */
+static u8* GdxEkCopyBounded(u8* out, const u8* src, s32 max) {
+    s32 i;
+
+    for (i = 0; (i < max) && (src[i] != '\0'); i++) {
+        out[i] = src[i];
+    }
+    out[i] = '\0';
+    return out;
+}
+#else
+#define GDX_EK_LABEL(bound, jp) ((u8*) (jp))
+#endif
+
 extern MenuDropItem gRoadTypeMenuItems;
 extern MenuDropItem gHRoadTypeMenuItems;
 extern MenuDropItem gPipeTypeMenuItems;
@@ -381,23 +471,20 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
     }
 
 #ifdef PORT
-    // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Default 0 =
+    // ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Default 0 =
     // bit-identical to stock N64 (this whole block, and every consumer below, is PORT-only). When
     // on, the marker highlights hold STEADY instead of strobing and the flagged-node size pulse
     // advances at half rate, calming the ~20 Hz Course Edit strobe on modern displays. Read once
-    // per draw call, mirroring the file's other PORT blocks. See port/gdx_menu.cpp DrawGameplayMenu
-    // for the toggle.
+    // per draw call. See port/gdx_menu.cpp DrawGameplayMenu for the toggle.
     //
-    // Two marker indicators share the stock D_800DCCFC blink parity but want OPPOSITE polarity to be
-    // visible: the selected control-point markers (unk_1C/unk_20 below) light green on the ON phase,
-    // while the look-ahead cursor node (spC0) shows its bright white on the OFF phase and blacks out
-    // on ON. A single reduced phase therefore cannot freeze both at once — halving it merely slowed
-    // the strobe (the cursor node kept toggling black/white at ~5 Hz, still reading as flicker on a
-    // digital display). Split the phase per indicator so each holds its OWN visible state every
-    // frame when the reducer is on: selected markers steady green (ON), cursor node steady white
-    // (OFF). When off, both follow the stock D_800DCCFC parity, bit-identical. The size pulse has no
-    // polarity conflict, so it keeps the half-rate advance. gGameFrameCount advances once per
-    // rendered frame (sys_gfx.c), so gGameFrameCount/2 is exactly half the native pulse rate.
+    // Two marker indicators share the stock D_800DCCFC blink parity but need OPPOSITE polarity to
+    // be visible: the selected control-point markers (unk_1C/unk_20 below) light green on the ON
+    // phase, while the look-ahead cursor node (spC0) shows bright white on the OFF phase and blacks
+    // out on ON. A single reduced phase cannot freeze both, so the phase is split per indicator:
+    // selected markers steady green (ON), cursor node steady white (OFF). When off, both follow the
+    // stock D_800DCCFC parity, bit-identical. The size pulse has no polarity conflict and keeps the
+    // half-rate advance. gGameFrameCount advances once per rendered frame (sys_gfx.c), so
+    // gGameFrameCount/2 is exactly half the native pulse rate.
     extern int CVarGetInteger(const char* name, int defaultValue);
     s32 gdxReduceFlash = CVarGetInteger("gEnhancements.Gameplay.ReduceEditorFlashing", 0);
     s32 gdxSelBlink = gdxReduceFlash ? 1 : (D_800DCCFC != 0);
@@ -510,7 +597,7 @@ Gfx* func_xk2_800E0988(Gfx* gfx) {
     }
 
 #ifdef PORT
-    // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Companion to the
+    // ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). Companion to the
     // skip in func_xk2_800E73DC: here the selected node's track-shape-colored line is skipped when
     // D_800DCD04 == 0 (drawn 2 of every 3 game frames), the inverse phase of the other draw path.
     // Same triple-framebuffer rotation blink under the port's digital present. When the reducer is
@@ -855,29 +942,76 @@ void func_xk2_800E2238(Gfx** gfxP) {
     gDPPipeSync(gfx++);
     gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
 
-    var_a1 = (D_xk2_801197EC->segmentIndex + 1) / 10;
-    if (var_a1) {
-        gDPLoadTextureBlock(gfx++, aCourseEditNumberSheetTex + var_a1 * 0x90, G_IM_FMT_RGBA, G_IM_SIZ_16b, 12, 12, 0,
-                            G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
-                            G_TX_NOLOD);
+#ifdef PORT
+    /* Node-panel header. The port read "2 Node" where Ares on the same disk reads
+       "Node    1": number-then-caption is correct Japanese (aCourseEditNumberTex
+       is a counter suffix, so retail's digits-then-word spells "<n> ban") and
+       exactly backwards in English, so the translation swapped the two.
 
-        gSPTextureRectangle(gfx++, (left + 3) << 2, top << 2, (left + 15) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
+       These are the disk's own coordinates, read out of its recompiled
+       course_edit at VRAM 0x800E2708-0x800E27D4 (caption rect xl=left+4,
+       xh=left+0x1C; ones digit xl=left+0x29, xh=left+0x35; tens digit
+       xl=left+0x1F, xh=left+0x29). The tens digit is TEN pixels wide there, not
+       twelve: the pair has to end at left+53 to stay off the frame, so the disk
+       squeezes the leading digit rather than move the group. Emission order is
+       unchanged from retail; only the rectangles moved.
+
+       Gated on gdx_ek_disk_is_translated() and not on a bound label string,
+       because this is geometry, not text: the retail-JP disk draws the Japanese
+       caption and must keep the Japanese order. */
+    if (gdx_ek_disk_is_translated()) {
+        gDPLoadTextureBlock(gfx++, aCourseEditNumberTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 24, 12, 0,
+                            G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                            G_TX_NOLOD, G_TX_NOLOD);
+
+        gSPTextureRectangle(gfx++, (left + 4) << 2, top << 2, (left + 0x1C) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
+                            1 << 10);
+
+        var_a1 = (D_xk2_801197EC->segmentIndex + 1) / 10;
+        if (var_a1) {
+            gDPLoadTextureBlock(gfx++, aCourseEditNumberSheetTex + var_a1 * 0x90, G_IM_FMT_RGBA, G_IM_SIZ_16b, 12, 12,
+                                0, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                                G_TX_NOLOD, G_TX_NOLOD);
+
+            gSPTextureRectangle(gfx++, (left + 0x1F) << 2, top << 2, (left + 0x29) << 2, (top + 12) << 2, 0, 0, 0,
+                                1 << 10, 1 << 10);
+        }
+        var_a1 = (D_xk2_801197EC->segmentIndex + 1) % 10;
+
+        gDPLoadTextureBlock(gfx++, aCourseEditNumberSheetTex + var_a1 * 0x90, G_IM_FMT_RGBA, G_IM_SIZ_16b, 12, 12, 0,
+                            G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                            G_TX_NOLOD, G_TX_NOLOD);
+
+        gSPTextureRectangle(gfx++, (left + 0x29) << 2, top << 2, (left + 0x35) << 2, (top + 12) << 2, 0, 0, 0,
+                            1 << 10, 1 << 10);
+    } else
+#endif
+    {
+        var_a1 = (D_xk2_801197EC->segmentIndex + 1) / 10;
+        if (var_a1) {
+            gDPLoadTextureBlock(gfx++, aCourseEditNumberSheetTex + var_a1 * 0x90, G_IM_FMT_RGBA, G_IM_SIZ_16b, 12, 12,
+                                0, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                                G_TX_NOLOD, G_TX_NOLOD);
+
+            gSPTextureRectangle(gfx++, (left + 3) << 2, top << 2, (left + 15) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
+                                1 << 10);
+        }
+        var_a1 = (D_xk2_801197EC->segmentIndex + 1) % 10;
+
+        gDPLoadTextureBlock(gfx++, aCourseEditNumberSheetTex + var_a1 * 0x90, G_IM_FMT_RGBA, G_IM_SIZ_16b, 12, 12, 0,
+                            G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                            G_TX_NOLOD, G_TX_NOLOD);
+
+        gSPTextureRectangle(gfx++, (left + 15) << 2, top << 2, (left + 0x1B) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
+                            1 << 10);
+
+        gDPLoadTextureBlock(gfx++, aCourseEditNumberTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 24, 12, 0,
+                            G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                            G_TX_NOLOD, G_TX_NOLOD);
+
+        gSPTextureRectangle(gfx++, (left + 0x1B) << 2, top << 2, (left + 0x33) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
                             1 << 10);
     }
-    var_a1 = (D_xk2_801197EC->segmentIndex + 1) % 10;
-
-    gDPLoadTextureBlock(gfx++, aCourseEditNumberSheetTex + var_a1 * 0x90, G_IM_FMT_RGBA, G_IM_SIZ_16b, 12, 12, 0,
-                        G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
-                        G_TX_NOLOD);
-
-    gSPTextureRectangle(gfx++, (left + 15) << 2, top << 2, (left + 0x1B) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
-                        1 << 10);
-
-    gDPLoadTextureBlock(gfx++, aCourseEditNumberTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 24, 12, 0, G_TX_NOMIRROR | G_TX_WRAP,
-                        G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
-
-    gSPTextureRectangle(gfx++, (left + 0x1B) << 2, top << 2, (left + 0x33) << 2, (top + 12) << 2, 0, 0, 0, 1 << 10,
-                        1 << 10);
 
     left += 4;
     top += 16;
@@ -984,12 +1118,46 @@ void func_xk2_800E2238(Gfx** gfxP) {
 
         D_xk1_80032AD0 = sp98[temp_t0_4];
         if (D_xk2_801197EC->segmentIndex != 0) {
+#ifdef PORT
+            {
+                /* Track-shape name, the second of the three places the
+                   translation changed geometry.
+
+                   D_xk2_800F7090 is [][8] and the row is handed straight to
+                   _Printf as a format string, which needs a NUL: the Japanese
+                   rows are five and six bytes so they have one, but the English
+                   disk writes "Cylinder" and "Halfpipe" into all eight bytes of
+                   rows 3 and 4, so a cylinder node printed
+                   "CylinderHalfpipeTunnel" across the 3D view. The English names
+                   are also not the retail width, so left-aligning them at `left`
+                   puts the long ones off the panel.
+
+                   Mirror what the disk does: its recompiled code at VRAM
+                   0x800E3310-0x800E3348 measures the row bounded to 8 bytes,
+                   copies those 8 bytes to a stack buffer, and draws at
+                   left + 24 - width/2 -- centred on the panel interior, whose
+                   midpoint is exactly left+24 (interior left-4..left+52).
+
+                   The bounded copy is one byte longer than the disk's (9 bytes,
+                   NUL-terminated) because _Printf here is the port's, and an
+                   unterminated format string is undefined behaviour rather than
+                   the harmless overread it is on hardware. The JP path is
+                   unchanged: its rows are 5-6 bytes, so the copy is the same
+                   bytes and the centring reproduces retail's own `left` for a
+                   6-byte name. */
+                u8 shapeName[9];
+
+                gfx = func_xk1_8002924C(gfx, left + 24 - (GdxEkTextWidth(D_xk2_800F7090[temp_t0_4], 8) / 2), top, "%s",
+                                        GdxEkCopyBounded(shapeName, D_xk2_800F7090[temp_t0_4], 8));
+            }
+#else
             gfx = func_xk1_8002924C(gfx, left, top, D_xk2_800F7090[temp_t0_4]);
+#endif
         } else {
             u8 sp90[5] = { 0x83, 0xD8, 0xAF, 0x8F, 0x00 };
 
             D_xk1_80032AD0 = 0;
-            gfx = func_xk1_8002924C(gfx, left, top, sp90);
+            gfx = func_xk1_8002924C(gfx, left, top, GDX_EK_LABEL(gdx_ek_label_grid, sp90));
         }
 
         gDPPipeSync(gfx++);
@@ -1022,10 +1190,37 @@ void func_xk2_800E2238(Gfx** gfxP) {
         top += 3;
 
         D_xk1_80032AD0 = 0;
+#ifdef PORT
+        /* Bank row: retail geometry in BOTH languages. The label is drawn at
+           `left` and the 7-cell field is drawn at `left` too -- right-aligned and
+           space-padded (func_xk2_800EDE68 pads, func_xk2_800EDAD0 skips a space
+           rather than drawing one, 19F3F0.c:144 and :60) -- so the label sits
+           inside the field's leading padding and the digits land at
+           left+36..left+42 whatever the label's width. The degree sign's retail
+           left+0x28 = left+40 follows the digits and the row ends at left+48, four
+           pixels inside the left+52 interior.
+
+           "Bank" is four cells, 32 px, entirely inside that padding, and the disk
+           agrees: its recompiled call at VRAM 0x800E35BC..0x800E3628 passes
+           left / left / left+0x28 with a 7-cell field, byte for byte retail's,
+           with only the format-string pointer swapped. Widening the field to eight
+           cells is what broke this row; the word never needed shortening.
+
+           Only the format string differs between the two branches. */
+        if (gdx_ek_label_bank[0] != 0) {
+            gfx = func_xk1_8002924C(gfx, left, top, "%s", (u8*) gdx_ek_label_bank);
+        } else {
+            gfx = func_xk1_8002924C(gfx, left, top, "%c%c%c", 0x90, 0xDD, 0xB8);
+        }
+        func_xk2_800EDE68(sp290, COURSE_CONTEXT()->courseData.bankAngle[D_xk2_800F703C] % 360, 7);
+        func_xk2_800EDAD0(&gfx, left, top, sp290);
+        gfx = func_xk1_8002924C(gfx, left + 0x28, top + 1, "%c", 0xDF);
+#else
         gfx = func_xk1_8002924C(gfx, left, top, "%c%c%c", 0x90, 0xDD, 0xB8);
         func_xk2_800EDE68(sp290, COURSE_CONTEXT()->courseData.bankAngle[D_xk2_800F703C] % 360, 7);
         func_xk2_800EDAD0(&gfx, left, top, sp290);
         gfx = func_xk1_8002924C(gfx, left + 0x28, top + 1, "%c", 0xDF);
+#endif
 
         top += 9;
         gSPDisplayList(gfx++, D_3000510);
@@ -1037,10 +1232,38 @@ void func_xk2_800E2238(Gfx** gfxP) {
         gSPDisplayList(gfx++, D_3000540);
 
         top += 3;
-        D_xk1_80032AD0 = 1;
-        gfx = func_xk1_8002924C(gfx, left, top, "%c%c%c%c", 0xD0, 0xC1, 0xCA, 0x90);
-        func_xk2_800EDE68(sp290, Math_Round((D_xk2_801197EC->radiusLeft + D_xk2_801197EC->radiusRight) / 10.0f), 3);
-        func_xk2_800EDAD0(&gfx, left + 32, top, sp290);
+#ifdef PORT
+        /* Width row: retail geometry in both languages, same reasoning as the
+           bank row above -- the 3-cell field at left+32 is right-aligned, so a
+           2-digit width prints at left+38..left+50 and a 3-digit one at
+           left+32..left+50, ending 2 px inside the interior either way. "Width"
+           is five cells, left..left+40, which overlaps the field's first cell by
+           8 px -- and that is what the disk does too: its recompiled call at VRAM
+           0x800E3710..0x800E3780 passes left for the label and left+0x20 for a
+           3-cell field, retail's own numbers, with only the format string swapped
+           from the four pooled katakana to "Width". It even still pushes the four
+           katakana as now-unused varargs, the signature of a string-pointer-only
+           patch. So "Width52 jammed with no gap" is the disk's own layout, not a
+           port defect; narrowing the field was the only genuine difference.
+
+           D_xk1_80032AD0 stays 1 as retail sets it. It only matters for bytes
+           >= 0x80 (func_xk1_80029218, A6340.c:66); every byte of "Width" is
+           ASCII, so the sheet flag cannot affect it either way. */
+        if (gdx_ek_label_width[0] != 0) {
+            D_xk1_80032AD0 = 1;
+            gfx = func_xk1_8002924C(gfx, left, top, "%s", (u8*) gdx_ek_label_width);
+            func_xk2_800EDE68(sp290,
+                              Math_Round((D_xk2_801197EC->radiusLeft + D_xk2_801197EC->radiusRight) / 10.0f), 3);
+            func_xk2_800EDAD0(&gfx, left + 32, top, sp290);
+        } else
+#endif
+        {
+            D_xk1_80032AD0 = 1;
+            gfx = func_xk1_8002924C(gfx, left, top, "%c%c%c%c", 0xD0, 0xC1, 0xCA, 0x90);
+            func_xk2_800EDE68(sp290,
+                              Math_Round((D_xk2_801197EC->radiusLeft + D_xk2_801197EC->radiusRight) / 10.0f), 3);
+            func_xk2_800EDAD0(&gfx, left + 32, top, sp290);
+        }
         top += 8;
         func_xk2_800EDE68(sp290, Math_Round(D_xk2_801197EC->radiusLeft / 10.0f), 3);
         func_xk2_800EDAD0(&gfx, left, top, sp290);
@@ -1068,6 +1291,9 @@ void func_xk2_800E38A8(Gfx** gfxP) {
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
 
     func_xk2_800EDE68(sp28, Math_Round(gCurrentCourseInfo->length * 0.1f), 6);
+    /* Course-length row: retail coordinates, and they are the disk's too -- its
+       recompiled func_xk2_800E38A8 at VRAM 0x800E3924..0x800E3944 passes a 6-cell
+       field at 0xF8 and the unit letter at 0x11F, unchanged. */
     func_xk2_800EDAD0(&gfx, 0xF8, 0xBA, sp28);
     func_xk2_800EDAD0(&gfx, 0x11F, 0xBA, "M");
     *gfxP = gfx;
@@ -1312,7 +1538,21 @@ Gfx* func_xk2_800E49FC(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, &sp38);
+    /* Count rows in the course-info box (this one and the four below) keep retail's
+       cluster in both languages: label at 0xE8, numerator at 0x108 or 0x10E, slash
+       at 0x114, denominator at 0x11B or 0x122, box interior 232..296. The
+       translated disk changes NONE of it -- verified in its recompiled
+       func_xk2_800E49FC / 800E4BA0 / 800E4D04 / 800E4E80 / 800E5058 at VRAM
+       0x800E4B10, 0x800E4C7C, 0x800E4DEC, 0x800E4FC8 and 0x800E5148, every one of
+       which still loads 0xE8 / 0x108 / 0x114 / 0x11B.
+
+       The label overlaps the numerator's leading cells exactly as on the bank and
+       width rows, and for the same reason, so a five- or six-letter English word
+       costs the row nothing: "Boost" ends at 0xE8+40 = 0x110 and the numerator's
+       two right-aligned info cells put its digits at 0x108..0x114. Shifting the
+       whole cluster 8 px right pushed the dash denominator's last digit outside
+       the box; the shift was the defect, not the word length. */
+    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_boost, &sp38));
     func_xk2_800EDE68(sp40, dashCount, 2);
     func_xk2_800EDAD0(&gfx, 0x108, 0xBA, sp40);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1344,7 +1584,7 @@ Gfx* func_xk2_800E4BA0(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, sp28);
+    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_jump, sp28));
     func_xk2_800EDE68(sp30, gCourseFeaturesInfo.jumpCount, 1);
     func_xk2_800EDAD0(&gfx, 0x10E, 0xBA, sp30);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1374,7 +1614,7 @@ Gfx* func_xk2_800E4D04(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, sp28);
+    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_trap, sp28));
     func_xk2_800EDE68(sp30, gCourseFeaturesInfo.landmineCount / 6, 1);
     func_xk2_800EDAD0(&gfx, 0x10E, 0xBA, sp30);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1420,7 +1660,12 @@ Gfx* func_xk2_800E4E80(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, &sp38);
+    /* This row was never bound to the disk at all: the label symbol existed and was
+       filled at load time, but the draw still passed the Japanese initializer, so
+       the object count read in katakana on an English disk. Bound here at retail's
+       own 0xE8 -- "Object" is six cells, 0xE8..0x118, which lands inside the
+       numerator's leading padding exactly as the other count rows do. */
+    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_object, &sp38));
     func_xk2_800EDE68(sp40, decorationalFeatureCount, 2);
     func_xk2_800EDAD0(&gfx, 0x108, 0xBA, sp40);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1454,7 +1699,7 @@ Gfx* func_xk2_800E5058(Gfx* gfx) {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
             }
             D_xk1_80032AD0 = 0;
-            gfx = func_xk1_8002924C(gfx, 0xE8, 0xC2, sp34);
+            gfx = func_xk1_8002924C(gfx, 0xE8, 0xC2, GDX_EK_LABEL(gdx_ek_label_size, sp34));
             func_xk2_800EDE68(sp3C, D_802CB6D0.controlPointCount, 2);
             func_xk2_800EDAD0(&gfx, 0x108, 0xC2, sp3C);
             gfx = func_xk1_8002924C(gfx, 0x114, 0xC2, "/");
@@ -2184,7 +2429,7 @@ Gfx* func_xk2_800E73DC(Gfx* gfx) {
     }
 
 #ifdef PORT
-    // GDX-2026: ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). The selected
+    // ReduceEditorFlashing (gEnhancements.Gameplay.ReduceEditorFlashing). The selected
     // node's connector line is skipped on a D_800DCD04 (triple-framebuffer rotation index) phase,
     // so under Course Edit's 3-buffer rotation the highlight line is drawn only 1 of every 3 game
     // frames — a soft pulse on console (3 physical scanout buffers + phosphor), but a hard ~6.6 Hz
@@ -2645,6 +2890,10 @@ Gfx* func_xk2_800E8F7C(Gfx* gfx) {
 
     if (D_80030060[0] == '\0') {
         gDPSetPrimColor(gfx++, 0, 0, 255, 64, 64, 0);
+        /* "No Title" is what the disk draws here -- the string is a plain literal in
+           this function on both the retail and the translated build, at retail's
+           0xE8/0xB2. Eight cells is 232..296, exactly the interior drawn above, so
+           the final 'e' ends flush against the border column; Ares does the same. */
         return func_xk1_8002924C(gfx, 0xE8, 0xB2, "No Title");
     }
     gDPPipeSync(gfx++);

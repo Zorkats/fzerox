@@ -1,6 +1,24 @@
 #include "global.h"
 #include "leo/mfs.h"
 
+/* The disk worker below dispatches to six functions that no header declares, so
+ * each call fell back to C's implicit-int rule. Every one of them returns s32 or
+ * void and the results are discarded, so nothing here miscompiled -- but the same
+ * rule truncated a returned Gfx* to 32 bits in course_edit/1A2D70.c and crashed
+ * "Test Course". Declaring them keeps /we4013 clean so that class cannot come back.
+ *
+ * These match the sys/disk definitions specifically. The superseded sys/rom twins
+ * differ in parameter types (u32 vs s32 lba, size_t vs s32 sizes), which is why the
+ * prototypes live here in the disk-only TU rather than in a shared header. */
+s32 SLLeoReadWrite_DATA(LEOCmd* cmdBlock, s32 direction, s32 lba, void* vAddr, u32 nLbas,
+                        OSMesgQueue* mq);                            /* sys_leo_dd.c */
+s32 SLMFSLoad(u16 dirId, char* name, char* extension, u8* buf, s32 sizeToLoad);
+s32 SLMFSLoadHalfway(u16 dirId, char* name, char* extension, u8* buf, s32 offset, s32 sizeToLoad);
+void SLMFSFlushManageArea(void);
+s32 func_800750B0(s32 startLba, void* vram, s32 diskSize, s32 bssSize); /* disk_drive_dd.c */
+void func_xk2_800EB938(u16 dirId, char* name, char* extension, u8* buf, u32 fileSize, s32 attr,
+                       s32 copyCount, bool writeChanges);            /* course_edit/19C470.c */
+
 OSMesgQueue D_807C6E90;
 volatile unk_807C6EA8 D_807C6EA8;
 volatile s32 D_807C6F0C;
@@ -14,6 +32,38 @@ volatile u8 D_80794E20 = 0;
 volatile u8 D_80794E24 = 0;
 volatile s32 D_80794E28 = 0;
 volatile s32 D_80794E2C = 0;
+
+#ifdef PORT
+/* PORT: transient disk prompts never appear ("now saving", "now loading", "now formatting").
+ *
+ * On real hardware a sender below posts a prompt id into D_807C6EA8.unk_08 (or raises the
+ * unk_0C == 4 "now formatting" banner), the priority-30 worker then spends many frames talking
+ * to the physical drive, and the EK prompt renderer (func_xk1_8002ED64 / func_xk1_8002F9DC,
+ * overlays/expansion_kit/ABC40.c) draws that id on every one of those frames.
+ *
+ * This port's drive is synchronous and host-fast, and osSendMesg's wake path is a priority
+ * hand-off rather than a deferral: the senders run on the priority-10 game thread, this worker
+ * is priority 30 (sys/sys_main.c's osCreateThread(&sSys6Thread, ..., 30)), so osSendMesg ->
+ * osStartThread takes its "__osRunningThread->priority < __osRunQueue->priority" branch
+ * (libultra/os/startthread.c) and yields into this worker immediately. The worker runs the
+ * ENTIRE operation and zeroes the prompt again -- func_80767940() on the unk_00 == 1/5 paths,
+ * AB150.c's "D_807C6EA8.unk_08 = 0" success branch on the unk_00 == 8..18 paths -- and control
+ * returns inside the sender's own osSendMesg call. The prompt is raised and cleared between two
+ * draws and never rendered: the save completes correctly, the player just sees nothing. Genuine
+ * errors are unaffected because they LATCH, which is why error messages still display.
+ *
+ * Record what was raised, once, when this worker picks the request up and before any of the
+ * operation's own bookkeeping can wipe it. ABC40.c's PORT minimum-display hold consumes the
+ * record on the next draw. Pure observation: nothing here waits on the reader, so the save is
+ * not delayed, the game thread is not blocked and no busy flag is held any longer than before.
+ *
+ * Deliberately NOT cleared by func_80767940(): the unk_00 == 1/5 paths call precisely that
+ * function as their completion step, so clearing the record there would erase it again before
+ * any frame could be drawn. The stale-record guard lives on the consumer side instead, in
+ * func_xk1_8002E9D0 (ABC40.c), which every EK screen calls from its own init. */
+volatile s32 gGdxDiskPromptRaised = 0;
+volatile s32 gGdxDiskBannerRaised = 0;
+#endif
 
 void func_80767800(unk_807C6F10 arg0) {
     OSIntMask prevMask;
@@ -105,6 +155,23 @@ void func_80767958(void* entry) {
             continue;
         }
         D_80794E18 = 1;
+
+#ifdef PORT
+        /* Snapshot point for the transient-prompt hold (see gGdxDiskPromptRaised above). Placed
+           here, after the ring-buffer entries have already been handled and `continue`d out, so
+           it sees exactly the file-management class of requests -- the ones whose prompt every
+           branch below is about to clear -- and it runs before any of that clearing.
+           Prompt id 10 is skipped on purpose: ABC40.c's draw switch has no case 10, which makes
+           it the "run this operation silently" id, and holding it would occupy the prompt slot
+           for half a second with nothing to show. */
+        if ((D_807C6EA8.unk_08 != 0) && (D_807C6EA8.unk_08 != 10)) {
+            gGdxDiskPromptRaised = D_807C6EA8.unk_08;
+        }
+        if (D_807C6EA8.unk_0C == 4) {
+            gGdxDiskBannerRaised = 4;
+        }
+#endif
+
         if (D_807C6EA8.unk_00 == 4) {
             SLMFSSave(D_807C6EA8.dirId, D_807C6EA8.name, D_807C6EA8.extension, D_807C6EA8.readBuf, D_807C6EA8.fileSize,
                       D_807C6EA8.attr, D_807C6EA8.copyCount, D_807C6EA8.writeChanges);
@@ -180,6 +247,116 @@ void func_80767958(void* entry) {
             default:
                 break;
         }
+
+#ifdef PORT
+        /* PORT fix: stuck disk-busy flag blanking EK kanji text and course-edit MFS ops.
+         *
+         * func_xk1_8002E368 (overlays/expansion_kit/AB150.c) is a multi-STEP retry state
+         * machine for the EK MFS file-MANAGEMENT ops routed here (D_807C6EA8.unk_00 8-18:
+         * create/rename/delete/get-or-set-attr/exists-check). Unlike the SL* wrappers used by
+         * unk_00 4-7 (sys/disk/sys_leo_dd.c), which retry INTERNALLY until they have a final
+         * result, it advances ONE step per call and, on anything other than
+         * LEO_ERROR_GOOD/LEO_ERROR_COMMAND_TERMINATED, expects to be invoked again later
+         * (see its D_807C6EA8.unk_10 == 4 resume branch). On real hardware that follow-up call
+         * is driven by a later 64DD interrupt re-posting to this thread's own queue
+         * (D_807C6E90) as the drive's physical state changes. This port's disk backing
+         * (port/n64_leo.c) is fully synchronous -- there is no later interrupt -- so without
+         * this fix the outer loop falls straight back to a blocking osRecvMesg,
+         * D_80794E14/D_80794E18 stay latched at 1 forever, func_80767E30's busy gate silently
+         * drops every later MFS send, and every reader gated on D_80794E14 (A2E90.c's kanji
+         * glyph renderer, Course Edit's input/update gates in 19DD60.c/188850.c) goes blank or
+         * unresponsive permanently. unk_00 == 4 (SLMFSSave) is unaffected: it never reaches
+         * this state machine.
+         *
+         * The underlying Mfs_ and LeoReadWrite calls are synchronous and deterministic here,
+         * so re-invoke the state machine immediately instead of waiting for an event that will
+         * never arrive. Bounded so a genuinely unrecoverable condition falls through -- forcing
+         * the busy flags clear -- rather than spinning; each iteration is a handful of
+         * synchronous C calls.
+         *
+         * ONE ERROR IS EXCLUDED: LEO_ERROR_DATA_PHASE_ERROR (the unk_10 = 4 / unk_08 = 3 case
+         * set by the switch above). That is not a transient the drive can resolve by being
+         * asked again -- it is a deliberate MULTI-FRAME HAND-OFF TO THE PLAYER, reached only
+         * from func_xk1_8002E368's N64DD_READ_ONLY_MEDIA branch. unk_08 = 3 is the "insert
+         * writable media" prompt ABC40.c draws, and unk_10 = 4 is the resume token
+         * func_xk1_8002E368 consumes to pick the operation back up after the swap. Re-driving
+         * it collapses that conversation into 64 same-frame retries against a medium the player
+         * has had no opportunity to change, and the fail-safe below then destroys the resume
+         * token while the prompt is still on screen.
+         *
+         * Excluding it restores retail state exactly: unk_10 = 4, unk_08 = 3, D_80794E14 and
+         * D_80794E18 left latched at 1 (the operation genuinely IS still in flight, and the
+         * busy gate is what stops a second op being queued on top of it). The re-drive then
+         * comes from where it comes from on hardware: the unk_10 == 2/3/4 osSendMesg at the top
+         * of func_xk1_8002ED64 (ABC40.c), once per drawn frame. That draw path runs while
+         * gInCourseEditor is set, which covers Course Edit and Machine Create -- the only two
+         * modes any sender that can reach this state machine is called from. The residual hole
+         * is a mode exit racing an in-flight unk_10 == 4, which also clears gInCourseEditor;
+         * that race needs a disk image whose MFS RAM area has zero capacity (leo/mfs/mfs_ram.c),
+         * which a well-formed Expansion Kit image does not have. */
+        if (temp_v0_3 != LEO_ERROR_GOOD && temp_v0_3 != LEO_ERROR_COMMAND_TERMINATED &&
+            temp_v0_3 != LEO_ERROR_DATA_PHASE_ERROR) {
+            s32 portRetries;
+            for (portRetries = 0; portRetries < 64; portRetries++) {
+                temp_v0_3 = func_xk1_8002E368();
+                if (temp_v0_3 == LEO_ERROR_GOOD) {
+                    D_807C6EA8.unk_10 = 0;
+                    D_80794E14 = 0;
+                    D_80794E18 = 0;
+                    break;
+                }
+                if (temp_v0_3 == LEO_ERROR_COMMAND_TERMINATED) {
+                    func_8070F8A4(temp_v0_3, 0);
+                    while (true) {}
+                }
+                /* Mirror the state update the console switch above performs so the
+                   unk_10 == 4 (read-only-media resume) branch inside
+                   func_xk1_8002E368 still sees the state it expects next iteration. */
+                switch (temp_v0_3) {
+                    case LEO_ERROR_DIAGNOSTIC_FAILURE:
+                        D_807C6EA8.unk_10 = 2;
+                        break;
+                    case LEO_ERROR_COMMAND_PHASE_ERROR:
+                        D_807C6EA8.unk_10 = 3;
+                        break;
+                    case LEO_ERROR_DATA_PHASE_ERROR:
+                        D_807C6EA8.unk_10 = 4;
+                        D_807C6EA8.unk_08 = 3;
+                        break;
+                    default:
+                        break;
+                }
+                if (temp_v0_3 == LEO_ERROR_DATA_PHASE_ERROR) {
+                    /* Same exclusion as the entry condition above, for the case where an
+                       EARLIER error retried its way into the media-swap hand-off: stop here
+                       with retail's state standing (unk_10 = 4, unk_08 = 3, busy flags still
+                       latched) and let the draw path re-post drive the resume. Breaking out
+                       rather than falling to the loop bound also keeps the fail-safe below
+                       from force-clearing the resume token. */
+                    break;
+                }
+            }
+            /* The DATA_PHASE_ERROR exclusion applies to the fail-safe too: force-clearing here
+               is exactly the destructive step the exclusion exists to prevent. Every other
+               unresolved error still gets the busy-flag rescue. */
+            if (temp_v0_3 != LEO_ERROR_GOOD && temp_v0_3 != LEO_ERROR_DATA_PHASE_ERROR) {
+                /* Fail-safe, not fail-stuck: force the busy flags clear so the UI/kanji
+                   renderer recovers even from a condition this bounded retry could not
+                   resolve. Bounded, rate-limited log so a genuinely stuck case is still
+                   diagnosable without spamming every frame. */
+                extern void gdx_cki(const char* s, int v);
+                static int sPortMfsMgmtStuckLogs = 0;
+                if (sPortMfsMgmtStuckLogs < 8) {
+                    sPortMfsMgmtStuckLogs++;
+                    gdx_cki("[disk] WARNING: EK MFS-mgmt op did not converge after PORT retry; "
+                            "forcing busy-flag clear, last error", (int) temp_v0_3);
+                }
+                D_807C6EA8.unk_10 = 0;
+                D_80794E14 = 0;
+                D_80794E18 = 0;
+            }
+        }
+#endif
     }
 }
 #else

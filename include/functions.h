@@ -222,6 +222,14 @@ void Fault_SetFrameBuffer(FrameBuffer* buffer, u16 width, u16 height);
 void Fault_Init(void);
 
 Gfx* Camera_Draw(Gfx* gfx, s32 scissorBoxType, s32 cameraIndex);
+#ifdef EXPANSION_KIT
+/* Defined in camera.c under the same guard. Without this prototype the sole
+ * caller (course_edit/1A2D70.c) falls back to the implicit-int rule, and the
+ * returned Gfx* is truncated to 32 bits and sign-extended. Harmless on MIPS,
+ * where pointers were 32-bit and that sign-extension was the native ABI; fatal
+ * on x64, where it faults on the next display-list write. */
+Gfx* Camera_DrawCourseEditTestRun(Gfx* gfx);
+#endif
 void Camera_Init(void);
 void Camera_Update(void);
 void Camera_SendEndingCameraMessage(s32 msg);

@@ -343,7 +343,7 @@ void Audio_ProcessNotes(void) {
         playbackState = &note->playbackState;
         if (playbackState->parentLayer != NO_LAYER) {
 #ifdef PORT
-            /* Task #24 ROOT CAUSE (intermittent frozen-boot silence): on
+            /* Root cause of intermittent frozen-boot silence: on
                console this guard rejects parentLayer values below KSEG0 —
                every VALID N64 pointer is >= 0x80000000 as u32, so for real
                layers the branch is dead code; it only catches NULL/corrupt
@@ -478,7 +478,7 @@ void Audio_ProcessNotes(void) {
                     subAttrs.velocity = 0.0f;
                 }
 #ifdef PORT
-                /* [boost-vol] probe (onion layer 5): [boost-synth] proved the boost
+                /* [boost-vol] probe: [boost-synth] proved the boost
                    note synthesizes at targetVol ~9/4096 (-77 dB). velocity here =
                    layer->noteVelocity * adsrScale; layer->noteVelocity already folds
                    the channel volume chain. Dump each factor separately for the
@@ -1077,7 +1077,7 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
     }
 #endif
 #ifdef PORT
-    /* [note-alloc] probe (missing boost/low-health investigation): both dead SEs
+    /* [note-alloc] probe (missing boost/low-health SEs): both dead SEs
        reach seqPlayer 0 channel 10 ([sfx-req] confirmed) and both are the only SE
        scripts that lower channel notePriority (e9 02 / e9 07) -- prime suspect is
        priority starvation in note stealing. Log every alloc attempt on that channel

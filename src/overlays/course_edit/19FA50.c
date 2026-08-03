@@ -198,6 +198,19 @@ void func_xk2_800EE664(s32 arg0) {
 extern Gfx D_8014940[];
 extern s32 D_8076C960;
 
+#ifdef PORT
+/* func_xk2_800EECD4 recomputes the tooltip's left edge from the widest line and
+   keeps it local. The inline help icon has to land inside that same box, so
+   publish it here rather than duplicating the min-over-lines calculation.
+   Written on every tooltip draw, read immediately afterwards by the icon pass in
+   the near-identical help overlay at course_edit/1A4210.c. The icon pass in
+   func_xk2_800EE67C below reads it too but never draws: it is gated on
+   D_8076C960, which is never assigned a nonzero value. */
+s32 gGdxTooltipLeft = 128;
+
+extern s32 GdxGlyphIconOffset(s8* str, s32* gapWidth);
+#endif
+
 void func_xk2_800EE67C(Gfx** gfxP) {
     s32 left = 128;
     s32 top = 88;
@@ -217,6 +230,18 @@ void func_xk2_800EE67C(Gfx** gfxP) {
     func_xk2_800F2AC0(D_xk1_800331F0[D_xk2_80104380]);
     temp_v0 = func_xk2_800F2AF4(D_xk1_800331F0[D_xk2_80104380]);
     func_xk2_800EECD4(&gfx, (((0x22 - temp_v0) / 2) * 8) + 0x18, 0x58, D_xk1_800331F0[D_xk2_80104380], D_xk2_80104380);
+
+#ifdef PORT
+    {
+        s32 gapWidth = 16;
+        s32 iconOffset = GdxGlyphIconOffset(D_xk1_800331F0[D_xk2_80104380], &gapWidth);
+
+        if (iconOffset >= 0) {
+            /* Centre the 16px icon in whatever hole the string reserved. */
+            left = gGdxTooltipLeft + iconOffset + ((gapWidth - width) / 2);
+        }
+    }
+#endif
 
     if (D_8076C960 != 0) {
         gSPDisplayList(gfx++, D_8014940);
@@ -324,6 +349,9 @@ void func_xk2_800EECD4(Gfx** gfxP, s32 left, s32 top, s8* arg3, s32 arg4) {
 
     } while (temp_s0 == 0);
     left = var_s4;
+#ifdef PORT
+    gGdxTooltipLeft = left;
+#endif
 
     gSPDisplayList(gfx++, D_3000510);
     if (D_xk2_80104378 == 6) {

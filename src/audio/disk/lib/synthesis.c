@@ -617,19 +617,20 @@ Acmd* AudioSynth_SingleAudioUpdate(s16* aiBuf, s32 aiBufLen, Acmd* aList, s32 up
             // reverb->volume is always set to 0x7FFF (audio spec), and DMEM_LEFT_CH is cleared before the loop.
             // So for the first iteration, this is essentially a DMEMmove from DMEM_WET_LEFT_CH to DMEM_LEFT_CH
 #ifdef PORT
-            /* GDX_NO_REVERB=1: A/B kill switch for the wet->dry return (deep-audit
-               finding #1 -- the single unscanned addend to the mixed buses, same-index
-               equal-magnitude on L and R, ring-wrap cadence ~15/s == the measured grain
-               rate). Grain gone with this off => the recirculating wet content is the
-               source; still there => the reverb loop is exonerated in one run. */
+            /* GDX_NO_REVERB=1: A/B kill switch for the wet->dry return, the
+               single unscanned addend to the mixed buses -- same-index,
+               equal-magnitude on L and R, ring-wrap cadence ~15/s, matching the
+               measured grain rate. Grain gone with this off means the
+               recirculating wet content is the source; still there exonerates
+               the reverb loop in one run. */
+            /* Reads the shared Dev Tools gate cache (port/gdx_dev_gates.{h,c}) instead of this
+               TU's own getenv, which historically returned NULL here and made the toggle a
+               silent no-op on this side while the HLE side honoured it. The accessor is
+               declared locally because port/ is deliberately not on the decomp include path --
+               the same idiom this file's neighbours already use for gdx_diag_verbose(). */
             {
-                extern char* getenv(const char*);
-                static s32 sNoReverb = -1;
-                if (sNoReverb == -1) {
-                    char* e = getenv("GDX_NO_REVERB");
-                    sNoReverb = (e != NULL && e[0] == '1') ? 1 : 0;
-                }
-                if (!sNoReverb) {
+                extern int gdx_dev_gate_no_reverb(void);
+                if (!gdx_dev_gate_no_reverb()) {
                     aMix(aList++, DMEM_2CH_SIZE >> 4, reverb->volume, DMEM_WET_LEFT_CH, DMEM_LEFT_CH);
                 }
             }
@@ -819,7 +820,7 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                              nParts, synthState->samplePosInt, (unsigned) sample->loop->header.start,
                              (unsigned) sample->loop->header.end, (unsigned) sample->loop->header.count);
         }
-        /* [boost-synth] probe (missing boost/low-energy, onion layer 4): the boost
+        /* [boost-synth] probe (missing boost/low-energy): the boost
            note allocates with instrument 8 and never hits a [note-bail] exit, so
            either it synthesizes fully but inaudibly (volume/pan zero) or it never
            reaches this function. Instrument 8's normal sample is uniquely 9676
@@ -917,11 +918,11 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                         (s32) (nSamplesToProcess - nSamplesInFirstFrame + SAMPLES_PER_FRAME - 1) / SAMPLES_PER_FRAME;
                     nSamplesToDecode = nFramesToDecode * SAMPLES_PER_FRAME;
                     nTrailingSamplesToIgnore = nSamplesInFirstFrame + nSamplesToDecode - nSamplesToProcess;
-                    /* (2026-07-11) A one-extra-frame "tap-slack pad" lived here briefly:
-                       near a loop end it decoded compressed bytes from BEYOND the loop
-                       -- wild-amplitude garbage that the taps then read on short-loop
-                       instruments (owner: "grain got worse, coupled with the bass").
-                       Replaced by the uniform tail-replicate after the decode loop. */
+                    /* Ruled out: a one-extra-frame "tap-slack pad" here decoded
+                       compressed bytes from BEYOND the loop end -- wild-amplitude
+                       garbage the taps then read on short-loop instruments, which
+                       made the grain worse and coupled it into the bass. Replaced
+                       by the uniform tail-replicate after the decode loop. */
                 } else {
                     nSamplesToDecode = nSamplesUntilLoopEnd - nSamplesInFirstFrame;
                     nTrailingSamplesToIgnore = 0;
@@ -1085,8 +1086,8 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                     addr = DMEM_COMPRESSED_ADPCM_DATA - aligned;
                     aLoadBuffer(aList++, sampleData - sampleDataStartPad, addr, aligned);
 #ifdef PORT
-                    /* [acmd-d2] the discriminating probe from the Acmd contract
-                       audit: for streamed (non-RAM-medium) notes, log the
+                    /* [acmd-d2] discriminating probe: for streamed
+                       (non-RAM-medium) notes, log the
                        INTENDED chunk pointer, what each HLE resolver returns
                        for its truncated low32, and the first 8 bytes at both.
                        intended != resolved => resolver false-positive (V1);
@@ -1099,22 +1100,20 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
                         extern void* gdx_resolve_module_host_address(unsigned int raw);
                         static s32 sD2Logs = 0;
                         static s32 sD2RamLogs = 0;
-                        /* RAM-medium notes flooded the budget before any
-                           streamed note played (48/48 medium=0 in the
-                           2026-07-10 21:26 run). Keep 8 RAM baselines; spend
-                           the rest of the budget on streamed media only. */
+                        /* RAM-medium notes flood the budget before any streamed
+                           note plays. Keep 8 RAM baselines and spend the rest of
+                           the budget on streamed media only. */
                         if (sample->medium == MEDIUM_RAM && sD2RamLogs >= 8) {
                             /* skip */
                         } else if (sD2Logs < 48) {
                             if (sample->medium == MEDIUM_RAM) {
                                 sD2RamLogs++;
                             }
-                            /* CONTRACT (learned from crash 0xC0000005 at this
-                               probe's first version): under the 32-bit
-                               uintptr_t shim, `sampleData` is a TRUNCATED
-                               low32 token, NOT a dereferenceable pointer --
-                               the HLE reconstructs it later. Only the
-                               RESOLVED pointers may be dereferenced here. */
+                            /* Under the 32-bit uintptr_t shim, `sampleData` is a
+                               TRUNCATED low32 token, NOT a dereferenceable
+                               pointer -- the HLE reconstructs it later. Only the
+                               RESOLVED pointers may be dereferenced here;
+                               dereferencing the token faults. */
                             u8* intended = sampleData - sampleDataStartPad;
                             u32 low = (u32) (uintptr_t) intended;
                             void* reg = gdx_resolve_registered_host_address(low);
@@ -1225,7 +1224,7 @@ Acmd* AudioSynth_ProcessNote(s32 noteIndex, NoteSubEu* noteSubEu, NoteSynthesisS
             }
 
 #ifdef PORT
-            /* Tail replicate (2026-07-11, the residual "film grain" root cause): the
+            /* Tail replicate, the residual "film grain" root cause: the
                resampler's 4-tap FIR reads up to 2 source samples PAST the last consumed
                one (plus RunResample's count round-up tail), but the decode budget covers
                consumption with only 0..15 samples of slack. Chain-capture analysis

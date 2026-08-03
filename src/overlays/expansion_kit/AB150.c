@@ -216,6 +216,41 @@ s32 func_xk1_8002E368(void) {
             }
             D_807C6EA8.unk_14 = D_xk1_80033404 = gMfsError;
             D_xk1_80033408 = D_80794CD8;
+#ifdef PORT
+            /* PORT diagnostic (GDX_TRACE=1) for the 64DD file-management cluster.
+             * Every EK MFS-management op passes through this choke point:
+             *
+             *   op       = D_807C6EA8.unk_00 -- 8 save, 9/10 load, 11/12 build picker,
+             *              13/14 exists check, 15 rename, 16 delete, 17/18 get/set attr.
+             *   prompt   = D_807C6EA8.unk_08 as posted by the sender in sys/disk/75000.c --
+             *              the message id the EK prompt renderer (func_xk1_8002ED64,
+             *              ABC40.c) would draw while the drive is busy. 6 is "now saving",
+             *              5 "now loading".
+             *   result   = gMfsError. 0 good; 0xF2 N64DD_NOT_FOUND; 0x106 write refused by
+             *              Mfs_ValidateFileSystemOperation (volume game-code /
+             *              write-protect); 0x10A management-area checksum failure.
+             *   files    = D_807C6F0C, the picker's file count, for ops 11/12.
+             *
+             * Two things to know when reading it. The success test immediately below folds
+             * N64DD_NOT_FOUND into the SUCCESS branch and zeroes unk_08 -- retail behaviour,
+             * correct for a well-formed volume, but it is why a broken filesystem fails with
+             * no prompt at all; a run full of result=0xF2 is that. And this port's drive is
+             * synchronous: the sender posts unk_08 and the priority-30 worker runs the whole
+             * op before the game thread draws, so a progress prompt is set and cleared inside
+             * one frame and never rendered. That is presentation only -- result= tells you
+             * whether the op also failed. */
+            {
+                static s32 sPortMfsOpLogs = 0;
+
+                if (sPortMfsOpLogs < 64) {
+                    sPortMfsOpLogs++;
+                    gdx_cki("[mfs-op] op", D_807C6EA8.unk_00);
+                    gdx_cki("[mfs-op]   prompt", D_807C6EA8.unk_08);
+                    gdx_cki("[mfs-op]   result", D_xk1_80033404);
+                    gdx_cki("[mfs-op]   files", D_807C6F0C);
+                }
+            }
+#endif
             /* fallthrough */
         case 1:
             D_xk1_80033400 = 0;
