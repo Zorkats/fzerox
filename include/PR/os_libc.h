@@ -82,9 +82,8 @@ extern "C" {
 
 
 #if defined(PORT) && !defined(_WIN32)
-/* glibc provides bcopy/bcmp/bzero and declares them with size_t lengths (strings.h);
- * re-declaring the IDO int-length signatures alongside is a hard conflict on GCC.
- * Callers pass s32/u32 lengths, which convert implicitly. */
+/* glibc declares bcopy/bcmp/bzero with size_t lengths; re-declaring the IDO
+ * int-length signatures alongside is a hard conflict on GCC. */
 #include <strings.h>
 #else
 extern void     bcopy(const void *, void *, int);

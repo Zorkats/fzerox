@@ -626,16 +626,8 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
 #endif
     } else {
 #ifdef PORT
-        /* Diagnostic for race gadgets (start gate, signs, buildings) rendering
-           invisible on PORT. Course_GadgetsDraw only draws a decorational
-           feature when decoration->loadChunk->drawState != 0 (above). Three
-           independent producers feed that condition: the feature list itself
-           (Course_FeaturesInit, at Course_Init time), the per-decoration
-           closest-chunk pointer + LookAt matrix
-           (Course_DecorationsViewInteractDataInit, at Race_Init time), and the
-           per-frame camera-frustum visibility flag (Course_Draw, every frame,
-           just before this function runs). Log all three once to name which
-           one is empty/zero. */
+        /* [gadget] probe: which of the three drawState producers (feature list, per-decoration
+           chunk/LookAt init, per-frame frustum flag) is empty when gadgets render invisible. */
         {
             static int sGdxGadgetDiagCount = 0;
             extern int gGdxRaceActive;
@@ -684,17 +676,12 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
             }
             if ((decoration->loadChunk->drawState != 0) && (feature->featureType <= COURSE_FEATURE_SIGN_OVERHEAD)) {
 #ifdef PORT
-                /* K0_TO_PHYS masks a 64-bit host pointer to 29 bits; the wide
-                   gSPMatrix carries the full pointer, so the mask turned every
-                   decoration modelview into an unresolvable token (invisible
-                   decorations even when drawState passed). Same fix family as
-                   the racer.c modelview matrices. */
+                /* K0_TO_PHYS masks a 64-bit host pointer to 29 bits, and the wide gSPMatrix
+                   carries the full pointer, so the mask turns every decoration modelview into
+                   an unresolvable token: invisible decorations even when drawState passes. */
                 gSPMatrix(gfx++, decorationMtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
-                /* [deco-draw] per-site census: every static cell of this chain
-                   verifies clean yet nothing appears on screen. Log the EXACT
-                   emitted pair (matrix host pointer + this frame's gfx cursor +
-                   feature type) for the drawable decoration so the bridge-side
-                   log lines for the same frame can be matched 1:1. Capped. */
+                /* [deco-draw] probe: emits the matrix pointer and gfx cursor so the bridge-side
+                   log lines for the same frame can be matched 1:1. */
                 {
                     extern void gdx_ckp(const char* s, void* v);
                     extern void gdx_cki(const char* s, int v);
@@ -3814,7 +3801,7 @@ extern OSPiHandle* gCartRomHandle;
 
 void Dma_ClearRomCopy(void* romAddr, void* ramAddr, size_t size) {
 #ifdef PORT
-    // PORT: no ROM DMA here — every caller (e.g. sys/math.c's boot_textures blit) gets nothing back.
+    // No ROM DMA under PORT: callers (sys/math.c's boot_textures blit) get nothing back.
     (void) romAddr;
     (void) ramAddr;
     (void) size;
@@ -3833,8 +3820,8 @@ void Dma_ClearRomCopy(void* romAddr, void* ramAddr, size_t size) {
 
 void Dma_RomCopyAsync(void* romAddr, void* ramAddr, size_t size) {
 #ifdef PORT
-    // The PORT Dma_RomCopy resolves raw N64 physical addresses and truncated low-32
-    // asset/segment pointers before touching host memory.
+    // Dma_RomCopy resolves raw N64 physical and truncated low-32 asset pointers before
+    // touching host memory; nothing here is actually asynchronous.
     Dma_RomCopy(romAddr, ramAddr, size);
     return;
 #endif
@@ -3883,14 +3870,10 @@ void func_80701E08(void) {
 
     func_80704050(true);
 
-    /* func_8070595C()'s "!= 2" spin below is a console-faithful "please
-     * insert the 64DD disk" wait -- on real hardware it blocks until the
-     * player physically inserts a disk. The PC port has no live disk-swap
-     * path, so with no disk connected at boot (gLeoDriveConnectionState == 0)
-     * this would busy-spin forever with no way out. Gate on
-     * gLeoDriveConnectionState, same pattern as the MFS-blocking gates
-     * elsewhere in this file (not gRamDDCompatible, which is unconditionally
-     * true in EK builds). */
+    /* The "!= 2" spin below is a console-faithful "please insert the 64DD disk" wait. The port
+     * has no live disk-swap path, so with no disk at boot it spins forever. Gate on
+     * gLeoDriveConnectionState, not gRamDDCompatible, which is unconditionally true in EK
+     * builds. */
     if (gLeoDriveConnectionState != 0) {
         switch (func_8070595C()) {
             case 1:
@@ -3939,8 +3922,8 @@ extern s32 gLeoDriveConnectionState;
 UNUSED s32 D_800CD21C = 0;
 
 #ifdef PORT
-// ROM data is big-endian (.z64). Byte-swap only the multi-byte fields that were
-// DMA'd into the host struct via memcpy. Single-byte fields (s8/u8/char) are fine.
+// ROM data is big-endian (.z64); only the multi-byte fields memcpy'd into the host struct need
+// swapping, so s8/u8/char fields are deliberately absent below.
 static void Gdx_SwapU16InPlace(void* p) {
     u8* b = (u8*)p;
     u8 t = b[0]; b[0] = b[1]; b[1] = t;
@@ -3967,13 +3950,10 @@ static void CourseData_FromRom(CourseData* cd) {
 #endif
 
 #if defined(PORT) && defined(EXPANSION_KIT)
-/* func_8076852C fills the WHOLE CourseContext (courseData + ghostSave[3] +
- * saveCourseRecord) from a big-endian MFS "GOST"/"CRSD" file. After every such
- * fetch the three ghost records+data and the course record must be byte-swapped
- * before any checksum validation (DDSave_ValidateCachedGhostRecords) or field use,
- * exactly as courseData is handled by CourseData_FromRom on the ROM/disk paths.
- * The record swappers live in ovl_i2/save.c (next to the checksum routines they
- * pair with); declared extern here following the fzx_save.h consumer pattern. */
+/* func_8076852C fills the whole CourseContext from a big-endian MFS file, so the ghost records
+ * and the course record must be swapped before checksum validation or field use, the same way
+ * CourseData_FromRom handles courseData. The swappers live in ovl_i2/save.c, next to the
+ * checksum routines they pair with. */
 extern void SaveCourseRecords_FromRom(SaveCourseRecords*);
 extern void GhostRecord_FromRom(GhostRecord*);
 extern void GhostData_FromRom(GhostData*);
@@ -4049,12 +4029,8 @@ void Course_Load(s32 courseIndex) {
             ghostName[5] = (courseIndex / 10) + '0';
             ghostName[6] = (courseIndex % 10) + '0';
             Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-            /* Blocking MFS ghost fetch: same gLeoDriveConnectionState gate as the
-             * Course_Load non-edit staff-ghost fix below -- without a disk this
-             * has no sSys6Thread producer and parks the game thread forever.
-             * Course Edit's own menu entry now refuses without a disk (see
-             * main_menu.c), so this is defense-in-depth for the disk-course
-             * default-ghost path. */
+            /* Blocking MFS fetch: same gLeoDriveConnectionState gate as the staff-ghost load
+             * below. */
             if (gLeoDriveConnectionState != 0) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
                 osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
@@ -4073,8 +4049,7 @@ void Course_Load(s32 courseIndex) {
             DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex, &COURSE_CONTEXT()->courseData,
                                sizeof(CourseData), 0);
 #ifdef PORT
-            /* Disk CourseData is big-endian; swap on the little-endian port
-               (the ROM course path does this via CourseData_FromRom above). */
+            /* Disk CourseData is big-endian too, not only the ROM path. */
             CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #endif
             if ((Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) ||
@@ -4084,11 +4059,7 @@ void Course_Load(s32 courseIndex) {
                 while (true) {}
             }
         } else {
-            /* Named-course MFS fetch: gate on gLeoDriveConnectionState (see
-             * pattern note above). In practice gEditCupTrackNames only holds a
-             * non-empty name when it was populated from disk, so this branch is
-             * unreachable in a no-disk session once Course Edit's menu entry is
-             * refused -- gated here too for defense-in-depth. */
+            /* Same gLeoDriveConnectionState gate; unreachable without a disk in practice. */
             if (gLeoDriveConnectionState != 0) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
                               sizeof(CourseContext));
@@ -4151,20 +4122,12 @@ void Course_Load(s32 courseIndex) {
         ghostName[5] = (courseIndex / 10) + '0';
         ghostName[6] = (courseIndex % 10) + '0';
         Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-        /* func_8076852C -> func_80767F14 posts an MFS load request onto
-         * sSys6Thread's command queue (D_807C6E90) and this call blocks on
-         * gMFSMesgQ until sSys6Thread's SLMFSLoad (sys/disk/75000.c,
-         * sys/disk/sys_leo_dd.c) sends completion. sSys6Thread is only ever
-         * osStartThread'd when a real 64DD drive is detected
-         * (gLeoDriveConnectionState == 1, promoted to 2 -- see sys_main.c).
-         * With no disk connected this staff-ghost load has no producer and
-         * the game thread parks here forever: Course_Load(COURSE_MUTE_CITY)
-         * is called unconditionally from func_800742FC during boot, so this
-         * blocked every no-disk EK boot before the title screen. Same class
-         * of bug as the guitar-seq and ovl_i10 cup-name gates elsewhere in
-         * this codebase -- gate on gLeoDriveConnectionState, not
-         * gRamDDCompatible (gRamDDCompatible is set true unconditionally in
-         * the EK build and is not a valid proxy for "disk present"). */
+        /* func_8076852C queues an MFS load for sSys6Thread and this call blocks on gMFSMesgQ
+         * until SLMFSLoad completes. sSys6Thread only starts when a real 64DD drive is
+         * detected, so with no disk there is no producer and the game thread parks here
+         * forever -- and func_800742FC calls Course_Load(COURSE_MUTE_CITY) unconditionally at
+         * boot. Gate on gLeoDriveConnectionState, not gRamDDCompatible, which is
+         * unconditionally true in EK builds and is no proxy for "disk present". */
         if ((gLeoDriveConnectionState != 0) && (gTitleDemoState == TITLE_DEMO_INACTIVE)) {
             func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
             osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
@@ -4219,8 +4182,8 @@ void func_80702448(s32 courseIndex) {
         romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseData);
 #ifdef PORT
         Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
-        /* ROM CourseData is big-endian; without this swap the course-select
-           preview mesh is built from garbage control points. */
+        /* Without the swap the course-select preview mesh is built from garbage control
+           points. */
         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #else
         Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
@@ -4259,15 +4222,9 @@ void func_80702448(s32 courseIndex) {
             ghostName[5] = (courseIndex / 10) + '0';
             ghostName[6] = (courseIndex % 10) + '0';
             Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
-            /* func_80702448 is the course-select preview loader (course_model.c)
-             * and is reachable while browsing the disk cup in normal course
-             * select, NOT only from inside Course Edit. Blocking MFS ghost
-             * fetch gated on gLeoDriveConnectionState (same pattern as
-             * Course_Load) -- with no disk, gEditCupTrackNames stays empty and
-             * the upstream course-select preview guard (var_v1 in
-             * course_select.c) already skips calling this for an empty disk
-             * cup slot, but gate here too since this function has no such
-             * guard of its own. */
+            /* Same gLeoDriveConnectionState gate as Course_Load. This preview loader is also
+             * reachable from normal course select while browsing the disk cup, not only from
+             * Course Edit, and it carries no guard of its own. */
             if (gLeoDriveConnectionState != 0) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, ghostName, "GOST", COURSE_CONTEXT(), sizeof(CourseContext));
                 osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
@@ -4286,8 +4243,7 @@ void func_80702448(s32 courseIndex) {
             DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex, &COURSE_CONTEXT()->courseData,
                                sizeof(CourseData), 0);
 #ifdef PORT
-            /* Disk CourseData is big-endian; swap on the little-endian port
-               (the ROM course path does this via CourseData_FromRom above). */
+            /* Disk CourseData is big-endian too, not only the ROM path. */
             CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #endif
             if ((Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) ||
@@ -4297,9 +4253,7 @@ void func_80702448(s32 courseIndex) {
                 while (true) {}
             }
         } else {
-            /* Named-course MFS fetch (course-select preview path): gate on
-             * gLeoDriveConnectionState. See notes above -- unreachable in
-             * practice without a disk, gated for defense-in-depth. */
+            /* Same gLeoDriveConnectionState gate; unreachable without a disk in practice. */
             if (gLeoDriveConnectionState != 0) {
                 func_8076852C(MFS_ENTRY_WORKING_DIR, gEditCupTrackNames[diskCourseIndex], "CRSD", COURSE_CONTEXT(),
                               sizeof(CourseContext));
@@ -4362,8 +4316,6 @@ void func_80702448(s32 courseIndex) {
 
 #ifdef PORT
         Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
-        /* ROM CourseData is big-endian; without this swap the course-select
-           preview mesh is built from garbage control points. */
         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #else
         Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
@@ -4376,10 +4328,8 @@ void func_80702448(s32 courseIndex) {
     }
 
 #ifdef PORT
-    /* Course-select preview textures: this loader only runs from the course
-       model preview (course_model.c). Menus never pass through the race-mode
-       Segment_LoadAssets venue load, leaving segment 0x0A empty (invisible
-       preview) — load the highlighted course's venue bank here. */
+    /* Menus never run the race-mode Segment_LoadAssets venue load, so segment 0x0A is empty
+       here and the preview renders invisible. Load the highlighted course's venue bank. */
     {
         extern int gdx_load_venue_texture_segment(int venue);
         if (!gdx_load_venue_texture_segment(COURSE_CONTEXT()->courseData.venue)) {
@@ -4611,7 +4561,17 @@ void func_800747EC(s32 venue) {
     RomOffset romOffset = gRomSegmentPairs[6][0] + (D_800CD220[venue] * 0x800);
 #endif
 
+#ifdef PORT
+    /* Segment_SegmentedToVirtual(D_8014A20) masks a 64-bit host pointer to 24
+     * bits, so this DMA cannot land under PORT. The shim writes the slice into
+     * the decoded segment-8 image the display-list resolver actually reads. */
+    {
+        extern void gdx_load_venue_building_texture(unsigned int romOffset);
+        gdx_load_venue_building_texture(romOffset);
+    }
+#else
     Dma_LoadAssetsAsync(romOffset, Segment_SegmentedToVirtual(D_8014A20), 0x800);
+#endif
 }
 
 extern GfxPool* gGfxPool;

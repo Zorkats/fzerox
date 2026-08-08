@@ -199,13 +199,11 @@ extern Gfx D_8014940[];
 extern s32 D_8076C960;
 
 #ifdef PORT
-/* func_xk2_800EECD4 recomputes the tooltip's left edge from the widest line and
-   keeps it local. The inline help icon has to land inside that same box, so
-   publish it here rather than duplicating the min-over-lines calculation.
-   Written on every tooltip draw, read immediately afterwards by the icon pass in
-   the near-identical help overlay at course_edit/1A4210.c. The icon pass in
-   func_xk2_800EE67C below reads it too but never draws: it is gated on
-   D_8076C960, which is never assigned a nonzero value. */
+/* func_xk2_800EECD4 computes the tooltip's left edge from the widest line and keeps it
+   local; the help icon has to land in the same box, so publish it instead of duplicating
+   the min-over-lines pass. Read back by the icon pass in the near-identical help overlay
+   at course_edit/1A4210.c. The icon pass in func_xk2_800EE67C below never draws: its
+   gate D_8076C960 is never assigned a nonzero value. */
 s32 gGdxTooltipLeft = 128;
 
 extern s32 GdxGlyphIconOffset(s8* str, s32* gapWidth);

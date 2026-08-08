@@ -22,11 +22,8 @@ UNUSED s32 D_i5_8007B080 = 0;
 #ifdef PORT
 extern int gdx_ghost_library_has_player(s32 encodedCourseIndex);
 
-/* Cup-to-cup squeeze instrumentation (enabled by GDX_TRACE=1; gdx_cki is
-   trace-gated internally). Correlates the frame a cup-selection change lands
-   with the model-scene update/draw paths suspected of emitting one fixed-4:3
-   viewport frame per selection change. Logging is bounded to a few frames
-   after each cup change so a browse session stays readable. */
+/* Which update/draw path emits the one fixed-4:3 viewport frame per cup-selection change
+   (GDX_TRACE=1; bounded to a few frames after each change so browsing stays readable). */
 extern void gdx_cki(const char* s, int v);
 extern u32 gGameFrameCount;
 static u32 sGdxCupChangeFrame = 0xFFFFFFFFu;
@@ -1089,8 +1086,7 @@ Gfx* CourseSelect_ModelDraw(Gfx* gfx, Object* modelObj) {
         case COURSE_SELECT_NEXT_COURSE_CONTINUE:
             if (sCourseSelectCup < NUM_COMPETITIVE_CUPS) {
 #ifdef PORT
-                /* Any hit inside the post-cup-change window is the smoking gun:
-                   the carousel viewport draw ran while browsing cups. */
+                /* A hit here means the carousel viewport draw ran while browsing cups. */
                 if (GDX_CUPSEL_WINDOW()) {
                     gdx_cki("[GDX cupsel] 80115E64 DRAW state", sCourseSelectState);
                     gdx_cki("[GDX cupsel] 80115E64 DRAW frame", (int) gGameFrameCount);
@@ -1305,13 +1301,12 @@ Gfx* CourseSelect_ArrowsDraw(Gfx* gfx, Object* arrowsObj) {
     f32 temp_fv0 = (SIN(LEFT_ARROW_ROTATION(arrowsObj)) + 1.0) / 2;
     f32 temp_fa1 = (SIN(RIGHT_ARROW_ROTATION(arrowsObj)) + 1.0) / 2;
 #ifdef PORT
-    /* On the first/last track (and during the OK confirmation) the game parks the unusable
-     * navigation arrow past the 4:3 edge -- left native X reaches -57, right native X reaches
-     * 345 -- so the N64 hardware scissor hides it. The wider 16:9 viewport has no such clip and
-     * would otherwise reveal that parked arrow glued to the physical screen edge (the reported
-     * right-arrow sliver). Skip an arrow whose native X falls outside the 4:3 screen. Gated on
-     * the widescreen-UI CVars: with them off, both arrows always emit and the list is
-     * bit-identical to stock. Mirrors CourseSelect_GhostMarkerDraw's -30..SCREEN_WIDTH clip. */
+    /* On the first/last track (and during OK confirmation) the game parks the unusable arrow
+     * past the 4:3 edge -- left native X reaches -57, right 345 -- where the N64 scissor hides
+     * it. The wider 16:9 viewport does not clip there and reveals the parked arrow glued to the
+     * physical edge, so skip an arrow whose native X falls outside the 4:3 screen. Gated on the
+     * widescreen-UI CVars: with them off both arrows always emit and the list is bit-identical
+     * to stock. Same -30..SCREEN_WIDTH clip as CourseSelect_GhostMarkerDraw. */
     extern int gdx_widescreen_ui_active(void);
     s32 gdxWideArrows = gdx_widescreen_ui_active();
     s32 leftArrowX = LEFT_ARROW_LEFT(arrowsObj) + 0x2B;
@@ -1478,13 +1473,11 @@ Gfx* CourseSelect_GhostOptionDraw(Gfx* gfx, Object* ghostOptionObj) {
 #endif
 
 #ifdef PORT
-    /* Unlike its sibling draws (CourseSelect_GhostMarkerDraw / CourseSelect_NameDraw, which
-     * explicitly skip the cup-select states), this column always emits: on 4:3 it stays hidden
-     * only because the object is parked past the right edge (base X 150 -> text native X 345)
-     * and the hardware scissor clips it. The 16:9 viewport reveals that parked text glued to the
-     * physical right edge (the reported "Wi" sliver). Skip the same states the marker/name draws
-     * skip. Gated on the widescreen-UI CVars so a CVar-off build still emits the stock off-screen
-     * draws and remains bit-identical. */
+    /* Unlike CourseSelect_GhostMarkerDraw / CourseSelect_NameDraw, this column never skips the
+     * cup-select states: on 4:3 it stays hidden only because the object is parked past the right
+     * edge (text native X 345) and the scissor clips it, which the 16:9 viewport does not. Skip
+     * the same states the marker/name draws skip. Gated on the widescreen-UI CVars so a CVar-off
+     * build still emits the stock off-screen draws and remains bit-identical. */
     {
         extern int gdx_widescreen_ui_active(void);
         if (gdx_widescreen_ui_active()) {

@@ -10,12 +10,10 @@
 #include ASSET_HEADER_EK(overlays/machine_create/machine_create_assets.h)
 
 #ifdef PORT
-// port/disk_buffer.cpp: non-zero when the currently loaded 64DD disk
-// image is the fan-translated (LuigiBlood/Zoinkity) release, whose recompile moved and/or reshaped
-// three Create-Machine label textures (Machine Name, Settings, Weight -- see
-// port/gen/EkTranslatedOverrides.c). The retail-JP disk, and any unrecognized disk, report 0 here and
-// keep the original literal blit dimensions below (gdx_ek_assets_fill already serves the right bytes
-// for those cases via the retail-JP-derived offset table).
+// port/disk_buffer.cpp: non-zero when the loaded 64DD image is the fan-translated release,
+// whose recompile moved and reshaped three Create-Machine label textures (Machine Name,
+// Settings, Weight -- see port/gen/EkTranslatedOverrides.c). The retail-JP disk and any
+// unrecognized disk report 0 and keep the original literal blit dimensions below.
 extern int gdx_ek_disk_is_translated(void);
 #endif
 
@@ -29,14 +27,10 @@ Gfx* sCustomMachinePartDLs[][7] = {
     { D_90186C0, D_9017B18, D_9018230, D_9017BF0, D_90183F0, D_9017D20, D_9017EC8 },
 };
 
-/* Driver names in machine-number order, as the retail-JP disk has them.
- *
- * The entries are mutable pointers on purpose: on the fan-translated 64DD disk
- * this table's English lives in the disk's own machine_create .data, and
- * gdx_ek_strings_apply() (port/gdx_ek_strings.c) repoints each entry at that
- * text once the disk is loaded. Nothing here is translated by hand -- if no disk
- * is present, or the disk is the retail-JP one, these Japanese names stand.
- */
+/* Driver names in machine-number order, as the retail-JP disk has them. The entries
+ * are mutable on purpose: gdx_ek_strings_apply (port/gdx_ek_strings.c) repoints each
+ * at the fan-translated disk's own English text once that disk is loaded. Nothing
+ * here is translated by hand. */
 const char* sCharacterNamesByNumber[] = {
     "MM \245\254\245\274\245\353",
     "\245\270\245\347\245\307\245\243 \245\265\245\336\241\274",
@@ -336,10 +330,9 @@ void func_xk3_8012F7AC(Gfx** gfxP, char* arg1) {
     u16 sp6A;
     u16 sp68;
     u8 sp67;
-    /* Was [35]: func_xk1_80026830 (expansion_kit/A3AA0.c) expands EACH source byte to two
-       output bytes plus a NUL, so any name longer than 17 bytes overruns the buffer —
-       the same stack-overrun class as MachineCreate_DrawWeight's weighStr above. Sized
-       for the longest possible machine-name expansion. */
+    /* func_xk1_80026830 (expansion_kit/A3AA0.c) expands each source byte to two output
+       bytes plus a NUL, so the retail [35] overruns on any name longer than 17 bytes.
+       Sized for the longest possible machine-name expansion. */
     char sp44[80];
     u8 sp43 = 0;
 
@@ -388,11 +381,10 @@ extern u8 aMachineCreateKgTex[];
 
 Gfx* MachineCreate_DrawWeight(Gfx* gfx, s32 left, s32 top, s32 weight) {
     u8 i;
-    /* Was [4]: a latent retail bug. 4-digit weights are EXPECTED here (the x-position
-       branch below tests weight >= 1000; the Super machine table carries 2210/1840),
-       and sprintf then writes 5 bytes (4 digits + NUL) — a 1-byte stack overrun that
-       landed in padding on console but trips MSVC /RTC stack checks on the port
-       (crash when the Parts screen drew a >=1000 kg machine). Sized for any s32. */
+    /* A latent retail bug: 4-digit weights are expected here (the x-position branch
+       below tests weight >= 1000, and the Super machine table carries 2210/1840), so
+       sprintf writes 5 bytes into the retail [4] -- padding on console, an MSVC /RTC
+       stack-check crash here. Sized for any s32. */
     signed char weighStr[12];
 
     gSPDisplayList(gfx++, D_xk3_801373F0);
@@ -400,19 +392,13 @@ Gfx* MachineCreate_DrawWeight(Gfx* gfx, s32 left, s32 top, s32 weight) {
 
 #ifdef PORT
     /* The fan-translated disk reshaped this WEIGHT caption from 32x16 to 40x12 (see
-       port/gen/EkTranslatedOverrides.c); the JP retail disk, and any unrecognized disk, keeps
-       the original 32x16 geometry gdx_ek_assets_fill() already serves.
+       port/gen/EkTranslatedOverrides.c); the retail-JP disk keeps the original geometry.
 
-       The ORIGIN moves with the reshape. The disk's own recompiled
-       MachineCreate_DrawWeight (VRAM 0x8012FAF4-0x8012FB14) blits the 40x12 caption at
-       (left - 8, top + 4), not at (left, top):
-         - x: the caption grew 32 -> 40 px, so it is pulled back 8 px to keep its RIGHT edge on
-           left+32. The digit advances below are unchanged from retail (left += 41 under
-           1000 kg, left += 33 at or above it), so a caption left at `left` would end at
-           left+40 and a four-digit weight starting at left+33 would run seven pixels INTO it
-           -- the "Weight1000 kg" collision; the three-digit case was one pixel from the same.
-         - y: the caption lost four rows, 16 -> 12, and the digits beside it are still 16 tall,
-           so it is pushed down 4 px to stay vertically centred against them. */
+       The origin moves with the reshape, matching the disk's own recompiled
+       MachineCreate_DrawWeight (VRAM 0x8012FAF4): x back 8 px so the wider caption still
+       ends at left+32 -- the digit advances below are unchanged from retail, so a caption
+       left at `left` would collide with a four-digit weight starting at left+33 -- and y
+       down 4 px so the shorter caption stays centred against the still-16-tall digits. */
     if (gdx_ek_disk_is_translated()) {
         gfx = MachineCreate_DrawTextureBlockI8(gfx, D_xk3_80138930, left - 8, top + 4, 40, 12);
     } else {
@@ -554,9 +540,9 @@ Gfx* func_xk3_80130698(Gfx* gfx, s32 arg1) {
             Matrix_FromMtx(gGfxPool->unk_20108, &sp80);
             Light_SetLookAtSource(&gGfxPool->unk_21B28, &sp80);
 #ifdef PORT
-            /* See gdx_diag_lookat_enabled (port/n64_sched.c). Compare against the
-               [lookat] machine-settings line, which is the same pass on the same
-               display lists but sourced from a real camera view matrix. */
+            /* Probe (gdx_diag_lookat_enabled, port/n64_sched.c): compare against the
+               machine-settings [lookat] line, the same pass sourced from a real
+               camera view matrix. */
             {
                 extern int gdx_diag_lookat_enabled(void);
                 extern void gdx_dbg_logf(const char* fmt, ...);
@@ -629,14 +615,14 @@ Gfx* func_xk3_80130920(Gfx* gfx) {
         gfx = sSuperMachineDrawFuncs[D_800333F4](gfx);
     } else {
 #ifdef PORT
-        /* Flat-navy preview probe: report the record this draw actually reads.
-           See gdx_diag_custommachine_enabled (port/n64_sched.c) for why. */
+        /* Probe (gdx_diag_custommachine_enabled, port/n64_sched.c): which
+           custom-machine record the flat-navy preview draw actually reads. */
         {
             extern int gdx_diag_custommachine_enabled(void);
             extern void gdx_dbg_logf(const char* fmt, ...);
             static u32 sLastKey = 0;
             static s32 sKeySeen = 0;
-            /* FNV-1a over exactly the fields the line prints: a logo/number/decal-only key
+            /* Keyed over exactly the fields the line prints: a logo/number/decal-only key
                deduplicated away the colour edits this probe exists to catch. */
             const u8 keyFields[] = {
                 gCustomMachine.logo,      gCustomMachine.number,   gCustomMachine.decal,
@@ -913,14 +899,12 @@ Gfx* func_xk3_80131494(Gfx* gfx) {
 
 #ifdef PORT
         /* The fan-translated disk swapped and reshaped these two captions (Machine Name
-           48x12 -> 96x9, Settings 72x12 -> 48x12; see port/gen/EkTranslatedOverrides.c and its
-           docstring for the recovery evidence). x/y are left at the JP retail literals on BOTH
-           variants: each is a left-aligned single-line header drawn above its own content box,
-           and the translated widths (96, 48) both still fit inside the panel's existing
-           right-column bounds starting at x=170, so no repositioning was needed. Note that no
-           tool in tools/ek_recovery/ extracts the translated overlay's own compiled x/y
-           blit-call literals -- only texture geometry is recovered there -- so unlike the
-           weight caption these positions were NOT re-derived from the disk. */
+           48x12 -> 96x9, Settings 72x12 -> 48x12; see port/gen/EkTranslatedOverrides.c). x/y
+           stay at the JP retail literals on both variants: each is a left-aligned single-line
+           header above its own content box, and both translated widths still fit the panel's
+           right-column bounds from x=170. Unlike the weight caption, though, these positions
+           were NOT re-derived from the disk -- tools/ek_recovery/ extracts texture geometry
+           only, not the translated overlay's blit-call literals. */
         if (gdx_ek_disk_is_translated()) {
             gfx = MachineCreate_DrawColorGradientTextureBlockI8(gfx, aMachineCreateMachineNameTex, 170, 82, 96, 9, 255,
                                                                 255, 0, 255, 120, 0);

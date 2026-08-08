@@ -239,12 +239,10 @@ extern bool gInCourseEditTestRun;
 void func_xk2_800EC91C(void) {
 
 #ifdef PORT
-    /* Frame-interpolation cut epoch: leaving a Course Edit test run jumps the
-       camera from race-follow back to the editor overhead view in one tick.
-       Test-run ENTRY is already covered (Racer_Init fires a cut), but no cut
-       fires here, and a rotation-dominant pose change can stay under the
-       300-unit teleport threshold and smear one tick. Same idiom as
-       Racer_RetireRacer. Render-only; no-op unless interpolation is on. */
+    /* Leaving a test run snaps the camera from race-follow back to the editor
+       overhead view in one tick. Entry is covered by Racer_Init's cut, exit is
+       not, and a rotation-dominant pose change can stay under the 300-unit
+       teleport threshold and smear a frame. Render-only. */
     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
 #endif
 

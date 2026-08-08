@@ -24,47 +24,16 @@ void func_xk2_800F632C(void) {
 }
 
 extern s8 gGamePaused;
-/* D_4011D78 (segment 0x04 offset 0x11D78) is the base game's own hud_gfx
-   asset aMenuTextTlutSetupDL (include/assets/us/rev0/hud_gfx.h) -- the same
-   TLUT-mode setup display list ovl_i3/menus.c uses ahead of its own menu
-   text draws. The editor pause menu reuses it here too; referencing the
-   named symbol picks up the real asset instead of a zero-filled placeholder
-   with no gSPEndDisplayList (which walked off the end of a 0x2000-byte
-   zero buffer -- undefined behavior). */
+/* Segment 0x04 offset 0x11D78 is the hud_gfx asset aMenuTextTlutSetupDL
+   (include/assets/us/rev0/hud_gfx.h), the same TLUT setup list ovl_i3/menus.c uses.
+   Referencing it by name matters: the raw D_4011D78 extern resolved to a zero-filled
+   placeholder with no gSPEndDisplayList, so the RSP walked off its 0x2000 bytes. */
 extern Gfx aMenuTextTlutSetupDL[];
 
 #ifdef PORT
-/* [pausereg] PORT diagnostic: Course Edit pause-menu corruption.
- *
- * The symptom is a PAIRED swap: while the Test Course runs the track carries
- * scattered coloured specks; on the frame PAUSE is pressed the specks vanish and
- * this menu draws corrupted instead. Both halves are consistent with ONE address
- * claimed by two consumers, but the two candidate mechanisms need different
- * fixes, so they have to be separated by measurement:
- *
- *   (a) STALE REGISTRY POINTER. D_800E33E0 stores raw arena pointers and is only
- *       cleared on a gGameMode change (func_80077D44 via func_80079EC8,
- *       game.c:735). A Course Edit test run re-inits the race IN PLACE
- *       (19DD60.c:338-345) with no mode change, so a registered glyph pointer can
- *       outlive the arena contents it named. func_800783AC then returns a
- *       non-NULL pointer to whatever now lives there and nothing logs -- the
- *       [reg-miss] probe only fires on NULL.
- *   (b) REGISTRY OVERFLOW. The count is unbounded on N64 (guarded in the port,
- *       see GDX_TexRegistryReserve in object.c) and past 200 entries the writes
- *       smash D_800E3A20 and gObjects.
- *
- * One line per second while paused, naming the registry occupancy and the pointer
- * this menu's own TLUT symbol resolves to. Count at or near 200, or a [texreg]
- * OVERFLOW line, means (b). Count sane but the tlut pointer changing between test
- * runs means (a).
- *
- * The arena [start,end) windows would decide (a) outright, but they are not
- * observable here: gArenaStartPtrs/gArenaEndPtrs are defined in sys/segment.c,
- * which port/CMakeLists.txt excludes from the port build, and the only surviving
- * symbol is a zero-filled stub (port/gen/LinkStubs.c). Deciding (a) properly needs
- * a port-side accessor for the live arena bounds -- see gdx_rdram_mode_reset in
- * port/decomp_port.c for where the port tracks them.
- * Gated on GDX_DIAG_TEXREG so a normal run stays silent. */
+/* Pause-menu corruption: texture-registry overflow (count at or near 200) versus a stale
+   registered pointer surviving the test run's in-place race re-init (count sane, but the
+   tlut pointer moves between runs). Gated on GDX_DIAG_TEXREG. */
 extern s32 D_800E3A20;
 extern u32 gGameFrameCount;
 extern int gdx_dev_gate_diag_texreg(void);

@@ -6,11 +6,9 @@
 #include ASSET_HEADER(staff_ghost_records.h)
 
 #ifdef PORT
-/* Host-backed SRAM image (port/sram_buffer.cpp) replaces the
-   N64 PI/DMA path in Sram_Init/Sram_ReadWrite below. Raw extern declarations only
-   (no header include) -- decomp-target C files can't include the MSVC CRT headers
-   port/sram_buffer.cpp uses; this mirrors the existing Dma_RomCopy PORT pattern in
-   sys/dma.c (extern unsigned char* gdx_rom_buffer;). */
+/* port/sram_buffer.cpp -- host-backed SRAM image replacing the PI/DMA path in Sram_Init/
+   Sram_ReadWrite below. Raw externs, no header: this TU can't include the MSVC CRT headers
+   sram_buffer.cpp pulls in (same as sys/dma.c). */
 extern void gdx_sram_init(void);
 extern void gdx_sram_read(unsigned int offset, void* dst, unsigned int size);
 extern void gdx_sram_write(unsigned int offset, const void* src, unsigned int size);
@@ -107,8 +105,8 @@ static void Gdx_LoadLibraryPlayerGhosts(s32 encodedCourseIndex) {
     if (selectedCount <= 0) {
         return;
     }
-    /* Defensive clamp at the ABI boundary: the loader is passed capacity 3, but the loop
-     * below indexes sGdxSelectedGhosts[3] and must never trust a larger return value. */
+    /* The loop below indexes sGdxSelectedGhosts[3]; never trust a count larger than the
+     * capacity we passed. */
     if (selectedCount > 3) {
         selectedCount = 3;
     }
@@ -117,7 +115,7 @@ static void Gdx_LoadLibraryPlayerGhosts(s32 encodedCourseIndex) {
         s32 ghostIndex = -1;
         s32 slowestTime = -1;
 
-        /* If vanilla SRAM/session loading already staged this replay, keep it and protect its slot. */
+        /* Already staged by vanilla SRAM/session loading: keep it and protect the slot. */
         for (j = 0; j < 3; j++) {
             if (!locked[j] && (gGhosts[j].encodedCourseIndex == encodedCourseIndex) &&
                 (gGhosts[j].ghostType == GHOST_PLAYER) &&
@@ -127,8 +125,8 @@ static void Gdx_LoadLibraryPlayerGhosts(s32 encodedCourseIndex) {
                 break;
             }
         }
-        /* Chosen persistent ghosts are authoritative. Prefer an empty/non-matching slot; if all
-         * remaining slots hold valid session ghosts, replace the slowest unprotected one. */
+        /* Chosen persistent ghosts win: prefer an empty/non-matching slot, else evict the
+         * slowest unprotected session ghost. */
         if (ghostIndex < 0) {
             for (j = 0; j < 3; j++) {
                 if (!locked[j] && ((gGhosts[j].encodedCourseIndex == 0) ||
@@ -162,8 +160,8 @@ s32 Save_LoadGhost(s32 courseIndex) {
     Ghost* ghost = gGhosts;
 
 #ifdef PORT
-    // Migrate a pre-library cartridge-slot ghost before any later vanilla overwrite. Failures are
-    // deliberately non-fatal: SRAM compatibility and the original loader remain authoritative.
+    // Migrate the pre-library cartridge-slot ghost before vanilla overwrites it. Non-fatal by
+    // design: the original loader stays authoritative.
     gdx_ghost_library_archive_sram();
 #endif
 
@@ -916,8 +914,8 @@ s32 Save_Init(SaveContext* saveContext, s32 arg1) {
     Save_InitWrite(saveContext);
     Save_Load(saveContext);
 #ifdef PORT
-    // Migrate an existing cartridge-slot player ghost only after the save has been fully loaded.
-    // Doing this here avoids any GUI-startup ordering dependency.
+    // Only after the save is fully loaded; here rather than at GUI startup, which would add an
+    // ordering dependency.
     gdx_ghost_library_archive_sram();
 #endif
     return 0;
@@ -1954,10 +1952,9 @@ void Save_LoadDDCups(ProfileSave* profileSaves, u8* cupCompletion, u16* staffGho
     }
 
 #ifdef AVOID_UB
-    //! @bug ddCups is only assigned inside the cupCompletion branch, but the
-    //! staffGhostCompletion branch below reads it — uninitialized when a
-    //! caller passes cupCompletion == NULL (tripped MSVC's runtime check on
-    //! the port's first-boot path).
+    //! @bug ddCups is only assigned inside the cupCompletion branch but read by the
+    //! staffGhostCompletion branch below -- uninitialized when a caller passes
+    //! cupCompletion == NULL. MSVC's runtime check trips on the port's first boot.
     ddCups = &profileSaves[0].ddCups;
 #endif
 
@@ -1981,26 +1978,14 @@ void Save_LoadDDCups(ProfileSave* profileSaves, u8* cupCompletion, u16* staffGho
 #endif
 
 #ifdef PORT
-/* Big-endian disk-record byte-swappers (PORT).
+/* MFS/64DD records are stored big-endian and bcopied raw by the port (port/n64_leo.c
+ * LeoReadWrite), so every multi-byte field reads reversed. As in CourseData_FromRom
+ * (course_gadgets.c): swap ONLY multi-byte fields; single-byte ones (MachineInfo, the raw
+ * replay stream) are already correct.
  *
- * MFS/64DD save records (SaveCourseRecords, GhostRecord, GhostData) are stored on
- * disk in N64 big-endian byte order. The console consumed them in place; the
- * little-endian port bcopies the raw disk bytes (port/n64_leo.c LeoReadWrite, via
- * func_8076852C / func_807684AC / DiskDrive_LoadData), so every multi-byte field
- * reads byte-reversed. These mirror CourseData_FromRom (course_gadgets.c): swap
- * ONLY the multi-byte fields. Single-byte fields (u8/s8/char -- including the
- * MachineInfo blocks and the raw replay input stream) are already correct and must
- * be left untouched.
- *
- * Checksum note (applies to every field marked "checksum" below):
- *   Save_CalculateChecksum() is an additive byte-sum, which is order-invariant --
- *   swapping bytes WITHIN a field never changes the sum over the record's bytes.
- *   On the console the record was written with  stored_checksum == byte_sum(data)
- *   and stored big-endian, so a raw little-endian read of that u16 field yields
- *   swap16(S). We therefore byte-swap the stored checksum field TOO: swap16 applied
- *   to swap16(S) restores S, which still equals the (unchanged) byte-sum S. A
- *   legitimate console-written record then validates, while a genuinely corrupt
- *   record (whose bytes no longer sum to its stored value) still fails. */
+ * Checksums get swapped too: Save_CalculateChecksum is an additive byte-sum, so in-field
+ * swaps never change the sum S, while the stored big-endian field reads back as swap16(S) --
+ * swapping restores S. Genuinely corrupt records still fail. */
 static void Gdx_SwapU16InPlace(void* p) {
     u8* b = (u8*)p;
     u8 t = b[0];
@@ -2020,28 +2005,27 @@ static void Gdx_SwapU32InPlace(void* p) {
 void SaveCourseRecords_FromRom(SaveCourseRecords* r) {
     s32 i;
 
-    Gdx_SwapU16InPlace(&r->checksum); /* u16 -- see checksum note above */
-    Gdx_SwapU16InPlace(&r->unk_02);   /* s16 */
+    Gdx_SwapU16InPlace(&r->checksum); /* see checksum note above */
+    Gdx_SwapU16InPlace(&r->unk_02);
     for (i = 0; i < 5; i++) {
-        Gdx_SwapU32InPlace(&r->timeRecord[i]); /* s32 */
+        Gdx_SwapU32InPlace(&r->timeRecord[i]);
     }
     for (i = 0; i < 5; i++) {
         Gdx_SwapU32InPlace(&r->engines[i]); /* f32 -- swap as raw u32 bits */
     }
     Gdx_SwapU32InPlace(&r->maxSpeed); /* f32 -- swap as raw u32 bits */
-    Gdx_SwapU32InPlace(&r->bestTime); /* s32 */
-    /* name[5][4], unk_48[8], unk_50[5], unk_F0: all single-byte. unk_80141C88_unk_1D
-       is MachineInfo (20x u8) followed by s8 unk_14[12] -- verified in unk_structs.h,
-       no multi-byte fields, so nothing to swap. */
+    Gdx_SwapU32InPlace(&r->bestTime);
+    /* name[5][4], unk_48[8], unk_50[5], unk_F0 and unk_80141C88_unk_1D (MachineInfo plus
+       s8 unk_14[12]) are all single-byte: nothing to swap. */
 }
 
 void GhostRecord_FromRom(GhostRecord* r) {
-    Gdx_SwapU16InPlace(&r->checksum);           /* u16 -- see checksum note above */
-    Gdx_SwapU16InPlace(&r->ghostType);          /* u16 */
-    Gdx_SwapU32InPlace(&r->replayChecksum);     /* s32 */
-    Gdx_SwapU32InPlace(&r->encodedCourseIndex); /* s32 */
-    Gdx_SwapU32InPlace(&r->raceTime);           /* s32 */
-    Gdx_SwapU16InPlace(&r->unk_10);             /* u16 */
+    Gdx_SwapU16InPlace(&r->checksum); /* see checksum note above */
+    Gdx_SwapU16InPlace(&r->ghostType);
+    Gdx_SwapU32InPlace(&r->replayChecksum);
+    Gdx_SwapU32InPlace(&r->encodedCourseIndex);
+    Gdx_SwapU32InPlace(&r->raceTime);
+    Gdx_SwapU16InPlace(&r->unk_10);
     /* unk_12[5] (s8), trackName[9] (u8), unk_20 (all single-byte): no swap. */
 }
 
@@ -2049,21 +2033,17 @@ void GhostData_FromRom(GhostData* d) {
     s32 i;
     GhostReplayInfo* ri = &d->replayInfo;
 
-    Gdx_SwapU16InPlace(&ri->checksum); /* u16 -- see checksum note above */
-    Gdx_SwapU16InPlace(&ri->unk_02);   /* s16 */
+    Gdx_SwapU16InPlace(&ri->checksum); /* see checksum note above */
+    Gdx_SwapU16InPlace(&ri->unk_02);
     for (i = 0; i < 3; i++) {
-        Gdx_SwapU32InPlace(&ri->lapTimes[i]); /* s32 */
+        Gdx_SwapU32InPlace(&ri->lapTimes[i]);
     }
-    Gdx_SwapU32InPlace(&ri->end);    /* s32 */
-    Gdx_SwapU32InPlace(&ri->size);   /* u32 */
-    Gdx_SwapU32InPlace(&ri->unk_18); /* s32 */
-    Gdx_SwapU32InPlace(&ri->unk_1C); /* s32 */
-    /* replayData[16200] (u8) is the raw replay INPUT stream: byte-addressed, consumed
-       byte-by-byte during playback, and summed as bytes by Save_CalculateGhostDataChecksum
-       (order-invariant). Swapping it would corrupt playback, so it is left untouched.
-       unk_3F68[0x18] (s8) likewise. Open question: only the GhostReplayInfo header is
-       provably multi-byte from the struct definition; nothing in the decomp indicates a
-       multi-byte field embedded in the stream, so none is swapped there. */
+    Gdx_SwapU32InPlace(&ri->end);
+    Gdx_SwapU32InPlace(&ri->size);
+    Gdx_SwapU32InPlace(&ri->unk_18);
+    Gdx_SwapU32InPlace(&ri->unk_1C);
+    /* replayData[16200] is the raw input stream: byte-addressed and checksummed as bytes, so
+       swapping it would corrupt playback. unk_3F68 (s8) likewise untouched. */
 }
 #endif
 
@@ -2126,7 +2106,7 @@ u16 Save_CalculateCupSaveChecksum(CupSave* cupSave) {
 OSPiHandle* Sram_Init(void) {
 #ifdef PORT
     gdx_sram_init();
-    return NULL; /* gSramPiHandlePtr is unused on PORT -- Sram_ReadWrite below never touches PI hardware */
+    return NULL; /* gSramPiHandlePtr is unused on PORT: Sram_ReadWrite never touches PI hardware */
 #endif
     if (sSramPiHandle.baseAddress == PHYS_TO_K1(PI_DOM2_ADDR2)) {
         return &sSramPiHandle;
@@ -2174,11 +2154,9 @@ void Sram_ReadWrite(s32 direction, u32 offset, void* dramAddr, size_t size) {
 /* AssetLoader.cpp: raw archive bytes, header included, partial copy allowed. */
 extern s32 GDiffuser_LoadArchiveFileBytes(const char* key, void* out, size_t outSize, size_t* copiedSize);
 
-/* courseIndex (COURSE_MUTE_CITY=0 .. COURSE_BIG_HAND=23) -> o2r key. Order
-   verified identical between the Courses enum (fzx_course.h) and
-   staff_ghost_records.yaml, and the keys exist in fzerox.o2r. Shared by
-   Save_LoadStaffGhostRecord (the record half) and Save_RomCopyGhostData (the
-   replay half) -- both parse the same archive entry. */
+/* courseIndex -> o2r key; the order must stay in lockstep with the Courses enum
+   (fzx_course.h) and staff_ghost_records.yaml. Shared by Save_LoadStaffGhostRecord (record
+   half) and Save_RomCopyGhostData (replay half), which parse the same archive entry. */
 static const char* const sStaffGhostKeys[] = {
     "staff_ghost_records/aMuteCity1StaffGhost",     "staff_ghost_records/aSilence1StaffGhost",
     "staff_ghost_records/aSandOcean1StaffGhost",    "staff_ghost_records/aDevilsForest1StaffGhost",
@@ -2198,16 +2176,14 @@ static const char* const sStaffGhostKeys[] = {
 #define GDX_GHOST_RD32(p, o) \
     ((u32) (p)[o] | ((u32) (p)[(o) + 1] << 8) | ((u32) (p)[(o) + 2] << 16) | ((u32) (p)[(o) + 3] << 24))
 
-/* Byte offset of the machine-info block inside the Torch payload (past the 0x40
-   OTR header), given the track-name length. Layout, from
-   torch/src/factories/fzerox/GhostRecordFactory.cpp's Export():
+/* Byte offset of the machine-info block inside the Torch payload (past the 0x40 OTR header),
+   given the track-name length. Layout from torch's GhostRecordFactory.cpp Export():
      u16 ghostType | u32 courseEncoding | u32 raceTime | u16 unk10
      u32 trackNameLen | u32 stringPrefixLen | trackName[trackNameLen]
      u8  machineInfo[0x14]
      s32 lapTimes[3] | s32 replayEnd | u32 replaySize | u32 replayDataLen
      u8  replayData[replayDataLen]
-   Note the doubled name length: an explicit write plus BinaryWriter's own
-   string prefix. */
+   The doubled name length is real: an explicit write plus BinaryWriter's string prefix. */
 #define GDX_GHOST_MACHINE_INFO_OFF(nameLen) (2u + 4u + 4u + 2u + 4u + 4u + (nameLen))
 #endif
 
@@ -2219,13 +2195,9 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
 #endif
 
 #ifdef PORT
-    /* Staff ghost records live in the o2r archive as Torch "GhostRecord" resources,
-       NOT in host SRAM. The port registers no libultraship factory for that resource
-       type yet (see port/resource/ResourceFactories.cpp), so the deserializing
-       loader (GDiffuser_LoadAssetBytes) cannot serve them; we pull the raw archive-file
-       bytes and parse the Torch payload here. This matters because func_i10_8012B580
-       seeds every standard-cup CPU pacing target from ghostInfo.raceTime -- the old
-       return-(-1) stub left that seed uninitialized, degenerating CPU pacing. */
+    /* Staff ghost records are Torch "GhostRecord" resources with no registered libultraship
+       factory, so pull the raw archive bytes and parse here. Not stubbable:
+       func_i10_8012B580 seeds standard-cup CPU pacing from ghostInfo.raceTime. */
     {
         /* 0x40 OTR header + Torch record prefix (<= 16 + 4 + 9 name + 20 machine). */
         u8 raw[128];
@@ -2241,19 +2213,14 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
         if (!GDiffuser_LoadArchiveFileBytes(sStaffGhostKeys[courseIndex], raw, sizeof(raw), &copied)) {
             return -1;
         }
-        /* Need at least the 0x40 header + the 16-byte fixed record prefix. */
         if (copied < 0x40 + 16) {
             return -1;
         }
-        p = raw + 0x40; /* skip the OTR/Torch header (Archive.h OTR_HEADER_SIZE == 64) */
+        p = raw + 0x40; /* OTR header; Archive.h OTR_HEADER_SIZE == 64 */
         o = 0;
 
-        /* Torch's GhostRecordBinaryExporter writes the payload PACKED (no struct
-           alignment) in native = little-endian order on the LE build host, and it
-           DROPS both the record checksum and the replay checksum. Read every scalar
-           explicitly little-endian -- these are NOT big-endian N64 bytes, so no
-           byte-swap. Fields land in GhostRecord exactly as func_i2_80101590 reads
-           them (the same fields the non-PORT DMA path fills). */
+        /* Torch writes this payload packed little-endian and drops both checksums -- these
+           are NOT big-endian N64 bytes, so no swap. */
         ghostRecord->checksum = 0; /* not serialized by Torch */
         ghostRecord->ghostType = (u16) (p[o] | (p[o + 1] << 8));
         o += 2;
@@ -2270,15 +2237,10 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
             (u32) ((u32) p[o] | ((u32) p[o + 1] << 8) | ((u32) p[o + 2] << 16) | ((u32) p[o + 3] << 24));
         o += 4;
 
-        /* Torch writes the track-name length TWICE. GhostRecordFactory.cpp emits an
-           explicit `writer.Write((uint32_t)mTrackName.length())`, and the very next
-           `writer.Write(mTrackName)` goes through BinaryWriter::Write(const
-           std::string&), which emits its OWN u32 length prefix before the characters.
-           Skipping only the first one reads every later field 4 bytes early, so
-           machineInfo.character lands on the second prefix (0) and every staff ghost
-           races as character 0 = Blue Falcon. Cross-check the two lengths rather than
-           blindly stepping over, so a future serializer change fails loudly instead of
-           silently mis-parsing. */
+        /* Torch writes the track-name length TWICE: an explicit u32, then BinaryWriter's own
+           string prefix. Skipping only one reads every later field 4 bytes early (every staff
+           ghost then races as Blue Falcon). Cross-check both so a serializer change fails
+           loudly instead of mis-parsing. */
         if (copied < (size_t) 0x40 + o + 4) {
             return -1;
         }
@@ -2292,12 +2254,10 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
         }
         o += 4;
 
-        /* Record track name is 9 bytes (empty for standard courses); reject anything
-           larger so the offset math below stays in-bounds. */
+        /* Bounds the offset math below; the record's name field is 9 bytes. */
         if (trackNameLen > sizeof(ghostRecord->trackName)) {
             return -1;
         }
-        /* Ensure the variable-length name plus the 20 machine bytes are present. */
         if (copied < (size_t) 0x40 + o + trackNameLen + 0x14) {
             return -1;
         }
@@ -2310,8 +2270,8 @@ s32 Save_LoadStaffGhostRecord(GhostInfo* ghostInfo, s32 courseIndex) {
         }
         o += trackNameLen;
 
-        /* MachineInfo (0x14) has the identical packed byte layout Torch writes for
-           GhostMachineInfo (character..cockpitB), so a byte copy is layout-safe. */
+        /* MachineInfo (0x14) matches Torch's GhostMachineInfo (character..cockpitB) byte for
+           byte, so a plain copy is layout-safe. */
         {
             u8* mi = (u8*) &ghostRecord->unk_20.unk_00;
             for (i = 0; i < 0x14; i++) {
@@ -2453,16 +2413,11 @@ s32 Save_LoadStaffGhost_impl(s32 courseIndex, s32 encodedCourseIndex) {
 
 void Save_RomCopyGhostData(GhostData* ghostData, s32 courseIndex) {
 #ifdef PORT
-    /* The replay half of the staff-ghost load. Its sibling
-       Save_LoadStaffGhostRecord reads the o2r payload, but this one was left on
-       the ROM path, and D_i2_80106DF0 holds HOST BSS pointers under PORT (the
-       zero-filled stubs in port/gen/LinkStubs.c), not ROM-segment offsets. Adding
-       a host pointer to a ROM base and masking it produced an address far outside
-       the ROM, so both DMAs missed and replayInfo came back zero-filled:
-       lapTimes {0,0,0} and replaySize 0. Every ghost then reported 00'00"000 and
-       despawned on the first frame after the race start, where racer.c checks
-       `replayIndex >= replaySize` (0 >= 0). Parse the same archive entry the
-       record half reads. */
+    /* Replay half of the staff-ghost load; parses the same archive entry as
+       Save_LoadStaffGhostRecord. The ROM path is unusable under PORT: D_i2_80106DF0
+       holds host BSS pointers (LinkStubs.c), not ROM-segment offsets, so the DMAs
+       miss and a zero-filled replayInfo makes every ghost despawn on the first frame
+       (racer.c: replayIndex >= replaySize). */
     {
         /* 0x40 OTR header + record prefix + the 16200-byte replayData ceiling
            GhostData declares, with slack for the length fields. */
@@ -2474,8 +2429,7 @@ void Save_RomCopyGhostData(GhostData* ghostData, s32 courseIndex) {
         u32 replayLen;
         u32 i;
 
-        /* Fail closed: a ghost with a zeroed replayInfo simply does not run,
-           which is what happens today anyway. Never leave it stale. */
+        /* Fail closed: a zeroed replayInfo simply does not run. Never leave it stale. */
         for (i = 0; i < sizeof(GhostReplayInfo); i++) {
             ((u8*) &ghostData->replayInfo)[i] = 0;
         }
@@ -2510,8 +2464,8 @@ void Save_RomCopyGhostData(GhostData* ghostData, s32 courseIndex) {
         replayLen = GDX_GHOST_RD32(p, o + 20);
         o += 24;
 
-        /* Torch drops both checksums, so leave them zero rather than inventing
-           values -- nothing in the staff-ghost path verifies them. */
+        /* Torch drops both checksums; leave them zero rather than inventing values, since
+           nothing in the staff-ghost path verifies them. */
         if ((replayLen > sizeof(ghostData->replayData)) || (copied < (size_t) 0x40 + o + replayLen)) {
             ghostData->replayInfo.size = 0;
             ghostData->replayInfo.end = 0;

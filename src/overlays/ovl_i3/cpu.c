@@ -660,12 +660,10 @@ void func_i3_80116974(void) {
     GhostInfo sp1C;
 
 #ifdef PORT
-    /* The EXPANSION_KIT path assigns sp1C.raceTime only when a staff record exists
-       (staffTime != -1). The gDifficulty >= EXPERT refinement below reads
-       sp1C.raceTime unconditionally, so with no record it read uninitialized stack.
-       0 makes `timeRecord < sp1C.raceTime` false -> no refinement, matching the
-       intent that no record means no adjustment. INT32_MAX would make it true and
-       corrupt D_i3_80141990 with a huge negative offset. */
+    /* raceTime is only assigned when a staff record exists (staffTime != -1), yet the
+       gDifficulty >= EXPERT refinement below reads it unconditionally. 0 keeps
+       `timeRecord < sp1C.raceTime` false, so no record means no adjustment; INT32_MAX
+       would instead corrupt D_i3_80141990 with a huge negative offset. */
     sp1C.raceTime = 0;
 #endif
 

@@ -3,10 +3,9 @@
 #include "PR/osint.h"
 
 #ifdef PORT
-/* port/n64_sched.c: cross-OS-thread message-queue guard. The dedicated audio OS thread calls
-   this function; __osDisableInt is a no-op on the port, so the queue data needs a real lock and
-   the wake path (which mutates the host-thread-affine run queue) must be deferred to the host
-   loop when called from a non-host thread. See the guard block in n64_sched.c. */
+/* port/n64_sched.c: cross-OS-thread message-queue guard. __osDisableInt is a no-op on the port
+   and the dedicated audio OS thread calls this, so the queue needs a real lock; the wake path
+   mutates the host-thread-affine run queue and must be deferred when off the host thread. */
 extern void gdx_mq_lock(void);
 extern void gdx_mq_unlock(void);
 extern int gdx_sched_on_host_thread(void);

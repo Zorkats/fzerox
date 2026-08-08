@@ -32,11 +32,9 @@ void func_80069F5C(FrameBuffer* fb) {
     var_s0 = &fb->array[70][96];
 
     for (var_s1 = 0; var_s1 < 0x6A00; var_s1 += 0x100, var_s0 += 80) {
-        /* +8 skips the leading Gfx command in the boot_textures ROM blob. This is
-         * a byte offset into N64-FORMAT ROM data, where a Gfx packet is 8 bytes.
-         * Was sizeof(Gfx); under the PC port (Phase G1) sizeof(Gfx) is wider than
-         * 8, so the literal N64 on-ROM size must be used here. On N64 sizeof(Gfx)
-         * == 8, so this is value-identical there. */
+        /* Skips the leading Gfx command in the boot_textures ROM blob. A literal 8, not
+         * sizeof(Gfx): this offsets into N64-format ROM data, where a Gfx packet is 8 bytes,
+         * while the port's sizeof(Gfx) is wider. Value-identical on N64. */
 #ifndef EXPANSION_KIT
         Dma_ClearRomCopy((uintptr_t) SEGMENT_ROM_START(boot_textures) + var_s1 + 8, var_s0, 0x100);
 #else
@@ -50,6 +48,28 @@ Gfx* func_8006A00C(Gfx* gfx, s32 scissorBoxType) {
 
     switch (scissorBoxType) {
         case SCISSOR_BOX_FULL_SCREEN:
+#ifdef PORT
+        {
+            /* Overscan removal: open the CRT-safe frame (viewport 296x224 + scissor 12,8..308,232)
+               to the full 320x240. The stock Vp is copied first so the z mapping stays bit-stock;
+               Camera_InitViewport applies the same numbers to the CPU-side mirrors. */
+            extern int gdx_remove_borders(void);
+            extern void* gdx_segmented_to_host_pointer(uintptr_t segmentedAddr);
+            static Vp sGdxVpFull;
+            static ScissorBox sGdxScissorFull = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+            if (gdx_remove_borders()) {
+                Vp* stock = (Vp*) gdx_segmented_to_host_pointer((uintptr_t) &aVpFullScreen);
+                sGdxVpFull = *stock;
+                sGdxVpFull.vp.vscale[0] = 640;
+                sGdxVpFull.vp.vscale[1] = 480;
+                sGdxVpFull.vp.vtrans[0] = 640;
+                sGdxVpFull.vp.vtrans[1] = 480;
+                gSPViewport(gfx++, &sGdxVpFull);
+                scissorBox = &sGdxScissorFull;
+                break;
+            }
+        }
+#endif
             gSPViewport(gfx++, &aVpFullScreen);
             scissorBox = &gScissorBoxFullScreen;
             break;

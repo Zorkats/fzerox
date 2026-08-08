@@ -56,10 +56,8 @@
 #define SEGMENT_RODATA_END(segment)   (segment ## _RODATA_END)
 #define SEGMENT_DATA_SIZE(segment)  (SEGMENT_RODATA_END(segment) - SEGMENT_DATA_START(segment))
 
-// On host the _DATA_SIZE linker symbols are 1-byte stubs, so (size_t)sym gives
-// the stub's host address instead of the section size. Return 0 on PORT builds so
-// arithmetic like (gBuffersVramEnd + SEGMENT_DATA_SIZE_CONST(x)) doesn't overflow
-// into garbage values that corrupt gSegments[].
+// On host the _DATA_SIZE linker symbols are 1-byte stubs, so (size_t)sym yields the
+// stub's address, not a section size; adding that to gBuffersVramEnd corrupts gSegments[].
 #ifdef PORT
 #define SEGMENT_DATA_SIZE_CONST(segment) ((size_t)0)
 #else
@@ -130,9 +128,9 @@ DECLARE_SEGMENT(game_context);
 
 #ifdef EXPANSION_KIT
 #if defined(PORT)
-/* PORT: the disk *_ROM_START linker symbols are 1-byte host stubs (garbage as
-   disk addresses). Resolve to tagged physical-disk handles instead; see
-   port_disk_segments.h and DiskDrive_LoadData's PORT branch. */
+/* The disk *_ROM_START linker symbols are 1-byte host stubs, garbage as disk
+   addresses. Resolve to tagged handles instead; see port_disk_segments.h and
+   DiskDrive_LoadData's PORT branch. */
 #include "port_disk_segments.h"
 #define SEGMENT_DISK_START(segment) (GDX_DISK_START_##segment)
 #else

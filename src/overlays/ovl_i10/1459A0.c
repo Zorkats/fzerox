@@ -31,10 +31,9 @@ void func_i10_8012B580(void) {
 
     for (courseIndex = COURSE_MUTE_CITY; courseIndex <= COURSE_BIG_HAND; courseIndex++) {
 #ifdef PORT
-        /* Only publish a pacing seed when the staff record actually loaded. On
-           failure, leave the sDDStaffGhostRecordTimes[] -1 initializer intact --
-           writing ghostInfo.raceTime here would seed CPU pacing from an
-           uninitialized stack GhostInfo (the original bug this slice fixes). */
+        /* Only publish a pacing seed when the record actually loaded; on failure the
+           sDDStaffGhostRecordTimes[] -1 initializer must stand, or CPU pacing gets seeded
+           from an uninitialized stack GhostInfo. */
         if (Save_LoadStaffGhostRecord(&ghostInfo, courseIndex) == 0) {
             sDDStaffGhostRecordTimes[courseIndex] = ghostInfo.raceTime;
             loaded++;
@@ -45,8 +44,7 @@ void func_i10_8012B580(void) {
 #endif
     }
 #ifdef PORT
-    /* Permanent boot log: proves the staff-ghost pacing fix is active in field logs.
-       Value is the count of standard courses (of 24) whose records loaded. */
+    /* Boot log: how many of the 24 standard-course staff records resolved. */
     {
         extern void gdx_cki(const char*, int);
         gdx_cki("[staffghost] loaded standard-course records (of 24)", loaded);

@@ -85,15 +85,8 @@ Gfx* func_xk1_8002924C(Gfx* gfx, s32 xPos, s32 yPos, const char* fmt, ...) {
     charRemaining = _Printf(func_xk1_800290D0, buffer, fmt, args);
 
 #ifdef PORT
-    /* Blank Course-Edit info panels. The GDX_DIAG_NODEINFO SETTIMG probe saw ZERO
-       samples of the three seg-7 setup font sheets across a full editor route,
-       which reads as "the draw never runs" -- but the panel BACKGROUND does reach
-       the screen, and func_xk2_800E8F7C (course_edit/191080.c:2630) emits the
-       background and this text with no branch between them. Both cannot be true.
-       Logging the call itself separates the readings: no lines here means the text
-       really is gated off upstream; lines here means the draw runs and the SETTIMG
-       probe missed it (its !w1IsHostPointer guard), putting the fault downstream in
-       the blit. Note the caller passes prim alpha 0 at 191080.c:2647 and :2651. */
+    /* Probe (GDX_DIAG_NODEINFO): whether the blank Course-Edit info panels reach
+       this draw at all. */
     {
         extern int gdx_dev_gate_by_name_nodeinfo(void);
         extern void gdx_dbg_logf(const char* fmt, ...);
@@ -102,8 +95,8 @@ Gfx* func_xk1_8002924C(Gfx* gfx, s32 xPos, s32 yPos, const char* fmt, ...) {
         if (gdx_dev_gate_by_name_nodeinfo() && sLogged < 24) {
             sLogged++;
             /* %.*s, not %s: _Printf reports a length and does NOT terminate the
-               buffer, so a plain %s runs past the emitted bytes into whatever the
-               previous call left behind and prints convincing garbage. */
+               buffer, so a plain %s runs past the emitted bytes and prints
+               convincing garbage. */
             gdx_dbg_logf("[ekprintf] at (%d,%d) len=%d text=\"%.*s\" firstCell=%d\n", xPos, yPos, charRemaining,
                          (charRemaining > 0) ? charRemaining : 0, buffer,
                          (charRemaining > 0) ? func_xk1_80029218(buffer[0]) : -1);
@@ -143,8 +136,7 @@ void ExpansionKit_GetCharacterKeyboardPosition(char letter, s32* xPosPtr, s32* y
 #ifdef PORT
     /* Any character outside the switch and the two range tests below leaves both
      * outputs unset, and callers feed them straight into gDPLoadTextureTile as
-     * tile coordinates. Default to the END cell so an unexpected byte can never
-     * produce garbage geometry. */
+     * tile coordinates. Default to the END cell. */
     xPos = 9;
     yPos = 4;
 #endif

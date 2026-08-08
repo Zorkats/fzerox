@@ -117,4 +117,11 @@
 #define PORT_audio_table_ROM_START 0x00528730
 #define PORT_audio_table_ROM_END 0x00f67900
 
+/* Not extraction segments: raw slices of the main code segment, pulled out so the RSP
+ * microcode ships in the locally-generated archive instead of the source tree. */
+#define PORT_aspmain_text_ROM_START 0x00066270
+#define PORT_aspmain_text_ROM_END 0x00066fa0
+#define PORT_aspmain_data_ROM_START 0x00071ca0
+#define PORT_aspmain_data_ROM_END 0x00071f80
+
 #endif

@@ -12,58 +12,35 @@ extern LEODiskID D_800CD2B0;
 #ifdef PORT
 /* PORT: 64DD MFS management-area byte order.
  *
- * The MFS "RAM area" is the 64DD disk's own filesystem management block: a volume header, a
- * 0xB3A-entry file allocation table, and an array of MfsRamDirectoryEntry. It lives at the
- * first three LBAs of the writable region (gRamAreaCapacity.startLBA), is mirrored by a
- * three-LBA backup copy immediately after it, and is moved wholesale in and out of gMfsRamArea
- * by mfs_ram.c -- always exactly three LBAs, always that one struct.
+ * The MFS management block is big-endian on disk, and port/n64_leo.c's LeoReadWrite is a
+ * verbatim bcopy -- right for opaque file payloads, but it leaves gMfsRamArea holding
+ * big-endian bytes the decomp then reads little-endian. Every defined MfsRamDirectoryEntry.attr
+ * bit lives in the high byte, so unswapped, Mfs_GetDirectoryIndex never matches
+ * MFS_FILE_ATTR_DIRECTORY: the EK file picker builds an empty list and Mfs_SaveFile bails with
+ * N64DD_NOT_FOUND before writing a byte. Both fail SILENTLY, because func_xk1_8002E368 (AB150.c)
+ * folds N64DD_NOT_FOUND into its success branch.
  *
- * On N64 that block is BIG-ENDIAN, because it was authored by a big-endian CPU writing this
- * very struct. This port's drive replacement (port/n64_leo.c LeoReadWrite) is a verbatim bcopy
- * -- correct for file payloads, which are opaque bytes, but it leaves gMfsRamArea holding
- * big-endian bytes that the decomp then reads with host (little-endian) semantics.
+ * The fix cannot live at the transfer boundary (Mfs_ReadLBA/Mfs_WriteLBA or LeoReadWrite): the
+ * volume checksum spans the whole three-LBA area, and Mfs_ReadLBA splits the transfer into
+ * single-LBA staged copies whenever &gMfsRamArea is not 16-byte aligned, so a per-call hook
+ * cannot always see enough of the area to recompute it. Normalize the image once, here, at the
+ * single mount point. Notes on the shape this forces:
  *
- * The field that decides everything is MfsRamDirectoryEntry.attr. EVERY defined attr bit
- * (COPYLIMIT..DIRECTORY, bits 9..15) lives in the HIGH byte, so a correctly ordered attr always
- * has a zero low byte and a byte-swapped one always has a zero high byte. Unswapped,
- * Mfs_GetDirectoryIndex never matches MFS_FILE_ATTR_DIRECTORY, so Mfs_GetFilesPreparation
- * returns MFS_ENTRY_DOES_NOT_EXIST and the EK's "Choose a file" builder (func_xk1_8002BD64,
- * overlays/expansion_kit/A8140.c) takes its early-return with an empty list, while Mfs_SaveFile
- * bails with N64DD_NOT_FOUND before writing a byte. Both failures are SILENT, because
- * func_xk1_8002E368 (overlays/expansion_kit/AB150.c) folds N64DD_NOT_FOUND into its SUCCESS
- * branch and sets D_807C6EA8.unk_08 = 0, the "no message" case in the prompt renderer.
+ *   - The pass must be IDEMPOTENT: its own writes are journalled into the .gdd sidecar and
+ *     replayed next boot, so it decides from the root entry's attr byte pattern whether the
+ *     window is disk-order or already host-order and rewrites only in the first case.
+ *   - It rewrites the volume checksum, because a field-selective swap necessarily invalidates a
+ *     whole-area XOR. This also repairs a defect in the shipped image (checksum stored for
+ *     renewalCounter 0x47 against a stored 0x48), which drove the EK into its 0x10A "recover
+ *     manage area" path on every boot.
+ *   - Primary and backup windows are normalized independently: Mfs_CopyRamAreaFromBackup reads
+ *     the backup directly and must see the same convention.
+ *   - MfsRamId.formatDate and MfsRamDirectoryEntry.creationDate are deliberately NOT swapped.
+ *     Mfs_LEODiskTimeToMfsTime writes the MfsTimeFormat union through both its u16 and its u8
+ *     members, so no byte order makes both access widths agree. Nothing in the EK reads either.
  *
- * The fix cannot live at the transfer boundary (mfs_device.c Mfs_ReadLBA/Mfs_WriteLBA, or
- * LeoReadWrite): the volume checksum spans the WHOLE three-LBA area, and Mfs_ReadLBA splits the
- * transfer into single-LBA staged copies whenever &gMfsRamArea is not 16-byte aligned, so a
- * per-call hook cannot always see enough of the area to recompute it. Normalize the IMAGE once
- * instead, here, at the single point where the disk is mounted and before anything has read the
- * management area:
- *
- *   - DiskMount_Init is called exactly once (sys_main.c), after LeoDriveExist() has loaded the
- *     image and after the .gdd sidecar has been replayed over it, and before SLMFSCreateManager
- *     and every MFS operation.
- *   - The pass is IDEMPOTENT and self-describing: it reads the window, decides from the root
- *     entry's attr byte pattern whether it is disk-order or already host-order, and only rewrites
- *     when it is disk-order. That is what makes it safe to run every boot even though the write
- *     it performs is itself journalled into the .gdd and replayed next boot.
- *   - It rewrites the volume checksum in host word order, exactly as Mfs_CalculateVolumeChecksum
- *     would, because a field-selective swap necessarily invalidates a whole-area XOR. This also
- *     repairs a pre-existing defect in the shipped image, whose stored checksum is the one for
- *     renewalCounter 0x47 with 0x48 stored -- the mismatch that made Mfs_CheckChecksum fail and
- *     drove the EK into its 0x10A "recover manage area" path on every boot.
- *   - Both the primary window and the backup window are normalized independently, because
- *     Mfs_CopyRamAreaFromBackup reads the backup directly and must see the same convention.
- *
- * Fields deliberately NOT swapped: MfsRamId.formatDate and MfsRamDirectoryEntry.creationDate.
- * MfsTimeFormat is a union that Mfs_LEODiskTimeToMfsTime writes through BOTH u16 members
- * (unks0/unks2) and u8 members (unkb0..unkb3) of the same bytes, so its bit layout is only
- * self-consistent in the original byte order -- a byte swap cannot make both access widths agree.
- * Nothing in the EK reads either field (the picker sorts on name bytes, func_xk1_8002CA98), so
- * leaving them in disk order costs nothing.
- *
- * The user's pristine .ndd is never touched: LeoReadWrite writes into the in-memory image and
- * records the dirty range in the .gdd sidecar (port/disk_savefile.cpp), same as any game save.
+ * The user's pristine .ndd is never touched: writes land in the in-memory image and the .gdd
+ * dirty range (port/disk_savefile.cpp), same as any game save.
  */
 
 /* port/disk_buffer.cpp -- the loaded disk image. Raw extern because this decomp TU cannot include
@@ -206,26 +183,16 @@ static void GdxDiskNormalizeMfsManagementArea(void) {
     GdxMfsNormalizeWindow(startLBA + GDX_MFS_MGMT_LBAS);
 }
 
-/* PORT: the game code the MFS volume is written under.
+/* Retail can hardcode "EFZJ" because a JP Expansion Kit only ever mounts the JP EK disk. This
+ * port mounts whatever .ndd the user supplies, and the fan-translated disk re-IDs itself as
+ * "EFZE". The mismatch is not cosmetic: that volume sets MFS_VOLUME_ATTR_VPROTECT_WRITE, so
+ * Mfs_ValidateFileSystemOperation compares the disk ID against gGameCode and, stuck at "EFZJ",
+ * fails every write with 0x106 -- no custom machine or course can be saved.
  *
- * Retail hardcodes "EFZJ" because the only disk a JP Expansion Kit can ever mount is the JP EK
- * disk, whose LEODiskID.gameName is "EFZJ". This port mounts whatever .ndd the user supplies, and
- * the fan-translated English EK disk re-IDs itself as "EFZE".
- *
- * That mismatch is not cosmetic. The translated volume's MfsRamId.attr is 0x20 =
- * MFS_VOLUME_ATTR_VPROTECT_WRITE, "prohibits writes unless game and company code match", and
- * Mfs_ValidateFileSystemOperation (mfs_validate.c) enforces it by comparing the DISK ID's company
- * and gameName against gCompanyCode/gGameCode. With gGameCode stuck at "EFZJ" every write
- * validation returns -1, Mfs_SaveFile reports 0x106, and no custom machine or course can be
- * saved -- the second blocker behind broken saving, sitting immediately behind the byte-order
- * bug above.
- *
- * So take the code from the mounted disk's own boot ID, which is what the retail pairing would
- * have produced anyway. leoBootID is filled from the image's disk-ID block by
- * gdx_leo_on_disk_loaded() (port/n64_leo.c). Only accept it when all four bytes are present:
- * Mfs_SetGameCode copies via mfsStrnCpy, which stops at a NUL, and a short copy would leave
- * gGameCode partly zeroed and fail the compare just as badly as the wrong code did. Anything
- * unexpected falls back to retail's literal so behaviour is never worse than before.
+ * Take the code from the mounted disk's own boot ID instead (filled by gdx_leo_on_disk_loaded).
+ * Accept it only when all four bytes are present: Mfs_SetGameCode copies via mfsStrnCpy, which
+ * stops at a NUL, so a short copy fails the compare just as badly. Otherwise fall back to
+ * retail's literal.
  */
 static void GdxDiskSetGameCodeFromDisk(void) {
     s32 i;
@@ -251,8 +218,7 @@ void DiskMount_Init(void) {
     LEODiskTime diskTime = LEO_DISK_TIME(19, 99, 12, 31, 23, 59, 59);
 
 #ifdef PORT
-    /* Must precede SLMFSCreateManager and therefore every MFS read of the management area. See the
-       essay above for why the mount point is the right place for this. */
+    /* Must precede SLMFSCreateManager and therefore every MFS read of the management area. */
     GdxDiskNormalizeMfsManagementArea();
 #endif
     func_80762330(&diskTime);

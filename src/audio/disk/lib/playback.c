@@ -124,8 +124,8 @@ static Note* gdx_unlock_audio_note_result(SequenceLayer* layer, Note* note) {
     s32 noteIndex = gdx_unlock_audio_note_index(note);
 
     if (noteIndex >= 0 && noteIndex < GDX_UNLOCK_AUDIO_MAX_TRACKED_NOTES) {
-        // Tag the allocated note itself so diagnostic attribution survives release
-        // tails and cannot leak to later system effects when the note slot is reused.
+        // Tag the note slot itself so attribution survives release tails and cannot
+        // leak to later effects once the slot is reused.
         sGdxUnlockAudioJingleNotes[noteIndex] =
             sGdxUnlockAudioJingleActive && gdx_unlock_audio_is_target_channel(layer);
     }
@@ -252,9 +252,8 @@ void Audio_NoteSetResamplingRate(Note* note, f32 freqScale) {
     f32 resamplingRate = 0.0f;
 
 #ifdef PORT
-    /* Note-lifecycle probe: a note that "ends" within a few frames while its
-       envelope sustains points at runaway frequency scale (sample consumed
-       instantly). Log the first few rates (x1000). */
+    /* Probe: is a runaway freqScale consuming the sample instantly, ending notes whose
+       envelope still sustains? */
     {
         extern void gdx_cki(const char* s, int v);
         static s32 sRateLogs = 0;
@@ -302,8 +301,7 @@ void Audio_NoteInit(Note* note) {
 
 void Audio_NoteDisable(Note* note) {
 #ifdef PORT
-    /* Pair of the freqScale probe: records every early note death and the
-       ADSR state it died in (release=4/disabled hints at who killed it). */
+    /* Pair of the freqScale probe: which ADSR state do early note deaths happen in? */
     {
         extern void gdx_cki(const char* s, int v);
         static s32 sDisableLogs = 0;
@@ -343,18 +341,13 @@ void Audio_ProcessNotes(void) {
         playbackState = &note->playbackState;
         if (playbackState->parentLayer != NO_LAYER) {
 #ifdef PORT
-            /* Root cause of intermittent frozen-boot silence: on
-               console this guard rejects parentLayer values below KSEG0 —
-               every VALID N64 pointer is >= 0x80000000 as u32, so for real
-               layers the branch is dead code; it only catches NULL/corrupt
-               low values. On a 64-bit host the low 32 bits of a genuine
-               heap pointer are arbitrary, so whenever the audio heap lands
-               at an address with low32 < 0x7FFFFFFF (pure allocation luck,
-               varies per boot), every note on that layer is skipped here
-               forever: Audio_InitNoteSub never runs, noteSubEu keeps
-               resamplingRateFixedPoint = 0, synthesis decodes zero samples,
-               and the title BGM is silent. Console-faithful host
-               equivalent of the guard: only reject NULL. */
+            /* Root cause of intermittent frozen-boot silence. On console every valid layer
+               pointer is >= 0x80000000 as u32, so this guard is dead code for real layers
+               and only catches NULL or corrupt values. On a 64-bit host the low 32 bits of
+               a genuine heap pointer are arbitrary, so whenever the audio heap happens to
+               land under 0x7FFFFFFF -- allocation luck, varies per boot -- every note on
+               that layer is skipped forever: Audio_InitNoteSub never runs, synthesis decodes
+               zero samples. Console-faithful equivalent here: only reject NULL. */
             if (playbackState->parentLayer == NULL) {
                 {
                     extern void gdx_cki(const char* s, int v);
@@ -478,11 +471,9 @@ void Audio_ProcessNotes(void) {
                     subAttrs.velocity = 0.0f;
                 }
 #ifdef PORT
-                /* [boost-vol] probe: [boost-synth] proved the boost
-                   note synthesizes at targetVol ~9/4096 (-77 dB). velocity here =
-                   layer->noteVelocity * adsrScale; layer->noteVelocity already folds
-                   the channel volume chain. Dump each factor separately for the
-                   fingerprinted boost (9676) / low-energy (1440) notes. */
+                /* Probe: which factor of the volume chain drops the boost note to
+                   ~9/4096 (-77 dB)? Sizes 9676/1440 fingerprint the boost and
+                   low-energy samples. */
                 if (noteSubEu->tunedSample != NULL && noteSubEu->tunedSample->sample != NULL &&
                     (noteSubEu->tunedSample->sample->size == 9676 ||
                      noteSubEu->tunedSample->sample->size == 1440)) {
@@ -510,8 +501,7 @@ void Audio_ProcessNotes(void) {
             subAttrs.frequency *= gAudioCtx.audioBufferParameters.resampleRate;
             subAttrs.velocity *= scale;
 #ifdef PORT
-            /* Volume-chain probe: names which factor is zero in silent
-               (Release) boots — the layer velocity or the ADSR scale. */
+            /* Probe: in silent Release boots, is the layer velocity or the ADSR scale zero? */
             {
                 extern void gdx_cki(const char* s, int v);
                 static s32 sVelLogs = 0;
@@ -548,11 +538,9 @@ Instrument* Audio_GetInstrument(s32 fontId, s32 instId) {
     Instrument* inst;
 
 #ifdef PORT
-    /* [inst-get] probe (missing boost/low-health, companion to [note-alloc]):
-       every failure path here is silent at the gameplay layer -- a NULL return
-       makes AudioSeq_GetInstrument invalidate the layer's instrument and the SE
-       simply never sounds. Encodes which branch failed. reason: 1=fontFF,
-       2=fontNotLoaded, 3=instId>=count, 4=nullInstrument. */
+    /* Probe: every failure path here is silent at the gameplay layer -- a NULL return
+       just makes the SE never sound. reason 1=fontFF, 2=fontNotLoaded, 3=instId>=count,
+       4=nullInstrument. */
     {
         extern void gdx_cki(const char* s, int v);
         static s32 sInstGetLogs = 0;
@@ -963,11 +951,8 @@ void Audio_NoteInitForLayer(Note* note, SequenceLayer* layer) {
     }
     sub->tunedSample = layer->tunedSample;
 #ifdef PORT
-    /* [boost-init] probe (companion to synthesis.c's [boost-synth]): fingerprints
-       the boost (9676-byte) / low-energy (1440-byte) samples at note init.
-       init-line WITHOUT a matching [boost-synth] line = the note died between
-       Audio_NoteInitForLayer and AudioSynth_ProcessNote (disabled/stolen/finished
-       before its first synthesis tick). */
+    /* Probe: an init line with no matching [boost-synth] line in synthesis.c means the
+       note died between here and its first synthesis tick. */
     if (sub->tunedSample != NULL && sub->tunedSample->sample != NULL &&
         (sub->tunedSample->sample->size == 9676 || sub->tunedSample->sample->size == 1440)) {
         extern void gdx_cki(const char* s, int v);
@@ -1077,11 +1062,9 @@ Note* Audio_AllocNote(SequenceLayer* layer) {
     }
 #endif
 #ifdef PORT
-    /* [note-alloc] probe (missing boost/low-health SEs): both dead SEs
-       reach seqPlayer 0 channel 10 ([sfx-req] confirmed) and both are the only SE
-       scripts that lower channel notePriority (e9 02 / e9 07) -- prime suspect is
-       priority starvation in note stealing. Log every alloc attempt on that channel
-       (request + outcome) and every global alloc failure. Caps keep it bounded. */
+    /* Probe: both dead SEs are the only SE scripts that lower channel notePriority, so
+       priority starvation in note stealing is the suspect. Logs every alloc attempt on
+       seqPlayer 0 channel 10 plus every global failure. */
     {
         extern void gdx_cki(const char* s, int v);
         static s32 sSeChanLogs = 0;

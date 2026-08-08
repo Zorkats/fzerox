@@ -83,9 +83,8 @@ s32 Mfs_ValidateFileSystemOperation(s32 validationFlags, u16 entryIndex, u16 sub
             //! can occur
             //       To fix, copy the section from the writing validation (potentially using FORBID_R instead also!)
             if (dirEntryIndex == MFS_ENTRY_DOES_NOT_EXIST) {
-                /* AVOID_UB (per annotation): assigning entryIndex left
-                   dirEntryIndex = -1 for the read below = OOB directory-entry
-                   read, making save validation layout-dependent on host. */
+                /* AVOID_UB: assigning entryIndex left dirEntryIndex = -1, so the read below
+                   went out of bounds and made save validation layout-dependent on host. */
                 dirEntryIndex = Mfs_GetDirectoryIndex(dirId);
             }
             if ((gMfsRamArea.directoryEntry[dirEntryIndex].attr & MFS_FILE_ATTR_FORBID_W)) {

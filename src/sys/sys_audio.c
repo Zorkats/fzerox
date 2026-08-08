@@ -13,12 +13,9 @@ void Audio_ThreadEntry(void* arg0) {
     static AudioTask* sCurAudioTask = NULL;
     (void) arg0;
 #ifdef PORT
-    // This branch once only drained gAudioTaskMesgQueue and never called Audio_Init, because the
-    // audio data was uninitialized (ROM DMA no-op'd). gRomSegmentPairs[0..2] (audio_seq/audio_bank/
-    // audio_table) are now populated synchronously by DiskDrive_InitRomSegmentPairs() in sys_main.c's
-    // Idle_ThreadEntry, before the same function's osCreateThread(&sAudioThread, ...) — sequential,
-    // no race — and AudioLoad_Init handles heap==NULL via the static gAudioHeap. So run the real
-    // init and per-frame task loop; that is what ticks the sequence engine.
+    // Safe to run the real init here: DiskDrive_InitRomSegmentPairs populates
+    // gRomSegmentPairs[0..2] from Idle_ThreadEntry before it creates this thread, so there is no
+    // race, and AudioLoad_Init handles heap == NULL via the static gAudioHeap.
     AudioThread_InitMesgQueues();
 #ifndef EXPANSION_KIT
     Audio_Init();
@@ -29,11 +26,8 @@ void Audio_ThreadEntry(void* arg0) {
     while (true) {
         osRecvMesg(&gAudioTaskMesgQueue, &sAudioTaskMsg, OS_MESG_NOBLOCK);
         osRecvMesg(&gAudioTaskMesgQueue, &sAudioTaskMsg, OS_MESG_BLOCK);
-        /* One-shot diagnostic (first 10 wakeups): does the audio thread's own loop keep cycling
-           after boot (VI -> gAudioTaskMesgQueue -> this blocking recv)? If it stops logging early
-           while the game keeps running, the break is in the wake chain (the main thread's
-           EVENT_MESG_VI handling, or the fiber scheduler) — not inside
-           Audio_SetupCreateTask/CreateTaskImpl. */
+        /* Probe: stopping early while the game keeps running puts the break in the VI wake
+           chain rather than in Audio_SetupCreateTask/CreateTaskImpl. */
         {
             extern void gdx_cki(const char* s, int v);
             static s32 sAudioThreadWakeLogCount = 0;

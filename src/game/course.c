@@ -18,7 +18,7 @@
 #endif
 
 typedef struct unk_800CF528 {
-    void* texture; // PORT: was s32; pointer so array asset symbols are valid static initializers (and avoid 64-bit truncation)
+    void* texture; // PORT: was s32; a pointer keeps asset symbols valid static initializers, untruncated on 64-bit
     f32 textureScale;
     s32 width;
     s32 tile;
@@ -632,15 +632,10 @@ void func_8009DB28(CourseSegment* segment, f32* arg1, f32* arg2) {
     CourseSegment* nextNextSegment;
 
 #ifdef PORT
-    /* Guard: this walks segment->prev, segment->next and
-     * nextSegment->next unconditionally. The circular list is only fully
-     * linked once func_80074428()/func_i2_800B39B4() finish building it from
-     * the just-DMA'd CourseData; if a caller reaches here first (observed via
-     * the title screen's auto-triggered attract-mode race, which queues a
-     * course/mode change with no user-facing loading gate) any of these
-     * pointers can still be NULL/stale, and this then dereferences two hops
-     * deep with no caller-side check. Bail via the function's own existing
-     * "invalid" sentinel (-1.0f) instead of crashing. */
+    /* The segment list is only fully linked once func_80074428/func_i2_800B39B4 finish building
+     * it from the DMA'd CourseData. The title screen's attract-mode race queues a course change
+     * with no loading gate, so this two-hop walk can hit stale/NULL links. Bail through the
+     * function's own -1.0f "invalid" sentinel. */
     if (segment == NULL || segment->prev == NULL || segment->next == NULL || segment->next->next == NULL) {
         *arg1 = -1.0f;
         *arg2 = -1.0f;
@@ -721,18 +716,12 @@ s32 Course_SplineCalculateTensions(CourseInfo* courseInfo) {
     f32 alpha2;
     CourseSegment* segment = courseInfo->courseSegments;
 #ifdef PORT
-    /* Guard: courseSegments is a shared static buffer reused across
-     * course loads (func_800A4B54/func_80074428) — it is only a valid closed
-     * loop once the course's segmentCount/next/prev links have been (re)built
-     * for THIS course. A caller that reaches this before that finishes (the
-     * title screen's auto-triggered attract-mode race is the one path that
-     * queues a course change with no loading-screen wait) walks a stale or
-     * partially-linked list here, which either dereferences a NULL segment
-     * or never satisfies "segment != courseInfo->courseSegments" and walks
-     * off the end of the buffer. Bound the walk and bail (the existing -1
-     * "invalid tension" return) instead of crashing. */
+    /* courseSegments is a static buffer reused across course loads, so it is only a closed loop
+     * once this course's links are rebuilt (see func_8009DB28). Reached earlier, the walk either
+     * derefs NULL or never re-reaches the head and runs off the buffer. Bound it and take the
+     * existing -1 "invalid tension" exit. */
     s32 guard = 0;
-    const s32 kMaxSegments = 4096; /* generous: real courses use well under 100 */
+    const s32 kMaxSegments = 4096; /* real courses use well under 100 */
 
     if (segment == NULL) {
         return -1;
@@ -1343,12 +1332,8 @@ s32 func_i2_800B39B4(CourseInfo* courseInfo) {
     CourseSegment* prevSegment;
     CourseSegment* segment = courseInfo->courseSegments;
 #ifdef PORT
-    /* Guard: same unguarded circular-list walk as
-     * Course_SplineCalculateTensions/func_8009DB28 above, and this is the
-     * function func_80074428() actually calls (under EXPANSION_KIT) for
-     * every course load, including the title screen's auto-triggered
-     * attract-mode race. See the comment on func_8009DB28 for the failure
-     * mode; bail the same way the function's own "nothing found" case does. */
+    /* Same unguarded list walk as func_8009DB28, and this is the one func_80074428 calls on
+     * every EK course load. Bail the way the function's own "nothing found" case does. */
     s32 guard = 0;
     const s32 kMaxSegments = 4096;
 
@@ -4484,13 +4469,8 @@ Gfx* func_800A95B4(Gfx* gfx) {
     gSPDisplayList(sCourseDisp++, D_8014040);
     gSPDisplayList(sCourseDisp++, D_8014078);
 #ifdef PORT
-    /* Diagnostic toggle for the rail strobe: the red channel here is a per-frame sawtooth
-       (period 32) animating the rail chevron color flow. Under matrix-only frame
-       interpolation the value is frozen per tick and steps unevenly (M oscillates 2,3),
-       which is the leading suspect. GDX_RAIL_COLOR_TEST=1 freezes the channel to a mid-ramp
-       constant: if the strobe then disappears, the frozen color animation is the cause and
-       primcolor value interpolation is the fix. Unset (the default), the expression below is
-       byte-identical to stock. */
+    /* GDX_RAIL_COLOR_TEST=1 freezes the rail chevron sawtooth: if the strobe stops, the cause is
+       primcolor not being interpolated. Unset, this is byte-identical to stock. */
     {
         extern s32 gdx_rail_color_test_enabled(void);
         if (gdx_rail_color_test_enabled()) {
@@ -4574,14 +4554,13 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     Camera* camera;
     s32 i;
 #ifdef PORT
-    // "Extended draw distance" (gEnhancements.Graphics.DrawDistance, a percentage, default 100).
-    // Cached once per Course_Draw call -- one call per active camera per frame -- so the per-chunk
-    // cull loop below, up to SEGMENT_CHUNK_COUNT iterations, never enters the CVar bridge. Applied
-    // ONLY at the chunk-depth cull comparison further down; sCourseFarRenderDistance itself (the
-    // course's own per-venue value, set in Course_SegmentsInit) is left untouched, so nothing else
-    // that reads it is affected. At the default 100 the multiplier is exactly 1.0f, an IEEE-754
-    // exact no-op multiply, so stock rendering is preserved bit-for-bit.
+    // gEnhancements.Graphics.DrawDistance (percent, default 100), cached once per call so the
+    // per-chunk cull loop never enters the CVar bridge. Applied only at the depth cull below;
+    // sCourseFarRenderDistance itself stays untouched for its other readers. At 100 the
+    // multiplier is exactly 1.0f, an IEEE-754 exact no-op multiply, so stock output is
+    // bit-identical.
     f32 gdxFarRenderDistanceScale;
+    f32 gdxCullX;
 #endif
 
     camera = &gCameras[cameraIndex];
@@ -4590,18 +4569,24 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     {
         extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
         s32 drawDistancePercent = CVarGetInteger("gEnhancements.Graphics.DrawDistance", 100);
-        // Clamp independently of the menu slider, since the CVar can be hand-edited in the config
-        // file: never shrink below stock, and cap at 200%. 200% is the EFFECTIVE ceiling, not an
-        // arbitrary one -- the track streams as a fixed set of chunks built only out to a bounded
-        // horizon (gSegmentChunks, capped at SEGMENT_CHUNK_COUNT), so once the scaled cull threshold
-        // (sCourseFarRenderDistance * scale) clears the furthest built chunk, which happens by
-        // ~200%, a larger multiplier un-culls nothing.
+        // Clamped here and not only in the menu, since the CVar can be hand-edited. 200% is the
+        // effective ceiling, not an arbitrary one: the track streams a bounded set of chunks
+        // (gSegmentChunks, capped at SEGMENT_CHUNK_COUNT), so past ~200% the scaled threshold
+        // already clears the furthest built chunk and a larger multiplier un-culls nothing.
         if (drawDistancePercent < 100) {
             drawDistancePercent = 100;
         } else if (drawDistancePercent > 200) {
             drawDistancePercent = 200;
         }
         gdxFarRenderDistanceScale = (f32) drawDistancePercent / 100.0f;
+    }
+    /* The NDC-x cull below tests the 4:3 frustum's +-1.0, but under hor+ the visible band is
+       +-(aspect/(4/3)), so chunks that occupy real screen get culled (side pop-in).
+       gdx_get_ultrawide_cull_xscale is exactly 1.0f unless UltrawideMode is on, keeping the
+       comparison an IEEE-exact no-op. Y is untouched: hor+ never widens the vertical band. */
+    {
+        extern float gdx_get_ultrawide_cull_xscale(void);
+        gdxCullX = gdx_get_ultrawide_cull_xscale();
     }
 #endif
 
@@ -4670,7 +4655,11 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
             var_fv1 = temp_fa0 *
                       (((sp60.m[0][0] * chunk->pos.x) + (sp60.m[1][0] * chunk->pos.y) + (sp60.m[2][0] * chunk->pos.z)) +
                        sp60.m[3][0]);
+#ifdef PORT
+            if ((var_fv1 < -gdxCullX) || (var_fv1 > gdxCullX)) {
+#else
             if ((var_fv1 < -1.0f) || (var_fv1 > 1.0f)) {
+#endif
                 chunk->drawState = 0;
             } else {
                 temp_fa0 =
@@ -4871,10 +4860,8 @@ s32 func_i2_800BE8BC(CourseInfo* courseInfo) {
     f32 alpha2;
     CourseSegment* segment = courseInfo->courseSegments;
 #ifdef PORT
-    /* Guard: same reasoning as func_i2_800B39B4/
-     * Course_SplineCalculateTensions above — this is the second-chance path
-     * func_80074428() calls when func_i2_800B39B4() finds nothing, so it
-     * runs on every EK course load too. */
+    /* Same walk guard as func_8009DB28: this is the second-chance path func_80074428 takes when
+     * func_i2_800B39B4 finds nothing, so it runs on every EK course load too. */
     s32 guard = 0;
     const s32 kMaxSegments = 4096;
 

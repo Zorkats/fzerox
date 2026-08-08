@@ -80,20 +80,11 @@ void __osDevMgrMain(void* args) {
 #endif
         {
 #ifdef PORT
-            /* PORT: DEAD CODE (R4 census). __osDevMgrMain is unreachable under PORT —
-             * osCreatePiManager links to libultraship/src/libultraship/libultra/os_pi.cpp:6,
-             * which is an empty-body stub, so no device-manager thread ever runs. The
-             * decomp's own PI manager (pimgr.c) and its EDMAREAD producer (epidma.c) are not
-             * compiled either -- port/CMakeLists.txt force-adds only this file (devmgr.c) from
-             * libultra/io. Cartridge/audio DMA is instead serviced inline, synchronously, by
-             * libultraship's osEPiStartDma (libultraship/src/libultraship/libultra/os.cpp),
-             * which routes every read through the single byte-source shim
-             * (GdxSegmentSourceRead). The former gdx_rom_buffer rom-read here has been
-             * removed for the same reason: this safe no-op is retained only to keep the
-             * switch structure intact; if a future PORT caller ever revives this path it
-             * MUST read via the shim, not gdx_rom_buffer. It zero-fills the destination
-             * and posts the completion messages so a hypothetical caller cannot hang,
-             * then sets ret = -1 to skip the evtQueue wait below. */
+            /* Unreachable under PORT: osCreatePiManager resolves to libultraship's empty stub,
+             * so no device-manager thread ever runs, and DMA is serviced inline by its
+             * osEPiStartDma instead. Kept as a safe no-op to preserve the switch structure --
+             * it zero-fills and posts both completions so a hypothetical caller cannot hang.
+             * A future PORT caller reviving this path must read via GdxSegmentSourceRead. */
 #define GDX_PI_ROM_READ(mb_, dm_)                                                    \
     do {                                                                              \
         if ((mb_)->dramAddr != NULL && (mb_)->size > 0) {                           \

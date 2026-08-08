@@ -4,11 +4,8 @@
 extern unsigned char* gdx_rdram;
 #define GDX_DMA_RDRAM_SIZE ((size_t)0x1000000u)  /* must match GDX_RDRAM_SIZE in n64_rdram.h */
 extern void gdx_record_dma_load(unsigned int rdram_phys, unsigned int rom_offset, unsigned int size);
-/* R1 (C-R1.3/C-R1.9 #2): route the cartridge read through the single byte-source
- * shim (port/gdx_segment_source.{h,c}) instead of touching gdx_rom_buffer here.
- * Forward-declared rather than #include'd: this decomp TU's include path does not
- * carry port/. The shim returns verbatim ROM bytes (archive-first, raw fallback),
- * so the copied bytes are byte-identical to the old memcpy. */
+/* port/gdx_segment_source.{h,c}. Forward-declared rather than #include'd: this decomp TU's
+ * include path does not carry port/. Returns verbatim ROM bytes, archive-first. */
 extern int GdxSegmentSourceRead(unsigned int romBase, unsigned int size, void* dst);
 #endif
 
@@ -21,8 +18,7 @@ extern OSPiHandle* gCartRomHandle;
 
 #ifdef PORT
 extern void* gdx_resolve_registered_host_address(unsigned int addr);
-/* Both live in port/n64_gfx_bridge.cpp beside the resolver above; forward-declared here for the
-   same reason as the shim, this TU's include path does not carry port/. */
+/* port/n64_gfx_bridge.cpp; forward-declared for the same reason as the shim above. */
 extern size_t gdx_registered_host_capacity(const void* host);
 extern void gdx_dma_report_short_dest(const void* dst, unsigned int size, size_t capacity,
                                       unsigned int romOffset);
@@ -32,27 +28,28 @@ static size_t Dma_PortRomOffset(u8* romAddr) {
     return (phys >= 0x10000000u) ? (size_t)(phys - 0x10000000u) : (size_t)phys;
 }
 
-/* Resolve an N64 RAM pointer to a host address and report how many bytes may be written there.
-   Callers copy `size` bytes into the result, so without the extent they cannot distinguish a
-   legitimate destination from one about to overrun: every branch below previously checked only
-   that the START address was in range, never that start + size was. `*capacity` is 0 when the
-   extent is unknown -- see Dma_PortDestTooSmall for how that case is treated. */
+/* Resolve an N64 RAM pointer to a host address, reporting how many bytes may be written there.
+   Every branch below used to check only that the START address was in range, never start + size.
+   `*capacity` is 0 when the extent is unknown; Dma_PortDestTooSmall lets those through. */
 static u8* Dma_PortRamPointer(u8* ramAddr, size_t* capacity) {
     unsigned long long full = (unsigned long long)ramAddr;
     unsigned int low = (unsigned int)full;
 
     *capacity = 0;
 
-    /* Physical RDRAM offset (< 16MB): direct mapping. */
     if (full < (unsigned long long)GDX_DMA_RDRAM_SIZE) {
         *capacity = GDX_DMA_RDRAM_SIZE - (size_t)full;
         return gdx_rdram + (size_t)full;
     }
 
-    /* KSEG0 / KSEG1 virtual addresses (0x80000000–0xBFFFFFFF): strip the top bits
-       to get the physical RDRAM offset.  Game model-load DMA calls pass KSEG0
-       pointers; without this the memcpy is skipped and gdx_rdram stays empty. */
-    if ((low & 0xE0000000u) == 0x80000000u) {
+    /* KSEG0/KSEG1 -> physical RDRAM offset; game model-load DMAs pass KSEG0 pointers.
+       The `full <= 0xFFFFFFFF` width gate is load-bearing, not redundant: a 64-bit host
+       pointer can have a low32 that merely LOOKS like KSEG0 when ASLR bases the EXE at
+       0x????????8???????. Ungated it silently rerouted DMAs aimed at EXE globals into RDRAM --
+       seen with the module at 0x7FF7805F0000, where &gCourseCtx's low32 is 0x80D31680, so
+       course data landed at gdx_rdram+0xD31680, controlPointCount stayed 0, and cup select
+       crashed in Course_SegmentLengthsInit. It comes and goes with the per-file ASLR draw. */
+    if (full <= 0xFFFFFFFFull && (low & 0xE0000000u) == 0x80000000u) {
         unsigned int phys = low & 0x1FFFFFFFu;
         if (phys < (unsigned int)GDX_DMA_RDRAM_SIZE) {
             *capacity = GDX_DMA_RDRAM_SIZE - (size_t)phys;
@@ -68,14 +65,12 @@ static u8* Dma_PortRamPointer(u8* ramAddr, size_t* capacity) {
         return host;
     }
 
-    /* Already a full 64-bit host pointer, so it did not come from the registry and has no
-       recorded extent. Left unknown. */
+    /* Full 64-bit host pointer: not from the registry, so no recorded extent. */
     return ramAddr;
 }
 
-/* True when the copy provably does not fit. A copy is refused ONLY when the extent is known and
-   too small; an unknown extent is allowed through unchanged, so this guard cannot regress a path
-   that works today. The goal is to stop provable overruns, not to tighten every DMA at once. */
+/* Refuses a copy ONLY when the extent is known and too small; an unknown extent passes through
+   unchanged, so this guard cannot regress a path that works today. */
 static int Dma_PortDestTooSmall(const u8* dst, size_t capacity, size_t size, size_t romOffset) {
     if ((capacity != 0) && (capacity < size)) {
         gdx_dma_report_short_dest(dst, (unsigned int)size, capacity, (unsigned int)romOffset);
@@ -99,8 +94,8 @@ void Dma_RomCopy(u8* romAddr, u8* ramAddr, size_t size) {
         if (Dma_PortDestTooSmall(dst, capacity, size, romOffset)) {
             return;
         }
-        /* Archive-first via the shim; on a total miss (ROM absent / out of range)
-         * it leaves dst untouched and returns 0 -- match the old zero-fill. */
+        /* A total miss (ROM absent / out of range) leaves dst untouched; zero-fill as the
+         * pre-shim path did. */
         if (!GdxSegmentSourceRead((unsigned int)romOffset, (unsigned int)size, dst)) {
             memset(dst, 0, size);
             return;
@@ -129,12 +124,9 @@ void Dma_RomCopyWithBssInit(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr
 
 #ifdef PORT
     {
-        /* DEAD CODE under PORT (R4 census): this function's only caller, Dma_LoadOverlay(),
-           early-returns under PORT before ever reaching its call site, so this body is
-           unreachable. Retained for structure and for any future PORT caller -- which now
-           routes through the single byte-source shim (GdxSegmentSourceRead), archive-first
-           with a byte-identical raw-ROM fallback, exactly like Dma_RomCopy above, NOT by
-           reintroducing gdx_rom_buffer here. */
+        /* Unreachable under PORT: the only caller, Dma_LoadOverlay, early-returns first.
+           Kept for structure; a future PORT caller must go through GdxSegmentSourceRead,
+           not a reintroduced gdx_rom_buffer. */
         size_t romOffset = Dma_PortRomOffset(romAddr);
         size_t capacity;
         u8* dst = Dma_PortRamPointer(ramAddr, &capacity);
@@ -146,8 +138,6 @@ void Dma_RomCopyWithBssInit(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr
             bzero(bssAddr, bssSize);
             return;
         }
-        /* Archive-first; on a total miss (ROM absent / out of range) the shim leaves dst
-           untouched and returns 0 -- match the old zero-fill. */
         if (!GdxSegmentSourceRead((unsigned int)romOffset, (unsigned int)size, dst)) {
             memset(dst, 0, size);
         } else if (dst >= gdx_rdram && dst < gdx_rdram + GDX_DMA_RDRAM_SIZE) {
@@ -186,16 +176,10 @@ void Dma_LoadAssets(u8* romAddr, u8* ramAddr, size_t size) {
         romAddr += 0x400;
         ramAddr += 0x400;
 #ifdef PORT
-        /* Real hardware DMA'd this over the PI bus asynchronously, freeing the
-           CPU for other threads (notably audio) while it ran. This port's
-           Dma_RomCopy is a synchronous memcpy with no yield point, so a large
-           asset load (hud_gfx, machine_global_gfx, course textures -- often
-           hundreds of KB) run inline on the GAME thread can monopolize the
-           cooperative scheduler for its entire duration, starving the AUDIO
-           fiber (measured as AI buffer underrun gaps during course loads).
-           Yield every 32 blocks (32KB) so other runnable fibers get a turn;
-           see port/n64_sched.c's gdx_yield() -- it re-enqueues this thread as
-           runnable and returns to the host frame pump, then we resume here. */
+        /* Hardware DMA'd this asynchronously over the PI bus, leaving the CPU free. Here
+           Dma_RomCopy is a synchronous memcpy on the game thread, so a hundreds-of-KB asset
+           load monopolizes the cooperative scheduler and starves the audio fiber (AI buffer
+           underruns during course loads). Yield every 32KB. */
         if ((i & 31) == 31) {
             gdx_yield();
         }
@@ -209,8 +193,8 @@ void Dma_LoadAssets(u8* romAddr, u8* ramAddr, size_t size) {
 
 void Dma_LoadOverlay(u8* romAddr, u8* ramAddr, size_t size, void* bssAddr, size_t bssSize) {
 #ifdef PORT
-    // Overlays are statically compiled into the binary. Code+data live at their native host
-    // addresses; BSS is zero-initialised by the host loader. Nothing to load or clear.
+    // Overlays are statically compiled into the binary: code and data are already at their
+    // host addresses and BSS is zeroed by the host loader, so there is nothing to load.
     (void)romAddr; (void)ramAddr; (void)size; (void)bssAddr; (void)bssSize;
     return;
 #endif

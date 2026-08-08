@@ -15,15 +15,12 @@ extern char gEditCupTrackNames[][9];
 extern s32 gLeoDriveConnectionState;
 
 #ifdef PORT
-/* Disk-fetched ghost/course save records are big-endian; swap them on the
- * little-endian port immediately after each MFS/64DD fetch and BEFORE any checksum
- * validation or field use. Helpers live in ovl_i2/save.c next to the checksum
- * routines they pair with; declared extern here per the fzx_save.h consumer pattern. */
+/* ovl_i2/save.c, next to the checksum routines they pair with. Disk records are big-endian:
+ * swap after every MFS/64DD fetch and before any checksum check or field use. */
 extern void SaveCourseRecords_FromRom(SaveCourseRecords*);
 extern void GhostRecord_FromRom(GhostRecord*);
 extern void GhostData_FromRom(GhostData*);
 
-/* Byte-swap the three big-endian disk ghost saves (record + data) in place. */
 static void Gdx_SwapGhostSaves_FromRom(GhostSave* ghostSave) {
     s32 i;
 
@@ -54,22 +51,18 @@ void DDSave_LoadCourseGhostRecords(s32 courseIndex, GhostRecord* ghostRecord) {
         return;
     }
     DDSave_ClearCachedGhostSaves();
-    /* Blocking MFS ghost-record fetch: reachable from Time Attack race init
-     * (Race_Init -> Save_LoadGhost, race.c) and the Records menu
-     * (Records_LoadGhostRaceTimes / Records_HasGhostFor, records.c) for ANY
-     * course, not just Course Edit. func_807684AC posts a request to
-     * sSys6Thread's command queue and this blocks on gMFSMesgQ, which never
-     * gets a producer without a real 64DD disk -- same
-     * gLeoDriveConnectionState gate as the Course_Load fixes (course_gadgets.c).
-     * Skipping the fetch leaves the just-cleared (empty) ghost records in
-     * place, matching the existing "no saved ghost" fallback. */
+    /* func_807684AC posts to sSys6Thread and this blocks on gMFSMesgQ, which has no producer
+     * without a real 64DD disk. Reachable for ANY course, not just Course Edit (Time Attack
+     * race init, Records menu). Skipping leaves the just-cleared empty records, i.e. the
+     * existing "no saved ghost" fallback. Same gate as the Course_Load fixes in
+     * course_gadgets.c. */
     if (gLeoDriveConnectionState != 0) {
         func_807684AC(MFS_ENTRY_WORKING_DIR, sDDSaveGhostFileName, "GOST", COURSE_CONTEXT()->ghostSave,
                       offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave) + sizeof(SaveCourseRecords));
         osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
 #ifdef PORT
-        /* This fetch fills ghostSave[3] + saveCourseRecord (contiguous in CourseContext);
-           swap both from big-endian before the record checksum check below. */
+        /* One fetch fills ghostSave[3] + saveCourseRecord (contiguous in CourseContext), so
+           both need swapping before the checksum check below. */
         Gdx_SwapGhostSaves_FromRom(COURSE_CONTEXT()->ghostSave);
         SaveCourseRecords_FromRom(&COURSE_CONTEXT()->saveCourseRecord);
 #endif
@@ -120,17 +113,12 @@ bool DDSave_ValidateCachedGhostRecords(void) {
         return true;
     }
 #ifdef PORT
-    /* An all-zero SaveCourseRecords self-validates: the additive byte-sum of zeros (0)
-       matches the zeroed checksum field, so it sails through the check above. A freshly
-       formatted MFS save area feeds exactly that through the disk-course record fetch,
-       and a 0 ms best time then "beats" every staff ghost (Staff Ghost row + beaten
-       badge on a save that never played Time Attack).
-       Broadened defense-in-depth: a valid *played* record always holds a time in the
-       open range (0, MAX_TIMER). Values <= 0 (e.g. a byte-swap that never got corrected,
-       or a negative garbage s32) and values >= MAX_TIMER (the "no record" sentinel that
-       Save_InitCourseRecord seeds, plus any out-of-range garbage) are not trustworthy
-       playable times, so treat them as broken and let the caller re-initialize. Clearing
-       re-seeds MAX_TIMER, so flagging the sentinel here is harmless (same empty state). */
+    /* An all-zero SaveCourseRecords self-validates -- the additive byte-sum of zeros matches
+       the zeroed checksum field -- so a freshly formatted MFS save area sails through the
+       check above and its 0 ms best time "beats" every staff ghost. A record that was
+       actually played always holds a time in the open range (0, MAX_TIMER); anything else is
+       garbage or the "no record" sentinel. Clearing re-seeds the sentinel, so flagging it
+       here is harmless. */
     if (courseRecord->timeRecord[0] <= 0 || courseRecord->timeRecord[0] >= MAX_TIMER) {
         PRINTF("RECORD_DATA_ZEROED\n");
         return true;
@@ -151,18 +139,13 @@ void DDSave_LoadCourseGhostData(s32 courseIndex, s32 ghostIndex, GhostData* ghos
         return;
     }
     DDSave_ClearCachedGhostSaves();
-    /* Same gLeoDriveConnectionState gate as DDSave_LoadCourseGhostRecords
-     * above -- blocking MFS fetch, no producer without a real disk. In
-     * practice this is only reached for a ghost record that
-     * DDSave_LoadCourseGhostRecords already found on disk, so it's dead code
-     * without a disk; gated directly too since it has its own blocking call. */
+    /* Same gate as DDSave_LoadCourseGhostRecords: its own blocking MFS fetch, no producer
+     * without a real disk. */
     if (gLeoDriveConnectionState != 0) {
         func_807684AC(MFS_ENTRY_WORKING_DIR, sDDSaveGhostFileName, "GOST", COURSE_CONTEXT()->ghostSave,
                       offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave));
         osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
 #ifdef PORT
-        /* Fetched 3 GhostSaves (record + data) from disk; swap from big-endian
-           before ghostSave[ghostIndex].data is consumed below. */
         Gdx_SwapGhostSaves_FromRom(COURSE_CONTEXT()->ghostSave);
 #endif
     }
@@ -342,9 +325,8 @@ void DDSave_LoadDDCourseGhosts(s32 courseIndex) {
     DiskDrive_LoadData(SEGMENT_DISK_START(silence_3_staff_ghost) + courseIndex, COURSE_CONTEXT()->ghostSave,
                        3 * sizeof(GhostSave), 0);
 #ifdef PORT
-    /* Staff-ghost records are read straight from the big-endian disk image; swap them
-       so their timeRecord/raceTime and checksum are interpreted correctly on the port.
-       Without this, garbage byte-swapped staff-ghost times "beat" every record. */
+    /* Staff-ghost records come straight from the big-endian disk image. Without this swap,
+       garbage byte-swapped staff-ghost times "beat" every record. */
     Gdx_SwapGhostSaves_FromRom(COURSE_CONTEXT()->ghostSave);
 #endif
 }

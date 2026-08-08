@@ -71,15 +71,12 @@ extern "C" {
 #define OS_CYCLES_TO_USEC(c)	(((u64)(c)*(1000000LL/15625LL))/(OS_CPU_COUNTER/15625LL))
 
 #ifdef PORT
-/* On the 64-bit port these must NOT add/subtract KSEG bases: the values are
-   full host pointers whose low 32 bits often have bit 31 set, and the u32
-   arithmetic wraps mod 2^32, FLIPPING bit 31 (proven: &gFrameBuffer1 low32
-   0xA4710460 emitted into G_SETCIMG as 0x24710460 — unrecoverable by the gfx
-   bridge resolver, which killed every render-to-framebuffer composite).
-   Preserve the value instead: DL words naturally truncate to an intact low32
-   that the resolver's module/KSEG windows reconstruct. Genuine N64 addresses
-   (0x80xxxxxx asset values) also pass through unchanged — the resolver's own
-   KSEG strip handles those. */
+/* Must not add or subtract the KSEG bases here: the operands are host pointers whose
+   low 32 bits usually have bit 31 set, and the u32 arithmetic wraps mod 2^32 and flips
+   it (&gFrameBuffer1 low32 0xA4710460 reached G_SETCIMG as 0x24710460, which the gfx
+   bridge resolver cannot reconstruct). Passing the value through leaves an intact low32
+   the resolver's module/KSEG windows do resolve; genuine 0x80xxxxxx N64 addresses
+   survive unchanged too. */
 #define	OS_K0_TO_PHYSICAL(x)	((u32)(uintptr_t)(x))
 #define	OS_K1_TO_PHYSICAL(x)	((u32)(uintptr_t)(x))
 #define	OS_PHYSICAL_TO_K0(x)	((void *)(uintptr_t)(x))

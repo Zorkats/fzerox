@@ -215,16 +215,10 @@ s32 MainMenu_Update(void) {
                     break;
             }
 #else
-            /* Course Edit and Machine Create are 64DD-disk-only content: both
-             * overlays (course_edit/, machine_create/) rely on blocking MFS
-             * calls (func_8076852C/func_807683B8/... family -> osRecvMesg(
-             * &gMFSMesgQ, ..., OS_MESG_BLOCK)) that have no producer without a
-             * real disk connected (see gLeoDriveConnectionState gates in
-             * course_gadgets.c and dd_save.c). Rather than gate every MFS call
-             * site inside those overlays, refuse entry at the menu itself --
-             * same gLeoDriveConnectionState gate, same redirect targets the
-             * non-EK build already uses above -- so a no-disk EK session can't
-             * navigate into a mode that will hang on first disk access. */
+            /* Course Edit and Machine Create are 64DD-disk-only: their overlays block in
+             * osRecvMesg(&gMFSMesgQ, ..., OS_MESG_BLOCK) on first disk access, and without a
+             * disk nothing ever posts. Refused at the menu rather than at every MFS call site,
+             * reusing the redirect targets the non-EK build above already uses. */
             if (gLeoDriveConnectionState == 0) {
                 switch (gSelectedMode) {
                     case MODE_COURSE_EDIT:

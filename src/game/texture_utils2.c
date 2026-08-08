@@ -21,12 +21,8 @@ Gfx* func_8007E410(Gfx* gfx, TexturePtr texture, TexturePtr palette, s32 format,
         //! @bug pixelSize uninitialised
     }
 #ifdef PORT
-    /* [ci-draw] per-site census: the global [tex-census] budget burns out
-       before the pause menu opens, so its evidence is unreliable here. Log the
-       EXACT texture/palette pointers and their first 8 bytes AT THE DRAW CALL
-       -- zero palette bytes here mean the staging delivered zeros; nonzero
-       here with a garbled screen means the defect is bridge/interpreter-side.
-       Capped. */
+    /* Probe: zero palette bytes here mean staging delivered zeros; nonzero bytes with a
+       garbled screen put the defect bridge-side. */
     {
         extern void gdx_ckp(const char* s, void* v);
         extern void gdx_cki(const char* s, int v);

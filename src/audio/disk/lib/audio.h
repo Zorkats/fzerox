@@ -6,9 +6,8 @@
 #include "libc/stdlib.h"
 #include "libc/stdbool.h"
 #include "PR/leo.h"
-/* size_t for the PORT-added prototypes below comes from PR/ultratypes.h (via ultra64.h),
- * which defines it for host GCC/Clang builds; do NOT include the system <stddef.h> here --
- * it also typedefs wchar_t, conflicting with the decomp's own definition. */
+/* size_t comes from PR/ultratypes.h via ultra64.h; do NOT include the system <stddef.h>
+ * instead -- it also typedefs wchar_t, conflicting with the decomp's own definition. */
 
 struct Note;
 struct NotePool;
@@ -659,14 +658,10 @@ typedef struct AudioCmd {
     /* 0x0 */ union{
         u32 opArgs;
 #ifdef PORT
-        /* AUDIO_MK_CMD packs opArgs as (op<<24)|(arg0<<16)|(arg1<<8)|arg2 --
-           MSB-first, matching the N64's big-endian memory layout, where the
-           bitfield struct below (declared op-first) aliases byte0=op, byte1=arg0,
-           byte2=arg1, byte3=arg2. On a little-endian host the SAME u32 store puts
-           those bytes in the OPPOSITE order (byte0=arg2 ... byte3=op), so the
-           fields must be declared in REVERSE order here to alias the right byte.
-           Without the reversal, the drained cmd->op read back as 0 (byte0) instead
-           of the real opcode (byte3). */
+        /* AUDIO_MK_CMD packs opArgs MSB-first, so on big-endian byte0 aliases op.
+           A little-endian host lays the same u32 store out in reverse, so the fields
+           must be declared reversed to alias the right byte -- otherwise the drained
+           cmd->op reads back as 0 and every sound goes silent. */
         struct {
             u8 arg2;
             u8 arg1;
@@ -753,9 +748,8 @@ typedef struct {
     /* 0x00 */ s32 sampleBankId1;
     /* 0x04 */ s32 sampleBankId2;
 #ifdef PORT
-    /* Host sample-bank base pointers (AudioLoad_TrySyncLoadSampleBank returns
-       heap addresses). As s32 these truncated on 64-bit hosts, breaking every
-       relocated sampleAddr. */
+    /* Heap pointers from AudioLoad_TrySyncLoadSampleBank. As s32 they truncated on
+       64-bit hosts, breaking every relocated sampleAddr. */
     u8* baseAddr1;
     u8* baseAddr2;
 #else
@@ -1099,12 +1093,9 @@ typedef enum HaasEffectDelaySide {
 
 #define AUDIO_MK_CMD(b0,b1,b2,b3) ((((b0) & 0xFF) << 0x18) | (((b1) & 0xFF) << 0x10) | (((b2) & 0xFF) << 0x8) | (((b3) & 0xFF) << 0))
 
-/* gSequenceFontTable stores u16 values as big-endian byte pairs (the S16()
-   macro in aseq.h). Reading them through a host-endian u16* cast breaks on
-   little-endian: S16(0x2E) reads back as 0x2E00, indexing thousands of bytes
-   past the table (the audio-thread hang on the first SYNC_LOAD_SEQ_PARTS).
-   Assemble the value from bytes explicitly — identical codegen semantics on
-   big-endian console, correct everywhere else. */
+/* gSequenceFontTable holds big-endian u16 pairs (aseq.h's S16()). Through a host-endian
+   u16* cast S16(0x2E) reads back as 0x2E00, indexing thousands of bytes past the table
+   (audio-thread hang on the first SYNC_LOAD_SEQ_PARTS). Assemble from bytes instead. */
 #define AUDIO_SEQ_FONT_TABLE_U16(table, seqId) \
     ((u16)(((table)[(seqId) * 2] << 8) | (table)[(seqId) * 2 + 1]))
 
@@ -1292,9 +1283,9 @@ extern AudioHeapInitSizes gAudioHeapInitSizes;
 extern s16 D_80771228[];
 
 #ifdef PORT
-/* Enlarged on host builds: N64-tuned pool splits overflow the retail heap
-   once structs carry 64-bit pointers (see audio_heap.c). Declared size must
-   match — init_data.c derives the heap init size from sizeof(gAudioHeap). */
+/* Enlarged on host: N64-tuned pool splits overflow the retail heap once structs carry
+   64-bit pointers (see audio_heap.c). This declaration must match the definition --
+   init_data.c derives the heap init size from sizeof(gAudioHeap). */
 extern u8 gAudioHeap[0x2ECA00 * 4];
 #else
 extern u8 gAudioHeap[0x2ECA00];
@@ -1304,11 +1295,9 @@ extern u8 gAudioHeap[0x2ECA00];
 
 typedef struct LbaVaddrPair {
     s32 lba;
-    /* Host pointer to the one-block staging buffer (AudioHeap_Alloc). Was s32
-       (a KSEG0 address on console): on 64-bit hosts the store truncated and
-       the read sign-extended (0x00007FF7xxxxxxxx -> 0xFFFFFFFFxxxxxxxx),
-       crashing the first sample-bank bcopy. Same fix AudioDiskInfo's
-       endRamAddr/ramAddr already received. */
+    /* Was s32, a KSEG0 address on console: on 64-bit hosts the store truncated and
+       the read sign-extended, crashing the first sample-bank bcopy. Same fix as
+       AudioDiskInfo's endRamAddr/ramAddr. */
     u8* vAddr;
 } LbaVaddrPair;
 

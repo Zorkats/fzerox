@@ -8,10 +8,9 @@ s32* D_8003BBB0;
 u16 D_xk1_80033500 = 180;
 
 #ifdef PORT
-/* State for the PORT minimum-display hold on the transient disk prompts. The full reasoning
-   lives at the hold itself, inside func_xk1_8002ED64 below; it sits at file scope only so that
-   func_xk1_8002E9D0 -- which every EK screen calls from its own init -- can reset it, and so the
-   unk_0C == 4 banner hold in func_xk1_8002F9DC can share the same frame budget. */
+/* Minimum-display hold for the transient disk prompts (reasoning at the hold itself,
+   in func_xk1_8002ED64). File scope only so func_xk1_8002E9D0 can reset it on screen
+   entry and the unk_0C banner hold in func_xk1_8002F9DC can share the frame budget. */
 static s32 sPortPromptHoldId = 0;
 static s32 sPortPromptHoldFrames = 0;
 static s32 sPortBannerHoldFrames = 0;
@@ -20,14 +19,12 @@ static s32 sPortBannerHoldFrames = 0;
 void func_xk1_8002E9D0(s32 arg0) {
     D_xk1_80033500 = 180 / arg0;
 #ifdef PORT
-    /* Screen entry: drop any hold left over from the previous screen and discard a raise that
-       was recorded but never drawn. This is the abort/exit guard. func_xk1_8002ED64 only runs
-       while gInCourseEditor is set (sys/sys_gfx.c's Gfx_FullSync), and both Machine Create and
-       the Course Editor clear that flag on their way out, so a player who leaves during the one
-       frame between a dispatch and the next draw would otherwise freeze the hold mid-countdown
-       and see it resume as a stale "now saving" over whichever screen came next. Both screens
-       call this function from their init (machine_create.c, course_edit/19DD60.c), so re-entry
-       always starts from a clean slate. */
+    /* Screen entry: drop any hold left over from the previous screen and discard a raise
+       recorded but never drawn. func_xk1_8002ED64 only runs while gInCourseEditor is set,
+       and both Machine Create and the Course Editor clear that flag on their way out, so a
+       player leaving in the frame between a dispatch and the next draw would otherwise
+       freeze the hold mid-countdown and see it resume as a stale "now saving" over
+       whichever screen came next. */
     {
         extern volatile s32 gGdxDiskPromptRaised;
         extern volatile s32 gGdxDiskBannerRaised;
@@ -122,35 +119,23 @@ u16 D_xk1_80033504 = 0;
 u16 D_xk1_80033508 = 0;
 
 #ifdef PORT
-/* The disk's own progress prompts ("Loading...", "Saving...", "No file." and the
- * eleven others in D_xk1_800337D0) drew an EMPTY BOX on the fan-translated disk.
- * The frame was right, the text was simply absent.
+/* The disk's own progress prompts (D_xk1_800337D0) drew an empty box on the
+ * fan-translated disk. LeoFault_DrawErrorMessage (sys/disk/leo_fault_dd.c) walks
+ * its argument two bytes at a time and looks each pair up in a fixed table of 110
+ * Shift-JIS codes, so ASCII forms 'L'<<8 | 'o', matches nothing, and draws nothing
+ * for every character. That function is shared with the cart-side fault handler,
+ * so the ASCII case is diverted here rather than changed there.
  *
- * The binding was never the problem: port/gen/EkTranslatedStrings.c carries all
- * fourteen entries and gdx_ek_strings_apply() repoints the array at them. The
- * renderer is. LeoFault_DrawErrorMessage (sys/disk/leo_fault_dd.c:259-269) walks
- * its argument TWO BYTES AT A TIME -- `(codes[i] << 8) + codes[i+1]`, i += 2 --
- * and looks each pair up in sLeoFontLoadedCharacters, a fixed table of 110
- * Shift-JIS codes for the drive's own Japanese error strings. Handed ASCII it
- * forms 'L'<<8 | 'o' = 0x4C6F, finds nothing, gets NULL from func_8070F634 and
- * draws nothing for every character -- exactly an empty box. That function is
- * shared with the cart-side fault handler, so the ASCII case is diverted here
- * rather than changed there.
+ * ASCII goes to the EK's own walker, func_xk1_800262F4 (A2E90.c): one byte per
+ * glyph from the halfwidth ANK font. Japanese has the high bit set on its lead
+ * byte and keeps the retail path, so JP is unchanged.
  *
- * ASCII goes to func_xk1_800262F4 (A2E90.c), the EK's own walker: one byte per
- * glyph, served from the drive ROM's halfwidth ANK font at the font's own
- * proportional advance. Japanese -- the retail-JP disk's prompts, and every
- * sLeoErrorMessages string on any disk -- has the high bit set on its lead byte
- * and keeps the retail path, so the JP experience is unchanged.
- *
- * Centring: the caller sized its box for two-byte text at a flat 16 px per glyph
- * (the literal widths passed to func_xk1_8002EAF0), roughly twice what the
- * English needs, so left-aligning at D_xk1_8003BBA0 would park the text at the
- * far left of a wide frame. func_xk1_8002EAF0 centres the box on the screen
- * (D_xk1_8003BBA0 = (SCREEN_WIDTH - width) / 2), so re-centring the text on
- * SCREEN_WIDTH / 2 centres it in the box whatever that width was. Only done when
- * posX is that same box origin -- call sites that pass a literal x (the
- * func_xk1_8002EA10 boxes below) mean it. */
+ * Centring: the caller sized its box for two-byte text at a flat 16px per glyph,
+ * roughly twice what the English needs, so left-aligning at D_xk1_8003BBA0 would
+ * park the text at the far left of a wide frame. func_xk1_8002EAF0 centres that
+ * box on the screen, so re-centring the text on SCREEN_WIDTH / 2 centres it in the
+ * box whatever its width was. Only when posX is that same box origin -- call sites
+ * passing a literal x mean it. */
 extern s32 GdxGlyphStringWidth(u8* str);
 
 static void GdxDrawPromptMessage(Gfx** gfxP, s32 posX, s32 posY, u8* codes) {
@@ -218,48 +203,21 @@ Gfx* func_xk1_8002ED64(Gfx* gfx) {
     D_xk1_80033508 = D_807C6EA8.unk_08;
 #ifdef PORT
     {
-        /* PORT fix: make the transient progress prompts ("now saving" and its siblings) visible.
+        /* The transient progress prompts never render on this port. sys/disk/75000.c's
+         * senders raise unk_08 and osSendMesg hands straight to the synchronous priority-30
+         * disk worker, which finishes the operation and zeroes unk_08 again inside that same
+         * call: set and cleared within one frame, so the retail minimum-display latch above
+         * -- keyed on "the previous frame was 6" -- never observes a 6 and can only extend a
+         * prompt already displayed once. Errors are immune because they outlive the
+         * operation. gGdxDiskPromptRaised carries what the worker saw, so the raise survives
+         * it.
          *
-         * WHAT THE RETAIL LATCH DIRECTLY ABOVE DOES. D_xk1_8003350C counts frames on which
-         * prompt id 6 was displayed, D_xk1_80033510 means "the hold has been armed", and
-         * D_xk1_80033508 holds unk_08 as of the end of the PREVIOUS call (assigned on the line
-         * above, before the error-promotion switch, so it is the pre-promotion value). While
-         * the drive genuinely has id 6 raised the first branch just runs the counter. The frame
-         * after the drive clears it, unk_08 is no longer 6 but D_xk1_80033508 still is, and the
-         * second branch fires: if hard error id 2 has taken the slot the hold is abandoned,
-         * otherwise it arms itself and puts id 6 back until D_xk1_80033500 / 6 frames have been
-         * shown. So retail already implements a minimum-display floor -- but it is keyed on
-         * "the previous frame was 6", so it can only EXTEND a prompt displayed at least once.
-         *
-         * WHY IT NEVER ARMS ON THIS PORT. sys/disk/75000.c's senders raise the id and then
-         * osSendMesg, which here hands straight over to the priority-30 disk worker (spelled
-         * out at gGdxDiskPromptRaised in that file). The worker runs the whole synchronous
-         * operation and zeroes unk_08 again before returning inside the sender's own
-         * osSendMesg call. Set and cleared inside a single frame, unk_08 reads 0 on both this
-         * frame and the last, so neither branch above ever observes a 6. Errors are immune
-         * precisely because they outlive the operation.
-         *
-         * THE HOLD. gGdxDiskPromptRaised carries what the worker saw, so the raise survives
-         * the operation that erased it. From there this is presentation only: it re-asserts
-         * the id for a floor of D_xk1_80033500 / 6 frames and does nothing else -- the save has
-         * already happened, nothing is delayed or blocked. That frame count is the retail
-         * latch's own threshold: D_xk1_80033500 is "three seconds in this screen's tick units"
-         * (180 for Machine Create's 1:1 cadence, 60 for the Course Editor's 1:3, both set
-         * through func_xk1_8002E9D0), so / 6 is half a second on either screen.
-         *
-         * PRECEDENCE, inherited from the retail rules:
-         *   - the hold only writes unk_08 while it is 0, so anything the game or the failed
-         *     operation put there -- id 0x10 write-refused, id 3 read-only media, id 9 busy, a
-         *     menu's own confirm prompt -- wins outright AND cancels the hold, so a failed save
-         *     can never be papered over by a lingering "now saving";
-         *   - a drive-level error signalled through unk_04 / unk_0C cancels the hold as well,
-         *     using the condition the retail promotion switch below uses to demote an
-         *     in-progress id to the silent id 10;
-         *   - a newer raise replaces an older one outright;
-         *   - the injected value is undone before this function returns, so unk_08 read from
-         *     anywhere else is exactly what it would be without the hold. func_80767E30's busy
-         *     gate and the menus' "unk_08 == 0" idle tests cannot observe it, and the retail
-         *     latch above -- which runs first, on purpose -- sees an unmodified stream. */
+         * Presentation only: re-assert the id for a floor of D_xk1_80033500 / 6 frames (half
+         * a second in either screen's tick units), never write unk_08 while it is nonzero,
+         * and cancel on any error in unk_04 / unk_0C -- a failed save must not be papered
+         * over by a lingering "now saving". The injection is undone before this function
+         * returns, so unk_08 read from anywhere else is exactly what it would be without the
+         * hold. */
         extern volatile s32 gGdxDiskPromptRaised;
 
         if (gGdxDiskPromptRaised != 0) {
@@ -478,24 +436,18 @@ Gfx* func_xk1_8002ED64(Gfx* gfx) {
     }
 #ifdef PORT
     {
-        /* Undo the injection so unk_08 leaves this function exactly as it arrived. Restored to
-           0 rather than compared against what we wrote: the slot was 0 when the hold took it,
-           and whatever the body may have turned our value into was derived from our own
-           injection and is ours to discard. This restore is what keeps the hold purely
-           cosmetic -- no reader of unk_08 outside this draw call can observe it, so
-           func_80767E30's busy gate and the menus' "unk_08 == 0" idle tests are unaffected. */
+        /* unk_08 must leave this function exactly as it arrived, or func_80767E30's busy gate
+           and the menus' "unk_08 == 0" idle tests start observing the hold. Restore to 0
+           rather than compare against what we wrote: the slot was 0 when the hold took it,
+           and whatever the body turned our value into is ours to discard. */
         s32 portDrawnId = D_807C6EA8.unk_08;
 
         if (portForcedId != 0) {
             D_807C6EA8.unk_08 = 0;
         }
 
-        /* Bounded diagnostic (GDX_TRACE=1; gdx_cki is silent otherwise). "raised" is the id
-           the disk worker recorded this frame (0 = none), "framesLeft" is how many hold frames
-           remain after this one, and "drawn" is the id the switch above rendered -- a "drawn"
-           of 0 or 10 while a hold is active is the signature of a prompt suppressed by the
-           error precedence rules rather than one that was never raised. Emitted only on frames
-           where the hold did something, and hard-capped. */
+        /* Probe (GDX_TRACE=1): a "drawn" of 0 or 10 while a hold is active means the error
+           precedence suppressed the prompt, not that it was never raised. */
         {
             extern void gdx_cki(const char* s, int v);
             static s32 sPortPromptHoldLogs = 0;
@@ -516,16 +468,14 @@ Gfx* func_xk1_8002F9DC(Gfx* gfx) {
 #ifdef PORT
     s32 portForcedBanner = 0;
 
-    /* The same defect and the same fix, one field over, for the unk_0C == 4 "now formatting"
-       banner: func_80767FE4 (sys/disk/75000.c, reached from the Course Editor's format-confirm in
-       19DD60.c) raises it and the worker's unk_00 == 1 branch clears it through func_80767940()
-       inside the same osSendMesg, so on this port the only feedback for a destructive whole-disk
-       format was no feedback at all. Held to the same D_xk1_80033500 / 6 floor as the prompt ids.
-       Precedence: the three error banners (unk_0C 1, 2 and 3) latch on their own and outrank this
-       one, so a nonzero unk_0C that is not 4 cancels the hold, and the hold only ever writes
-       unk_0C while it is 0. Undone before returning, exactly as the prompt hold is, so nothing
-       outside this draw call can observe it -- including func_xk1_8002ED64's own hold, which runs
-       earlier in Gfx_FullSync and treats any nonzero unk_0C as a reason to stand down. */
+    /* Same defect and same hold, one field over, for the unk_0C == 4 "now formatting" banner:
+       func_80767FE4 raises it and the worker clears it inside the same osSendMesg, so a
+       destructive whole-disk format gave no feedback at all. Same D_xk1_80033500 / 6 floor.
+       The three error banners (unk_0C 1-3) latch on their own and outrank this one, so a
+       nonzero unk_0C that is not 4 cancels the hold, and the hold only writes unk_0C while it
+       is 0. Undone before returning, like the prompt hold, so nothing outside this draw call
+       can observe it -- including func_xk1_8002ED64's hold, which runs earlier in Gfx_FullSync
+       and stands down on any nonzero unk_0C. */
     {
         extern volatile s32 gGdxDiskBannerRaised;
 
@@ -569,11 +519,9 @@ void func_xk1_8002FA50(void) {
     D_8003BBB0 = Arena_Allocate(ALLOC_FRONT, 20 * sizeof(s32));
 
 #ifdef PORT
-    /* Arena memory is not zeroed on the port (Arena_Allocate only bumps a
-       pointer) and the hardware DMA that would fill these glyphs
-       (LeoFault_CopyFontToRam via gDriveRomHandle) never runs. Clear the whole
-       block up front so any slot left unfilled below renders as a blank 16x16
-       I4 cell instead of uninitialized-arena noise. */
+    /* Arena memory is not zeroed on the port (Arena_Allocate only bumps a pointer)
+       and the DMA that would fill these glyphs never runs, so a slot left unfilled
+       below would render as arena noise rather than a blank cell. */
     bzero(gExpansionKitFontPtr, 20 * 0x80);
 #endif
 
@@ -585,13 +533,10 @@ void func_xk1_8002FA50(void) {
         LeoFault_CopyFontToRam(D_8003BBB0[i], gExpansionKitFontPtr + i * 0x80);
 #else
         /* The same font block ships inside the user-supplied 64DD IPL ROM image
-           (N64DDIPLROM.n64, loaded by port/disk_buffer.cpp). Resolve the
-           Shift-JIS code to a font-block offset with LeoGetKAdr and copy its
-           16x16 I4 cell straight out of that image — identical to the EK setup
-           font path (A2E90.c func_xk1_800260F0). LeoGetKAdr returns -1 for
-           unknown codes (fontAddr < DDROM_FONT_START) and a missing image
-           leaves gdx_ddipl_buffer NULL; either way the pre-zeroed blank cell
-           from the bzero above stands. */
+           (port/disk_buffer.cpp): resolve the Shift-JIS code with LeoGetKAdr and
+           copy the 16x16 I4 cell straight out of it, as the EK setup font path
+           does (A2E90.c func_xk1_800260F0). Unknown codes and a missing image both
+           leave the pre-zeroed blank cell standing. */
         {
             extern unsigned char* gdx_ddipl_buffer;
             extern unsigned int gdx_ddipl_size;

@@ -1117,16 +1117,14 @@ Gfx* MachineSelect_BackgroundDraw(Gfx* gfx) {
     s32 gmul = 0;
     s32 bmul = 60;
 #ifdef PORT
-    /* Same predicate as every other anchor site in this file (port/input_bridge.c) --
-     * a divergent inline CVar composite here would desync background vs foreground
-     * gating if a default ever changes. Declared locally: this function sits above the
-     * file-scope extern used by the later anchor sites. */
+    /* port/input_bridge.c. Same predicate as every other anchor site in this file: a divergent
+     * inline CVar composite here would desync background against foreground gating if a default
+     * changes. Declared locally because this function precedes the file-scope extern below. */
     extern int gdx_widescreen_ui_active(void);
     s32 gdxWideSelectMachine = gdx_widescreen_ui_active();
     if (gdxWideSelectMachine) {
-        /* The gradient's native 12..307 safe-area rectangle owns the blue background seen on the
-         * regular 30-machine selector. Stretch only this layer and restore the menu scissor before
-         * its portraits, labels, and machines are drawn. */
+        /* The gradient's native 12..307 rectangle is the selector's blue background; stretch that
+         * layer alone and restore the menu scissor before its contents are drawn over it. */
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
     }
@@ -1134,6 +1132,40 @@ Gfx* MachineSelect_BackgroundDraw(Gfx* gfx) {
 
     gDPSetCycleType(gfx++, G_CYC_FILL);
 
+#ifdef PORT
+    {
+        /* With the overscan frame removed the gradient's 12..307 x 8..231 band leaves the freed
+           margins black; draw the full 240 rows, clamping the gradient index so the stock band
+           is pixel-identical and the margins extend the edge colours. */
+        extern int gdx_remove_borders(void);
+        if (gdx_remove_borders()) {
+            for (i = -8; i < 232; i++) {
+                s32 temp_t6 = 224;
+                s32 gdxIdx = (i < 0) ? 0 : ((i > 223) ? 223 : i);
+                temp_a1 = temp_t6 - gdxIdx;
+                r = ((((rmul2 * temp_a1) + (rmul * gdxIdx)) / temp_t1) >> 3);
+                g = ((((gmul2 * temp_a1) + (gmul * gdxIdx)) / temp_t1) >> 3);
+                b = ((((bmul2 * temp_a1) + (bmul * gdxIdx)) / temp_t1) >> 3);
+
+                gDPPipeSync(gfx++);
+                gDPSetFillColor(gfx++, PACK_5551(r, g, b, 1) << 0x10 | PACK_5551(r, g, b, 1));
+                gDPFillRectangle(gfx++, 0, i + 8, SCREEN_WIDTH - 1, i + 8);
+            }
+        } else {
+            for (i = 0; i < 224; i++) {
+                s32 temp_t6 = 224;
+                temp_a1 = temp_t6 - i;
+                r = ((((rmul2 * temp_a1) + (rmul * i)) / temp_t1) >> 3);
+                g = ((((gmul2 * temp_a1) + (gmul * i)) / temp_t1) >> 3);
+                b = ((((bmul2 * temp_a1) + (bmul * i)) / temp_t1) >> 3);
+
+                gDPPipeSync(gfx++);
+                gDPSetFillColor(gfx++, PACK_5551(r, g, b, 1) << 0x10 | PACK_5551(r, g, b, 1));
+                gDPFillRectangle(gfx++, 12, i + 8, 307, i + 8);
+            }
+        }
+    }
+#else
     for (i = 0; i < 224; i++) {
         s32 temp_t6 = 224;
         temp_a1 = temp_t6 - i;
@@ -1145,6 +1177,7 @@ Gfx* MachineSelect_BackgroundDraw(Gfx* gfx) {
         gDPSetFillColor(gfx++, PACK_5551(r, g, b, 1) << 0x10 | PACK_5551(r, g, b, 1));
         gDPFillRectangle(gfx++, 12, i + 8, 307, i + 8);
     }
+#endif
 #ifdef PORT
     if (gdxWideSelectMachine) {
         gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
@@ -1208,14 +1241,11 @@ Gfx* MachineSettings_PortraitDraw(Gfx* gfx, Object* portraitObj) {
 extern Machine gMachines[];
 
 #ifdef PORT
-/* port/input_bridge.c. Gates every anchor/distribute emission below so that CVar-off builds
- * emit a bit-identical display list to stock (the interpreter re-checks the CVars when it
- * consumes the mode bits; gating both sides is deliberate defense in depth). */
+/* port/input_bridge.c. Gates every anchor/distribute emission below, so a CVar-off build emits a
+ * display list bit-identical to stock. */
 extern int gdx_widescreen_ui_active(void);
-/* Split-screen HUD anchoring, a strict subset of the above -- see gdx_widescreen_split_ui_active
-   in port/input_bridge.c for why the 2P/3P/4P layouts get their own switch. Declared inline
-   because this overlay compiles with only the decomp include paths (port/CMakeLists.txt:214-219),
-   so no port or libultraship header is reachable from here. Same idiom as racer.c:763. */
+/* port/input_bridge.c. Split-screen anchoring, a strict subset of the above. Declared inline
+   rather than #include'd: this overlay compiles with only the decomp include paths. */
 extern int gdx_widescreen_split_ui_active(void);
 #endif
 
@@ -1233,17 +1263,11 @@ Gfx* MachineSelect_StatsDraw(Gfx* gfx, Object* statsObj) {
     playerIndex = statsObj->cmdId - OBJECT_MACHINE_SELECT_STATS_0;
 
 #ifdef PORT
-    /* SELECT MACHINE is the 1P stat cluster duplicated per player, so it anchors per player rather
-       than needing a 1P special case. The screen's own layout already says which edge each slot
-       belongs to, twice over:
-         - D_i4_8011D694 (machine.c:468) is {19,60, 19,136, 299,60, 299,136, ...}: slots 0 and 1 sit
-           at native x=19, slots 2 and 3 at x=299 of a 320-wide frame.
-         - the playerIndex < 2 branch below draws left-aligned from temp_fp, while the else branch
-           draws from temp_fp - 20 and right-aligns the value with Font_GetStringWidth.
-       Both agree, so the discriminator is exactly playerIndex < 2 -> left edge, else right edge.
-       1P is slot 0 and therefore still ANCHOR_LEFT: byte-identical to the previous behaviour.
-       Guarded by the split predicate only for slots >= 1, so the 1P screen keeps answering to the
-       1P switch alone. */
+    /* SELECT MACHINE duplicates the 1P stat cluster per player, so it anchors per slot. Two
+       independent facts fix the discriminator at playerIndex < 2: D_i4_8011D694 puts slots 0/1 at
+       native x=19 and slots 2/3 at x=299, and the draw branch below is left-aligned for the first
+       pair and right-aligned for the second. 1P is slot 0, so ANCHOR_LEFT leaves it byte-identical;
+       the split predicate gates slots >= 1 only, keeping the 1P screen on the 1P switch alone. */
     if (gdx_widescreen_ui_active() &&
         ((playerIndex == 0) || gdx_widescreen_split_ui_active())) {
         gdxAnchor = (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : G_EX_WIDESCREEN_ANCHOR_RIGHT;
@@ -1296,11 +1320,10 @@ Gfx* MachineSelect_PortraitDraw(Gfx* gfx, Object* portraitObj) {
     playerIndex = portraitObj->cmdId - OBJECT_MACHINE_SELECT_PORTRAIT_0;
 
 #ifdef PORT
-    /* Same per-slot rule as MachineSelect_StatsDraw above: the portrait belongs to the same cluster
-       as the stats under it, so anchoring them differently would tear the pair apart at 16:9.
-       Both the portrait and its player-number badge are emitted inside one anchor bracket so the
-       badge keeps its D_i4_8011D674 offset from the portrait corner -- an anchor is a uniform
-       affine map, so their relative placement survives any window aspect. */
+    /* Same per-slot rule as MachineSelect_StatsDraw: the portrait belongs to the cluster whose
+       stats sit under it, so anchoring them differently tears the pair apart at 16:9. The badge
+       shares one bracket with the portrait so it keeps its D_i4_8011D674 offset -- an anchor is a
+       uniform affine map, so relative placement survives any window aspect. */
     if (gdx_widescreen_ui_active() &&
         ((playerIndex == 0) || gdx_widescreen_split_ui_active())) {
         gdxAnchor = (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : G_EX_WIDESCREEN_ANCHOR_RIGHT;
@@ -1322,9 +1345,9 @@ Gfx* MachineSelect_PortraitDraw(Gfx* gfx, Object* portraitObj) {
 
 Gfx* MachineSelect_CursorNumDraw(Gfx* gfx, Object* portraitObj) {
 #ifdef PORT
-    /* The "1P".."4P" badge rides on the selection splat, so it takes the same DISTRIBUTE treatment
-       as MachineSelect_CursorDraw below -- anchoring the two differently would peel the label off
-       the splat it labels. Set and clear conditions are identical by construction. */
+    /* The badge rides on the selection splat, so it takes the same DISTRIBUTE treatment as
+       MachineSelect_CursorDraw below; anchoring the two differently peels the label off the splat.
+       Set and clear conditions must stay identical. */
     if (gdx_widescreen_ui_active() &&
         ((gNumPlayers == 1) || gdx_widescreen_split_ui_active())) {
         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
@@ -1352,12 +1375,10 @@ Gfx* MachineSelect_CursorDraw(Gfx* gfx, Object* cursorObj) {
     s32 blue;
 
 #ifdef PORT
-    /* The selection splat is a 2D texrect placed on the same 6-column grid as the machines
-       (OBJECT_LEFT = (index % 6) * 40 + 40 below), but the machines themselves are 3D and keep
-       their spread under hor+ while a plain 2D rect is compressed toward screen centre. DISTRIBUTE
-       is what keeps the splat tracking the grid, and it was gated to 1P -- so in VS the splat drifted
-       inboard of the machine it marks. The loop already covers all four cursors, so lifting the
-       player-count gate is the whole fix. */
+    /* The splat is a 2D texrect on the same 6-column grid as the machines, but the machines are 3D
+       and keep their spread under hor+ while a plain 2D rect compresses toward screen centre.
+       DISTRIBUTE is what keeps the splat tracking the grid; gating it by player count would leave
+       the VS splat drifting inboard of the machine it marks. */
     if (gdx_widescreen_ui_active() &&
         ((gNumPlayers == 1) || gdx_widescreen_split_ui_active())) {
         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_DISTRIBUTE);
@@ -1577,9 +1598,8 @@ Gfx* MachineSettings_MachineDraw(Gfx* gfx, Object* machineObj) {
 
     Light_SetLookAtSource(&gGfxPool->unk_21B28, &gCameras[0].viewMtx);
 #ifdef PORT
-    /* Known-good reference for the [lookat] comparison — this screen renders the
-       same reflection pass over the same part display lists correctly. See
-       gdx_diag_lookat_enabled (port/n64_sched.c). */
+    /* Known-good reference for the [lookat] comparison: this screen renders the same reflection
+       pass over the same part display lists correctly. gdx_diag_lookat_enabled: port/n64_sched.c. */
     {
         extern int gdx_diag_lookat_enabled(void);
         extern void gdx_dbg_logf(const char* fmt, ...);

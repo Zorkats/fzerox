@@ -89,12 +89,10 @@ s32 DiskDrive_LoadData(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
     LEOCmd cmdBlock;
 
 #ifdef PORT
-    /* The runtime .ndd is a physical/zoned dump; the leo LBA->byte path below is
-       LOGICAL and drifts from the physical file across zone boundaries, so it is
-       never used on the port. Instead startLba is a tagged handle from
-       SEGMENT_DISK_START (see port_disk_segments.h); serve the request directly
-       from the physical disk buffer, and fail safe (zero-fill) for anything not
-       yet mapped so no path reads garbage or deadlocks. */
+    /* The runtime .ndd is a physical/zoned dump, but the leo LBA->byte path below is LOGICAL
+       and drifts from the physical file across zone boundaries. On the port startLba is instead
+       a tagged handle from SEGMENT_DISK_START (port_disk_segments.h), served straight out of
+       the disk buffer; anything not yet mapped zero-fills rather than reading garbage. */
     {
         extern unsigned char* gdx_disk_buffer;
         extern unsigned int gdx_disk_size;
@@ -246,15 +244,11 @@ s32 DiskDrive_LoadOverlayProgressBar(s32 startLba, void* vram, s32 diskSize, s32
 
 void DiskDrive_InitRomSegmentPairs(void) {
 #ifdef PORT
-    /* On hardware the 64DD IPL fills osAppNMIBuffer with the cartridge_offsets
-       segment range (and the non-EK build mirrors it in ovl_i11/524920.c). The
-       port bypasses both the IPL and ovl_i11 (excluded from the EK build), so
-       osAppNMIBuffer stays zero and the Dma_ClearRomCopy below would copy zero
-       bytes, leaving gRomSegmentPairs all zeros — every EK asset load
-       (course data, venue textures, audio) would then DMA from ROM offset 0 and
-       crash. Populate it directly from the port ROM segment symbols instead;
-       this is the exact table the base build compiles into cartridge_offsets.c,
-       and each PORT_*_ROM_START is the offset the port DMA already resolves. */
+    /* On hardware the 64DD IPL fills osAppNMIBuffer with the cartridge_offsets segment range.
+       The port bypasses both the IPL and ovl_i11, so osAppNMIBuffer stays zero, the
+       Dma_ClearRomCopy below copies nothing, and every EK asset load would DMA from ROM
+       offset 0 and crash. This is the same table the base build compiles into
+       cartridge_offsets.c, built from offsets the port DMA already resolves. */
     static const RomOffset kRomSegmentPairs[29][2] = {
         { (RomOffset)SEGMENT_ROM_START(audio_bank),                  (RomOffset)SEGMENT_ROM_END(audio_bank) },
         { (RomOffset)SEGMENT_ROM_START(audio_table),                 (RomOffset)SEGMENT_ROM_END(audio_table) },

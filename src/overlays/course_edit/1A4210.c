@@ -455,11 +455,10 @@ void func_xk2_800F2B48(Gfx** gfxP) {
     s32 i;
     s32 temp_v1;
     s32 top = 200;
-    /* The FAKE below passes `pad = gfx++` as the macro's pkt argument, so the
-       packet writes go through pad's VALUE. As s32 (original) that truncates
-       the 64-bit cursor on host builds — the invalid-part warning box then
-       faulted on its first texrect word (the Course Edit invalid-node crash).
-       Pointer-width pad keeps the console codegen shape and the host correct. */
+    /* The FAKE below passes `pad = gfx++` as the macro's pkt argument, so the packet
+       writes go through pad's value. As s32 that truncates the 64-bit cursor and the
+       warning box faults on its first texrect word. Pointer-width keeps the console
+       codegen shape while staying host-correct. */
     Gfx* pad;
 
     gfx = *gfxP;
@@ -477,12 +476,11 @@ void func_xk2_800F2B48(Gfx** gfxP) {
 
         gSPDisplayList(gfx++, D_3000510);
 #ifdef PORT
-        /* D_3000510 sets the combiner + blender but never the cycle type, so these texrects
-           inherit whatever the RDP was last in. The editor's fill-rect paths leave FILL mode
-           with a red fill color (1A5B70.c), and a texrect in FILL mode paints the stale
-           fill_color and ignores the PRIM combiner — the warning box rendered as a solid red
-           rectangle. Console reached this widget with 1CYCLE inherited by draw order; make the
-           widget self-sufficient on the port. */
+        /* D_3000510 sets the combiner and blender but never the cycle type, so these texrects
+           inherit whatever the RDP was last in. The editor's fill-rect paths (1A5B70.c) leave
+           FILL mode with a red fill color, and a texrect in FILL mode paints that fill color
+           and ignores the PRIM combiner. Console reached this widget with 1CYCLE inherited by
+           draw order; the port cannot rely on draw order, so the widget sets its own. */
         gDPSetCycleType(gfx++, G_CYC_1CYCLE);
 #endif
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
@@ -902,8 +900,7 @@ void func_xk2_800F3D10(void) {
 extern s32 D_8076C958;
 
 #ifdef PORT
-/* Published by func_xk2_800EECD4 (course_edit/19FA50.c) on every tooltip draw,
- * read back here immediately afterwards. See the comment beside its definition. */
+/* Published by func_xk2_800EECD4 (course_edit/19FA50.c) on every tooltip draw. */
 extern s32 gGdxTooltipLeft;
 extern s32 GdxGlyphIconOffset(s8* str, s32* gapWidth);
 #endif
@@ -935,13 +932,11 @@ void func_xk2_800F3DAC(Gfx** gfxP) {
     func_xk2_800EECD4(&gfx, temp_v1, 0x58, D_xk1_800331F0[22], 22);
 
 #ifdef PORT
-    /* `left = 128` above is the retail-JP hole position: that string's box began
-     * at x=80 and reserved one fullwidth glyph three glyphs in, so 80+48=128.
-     * The English text is proportional ASCII with a two-glyph hole, which puts
-     * the box at 56 and the hole at 109 -- drawing at 128 lands the icon on the
-     * "i" of "icon". Compute it the same way func_xk2_800EE67C does instead.
-     * This is the copy that actually runs: func_xk2_800EE67C's icon pass is
-     * gated on D_8076C960, which is never assigned a nonzero value. */
+    /* `left = 128` above is the retail-JP hole position (box at x=80, one fullwidth glyph
+     * three glyphs in). The English text is proportional ASCII with its hole at 109, so 128
+     * lands the icon on a letter; derive it the way func_xk2_800EE67C does. This is the copy
+     * that actually runs -- that one's icon pass is gated on D_8076C960, which is never
+     * assigned a nonzero value. */
     {
         s32 gapWidth = 16;
         s32 iconOffset = GdxGlyphIconOffset(D_xk1_800331F0[22], &gapWidth);

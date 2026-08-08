@@ -990,10 +990,8 @@ void Camera_MatrixToMtx(MtxF* mtxF, Mtx* mtx2) {
                 longValue = temp_fv0 + 0.5f;
             }
 
-            // libultraship's GfxSpMatrix expects Big-Endian packed words.
-            // On a Little-Endian host, writing u16 array elements sequentially
-            // swaps the 16-bit halves when read back as 32-bit integers.
-            // Swap columns j and j^1 so they read correctly on Little-Endian.
+            // libultraship's GfxSpMatrix reads these as big-endian packed 32-bit words;
+            // on a little-endian host the u16 halves land swapped, so write column j^1.
             mtx->u.i[i][j ^ 1] = longValue >> 0x10;
             mtx->u.f[i][j ^ 1] = longValue & 0xFFFF;
         }
@@ -1003,30 +1001,20 @@ void Camera_MatrixToMtx(MtxF* mtxF, Mtx* mtx2) {
 extern s32 D_800CCFB0;
 
 #ifdef PORT
-// ── G-Diffuser photo mode: free camera ─────────────────────────────────────────────────────────
-// Available in every race mode and gated by the explicit ImGui toggle plus the game's existing
-// pause state. We reuse the pause so the simulation is already frozen and introduce no new
-// time-freeze.
-//
-// This helper only ever transforms the PRIMARY camera's eye/at/fov for the current frame's matrix
-// build. Camera_UpdateProjectionViewMtx saves those three fields before calling it and restores
-// them immediately after the matrices are built (see the call site), so gCameras[0] is
-// byte-identical once the function returns, and Camera_UpdateFromSettings rewrites them from the
-// game's own settings every frame anyway (Camera_UpdateMode). No persistent camera state is
-// modified, so there is no separate "restore on exit" step to get wrong -- leaving photo mode just
-// stops the per-frame transform. With the CVar at 0 the first branch returns 0 without touching
-// anything.
+// Photo-mode free camera. Only touches the primary camera's eye/at/fov for the current
+// frame's matrix build; Camera_UpdateProjectionViewMtx restores them once the matrices are
+// built, so no persistent camera state changes and leaving photo mode needs no restore step.
 extern int gdx_photo_mode_active(void); // port/input_bridge.c
 extern float sinf(float angle); // PR/gu.h
 extern float cosf(float angle); // PR/gu.h
 
-// Free-camera offsets: accumulated while engaged, cleared on every enter/exit edge so
-// each entry starts exactly on the live game camera.
+// Offsets accumulate while engaged; cleared on enter/exit edges so each entry starts on
+// the live game camera.
 static s32 sGdxPhotoActive = 0;
-static Vec3f sGdxPhotoPos = { 0.0f, 0.0f, 0.0f }; // world-space translation applied to eye and at
-static f32 sGdxPhotoYaw = 0.0f;                   // accumulated look yaw   (radians, about world up)
-static f32 sGdxPhotoPitch = 0.0f;                 // accumulated look pitch (radians, about right axis)
-static f32 sGdxPhotoFovDelta = 0.0f;              // accumulated FOV offset (degrees)
+static Vec3f sGdxPhotoPos = { 0.0f, 0.0f, 0.0f };
+static f32 sGdxPhotoYaw = 0.0f;      // radians, about world up
+static f32 sGdxPhotoPitch = 0.0f;    // radians, about the right axis
+static f32 sGdxPhotoFovDelta = 0.0f; // degrees
 
 static void GdxPhotoCamera_ResetOffsets(void) {
     sGdxPhotoPos.x = 0.0f;
@@ -1037,7 +1025,7 @@ static void GdxPhotoCamera_ResetOffsets(void) {
     sGdxPhotoFovDelta = 0.0f;
 }
 
-// Rotate vector v around unit axis k by angle (Rodrigues). Local, tiny, no allocations.
+// Rodrigues rotation of v around unit axis k.
 static void GdxPhoto_RotateAroundAxis(Vec3f* v, Vec3f* k, f32 angle) {
     f32 c = cosf(angle);
     f32 s = sinf(angle);
@@ -1055,8 +1043,7 @@ static void GdxPhoto_RotateAroundAxis(Vec3f* v, Vec3f* k, f32 angle) {
     *v = out;
 }
 
-// Returns 1 and overrides camera->eye/at/fov for this frame when the free camera is engaged; returns
-// 0 (writing nothing to the camera) otherwise.
+// Returns 1 and overrides eye/at/fov for this frame when engaged; 0 and writes nothing otherwise.
 static s32 GdxPhotoCamera_Update(Camera* camera) {
     Controller* pad;
     Vec3f fwd;
@@ -1070,14 +1057,13 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
     f32 fov;
     u16 btn;
     s32 zHeld;
-    f32 moveSpeed = 12.0f;  // world units / frame at full stick deflection (native 60Hz tick)
-    f32 lookSpeed = 0.03f;  // radians / frame while a C-button is held
-    f32 fovSpeed = 1.0f;    // degrees / frame while L or R is held
+    f32 moveSpeed = 12.0f;  // world units per 60Hz tick at full stick deflection
+    f32 lookSpeed = 0.03f;  // radians / tick
+    f32 fovSpeed = 1.0f;    // degrees / tick
     f32 pitchLimit = 1.30f; // ~74 deg; keeps the view vector clear of the vertical axis
     f32 fovMin = 15.0f;
     f32 fovMax = 110.0f;
 
-    // Gate: feature off, sim not paused, or not the primary camera -> pure no-op (nothing written).
     if (!gdx_photo_mode_active() || (camera->id != 0)) {
         if (sGdxPhotoActive != 0) {
             GdxPhotoCamera_ResetOffsets();
@@ -1086,14 +1072,12 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
         return 0;
     }
 
-    // Enter edge: begin exactly on the live game camera (all offsets zero).
     if (sGdxPhotoActive == 0) {
         GdxPhotoCamera_ResetOffsets();
         sGdxPhotoActive = 1;
     }
 
-    // Read the already-resolved pad the game reads (written each frame by port/input_bridge.c),
-    // mirroring the existing controller access pattern in this file (Camera_UpdateRace).
+    // Same resolved pad the game reads (see Camera_UpdateRace).
     pad = &gControllers[gPlayerControlPorts[0]];
     btn = pad->buttonCurrent;
     zHeld = (btn & BTN_Z) != 0;
@@ -1110,7 +1094,6 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
         stickY = -1.0f;
     }
 
-    // Look: C-buttons accumulate yaw (CLEFT/CRIGHT) and pitch (CUP/CDOWN).
     if (btn & BTN_CLEFT) {
         sGdxPhotoYaw -= lookSpeed;
     }
@@ -1129,7 +1112,6 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
         sGdxPhotoPitch = -pitchLimit;
     }
 
-    // FOV: L widens (zoom out), R narrows (zoom in).
     if (btn & BTN_L) {
         sGdxPhotoFovDelta += fovSpeed;
     }
@@ -1137,7 +1119,6 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
         sGdxPhotoFovDelta -= fovSpeed;
     }
 
-    // Build a view frame from the live game camera's forward direction, then apply accumulated look.
     fwd.x = camera->at.x - camera->eye.x;
     fwd.y = camera->at.y - camera->eye.y;
     fwd.z = camera->at.z - camera->eye.z;
@@ -1153,13 +1134,13 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
     worldUp.y = 1.0f;
     worldUp.z = 0.0f;
 
-    GdxPhoto_RotateAroundAxis(&fwd, &worldUp, sGdxPhotoYaw); // yaw about world up
+    GdxPhoto_RotateAroundAxis(&fwd, &worldUp, sGdxPhotoYaw);
     right.x = (worldUp.y * fwd.z) - (worldUp.z * fwd.y);
     right.y = (worldUp.z * fwd.x) - (worldUp.x * fwd.z);
     right.z = (worldUp.x * fwd.y) - (worldUp.y * fwd.x);
     rlen = sqrtf(SQ(right.x) + SQ(right.y) + SQ(right.z));
     if (rlen < 0.0001f) {
-        // View is (near) vertical; fall back to the game camera's side axis to stay stable.
+        // View is near-vertical; fall back to the game camera's side axis.
         right = camera->basis.z;
         rlen = sqrtf(SQ(right.x) + SQ(right.y) + SQ(right.z));
         if (rlen < 0.0001f) {
@@ -1169,9 +1150,8 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
     right.x /= rlen;
     right.y /= rlen;
     right.z /= rlen;
-    GdxPhoto_RotateAroundAxis(&fwd, &right, sGdxPhotoPitch); // pitch about right axis
+    GdxPhoto_RotateAroundAxis(&fwd, &right, sGdxPhotoPitch);
 
-    // Move: stickX trucks along right; stickY dollies along fwd, or pedestals on world up while Z held.
     sGdxPhotoPos.x += right.x * stickX * moveSpeed;
     sGdxPhotoPos.y += right.y * stickX * moveSpeed;
     sGdxPhotoPos.z += right.z * stickX * moveSpeed;
@@ -1183,8 +1163,6 @@ static s32 GdxPhotoCamera_Update(Camera* camera) {
         sGdxPhotoPos.z += fwd.z * stickY * moveSpeed;
     }
 
-    // Commit this frame's eye/at/fov. The caller restores the saved originals after building the
-    // matrices, so the persistent struct is untouched once the function returns.
     newEye.x = camera->eye.x + sGdxPhotoPos.x;
     newEye.y = camera->eye.y + sGdxPhotoPos.y;
     newEye.z = camera->eye.z + sGdxPhotoPos.z;
@@ -1209,10 +1187,7 @@ void Camera_UpdateProjectionViewMtx(GfxPool* gfxPool, Camera* camera) {
     f32 var_fv0;
     f32 var_fv1;
 #ifdef PORT
-    // Photo mode free camera (default off). Save the game camera, let the helper transiently
-    // override eye/at/fov for this frame's matrix build, and restore below. With the CVar at 0 the
-    // helper returns 0 without touching the camera, gdxPhotoActive stays 0 and the restore is
-    // skipped, so the three saved reads have no observable effect.
+    // Photo mode: transient eye/at/fov override for this frame's matrix build; restored below.
     Vec3f gdxSavedEye = camera->eye;
     Vec3f gdxSavedAt = camera->at;
     f32 gdxSavedFov = camera->fov;
@@ -1277,9 +1252,8 @@ void Camera_UpdateProjectionViewMtx(GfxPool* gfxPool, Camera* camera) {
 
     Camera_MatrixToMtx(&camera->projectionViewMtx, &gfxPool->unk_20208[camera->id]);
 #ifdef PORT
-    // Restore the game camera so the persistent struct is byte-identical after this call (keeps any
-    // later consumer this frame -- e.g. Camera_UpdateEnemyEnginePan, which reads camera->eye -- on
-    // the real game camera). Skipped entirely when photo mode is inactive.
+    // Later consumers this frame need the real game camera (Camera_UpdateEnemyEnginePan
+    // reads camera->eye).
     if (gdxPhotoActive) {
         camera->eye = gdxSavedEye;
         camera->at = gdxSavedAt;
@@ -2612,6 +2586,22 @@ void Camera_InitViewport(Camera* camera) {
     camera->startVpTransX = camera->endVpTransX = camera->currentVpTransX - camera->currentVpScaleX;
     camera->startVpTransY = camera->endVpTransY = camera->currentVpTransY - camera->currentVpScaleY;
 
+#ifdef PORT
+    /* Overscan removal must reach these CPU mirrors too: position/rival markers project through
+       currentVpScale/Trans, so they have to match the full-frame Vp func_8006A00C submits. */
+    {
+        extern int gdx_remove_borders(void);
+        if (scissorBoxType == SCISSOR_BOX_FULL_SCREEN && gdx_remove_borders()) {
+            camera->currentVpScaleX = camera->startVpScaleX = camera->endVpScaleX = 160.0f;
+            camera->currentVpScaleY = camera->startVpScaleY = camera->endVpScaleY = 120.0f;
+            camera->currentVpTransX = 160.0f;
+            camera->currentVpTransY = 120.0f;
+            camera->startVpTransX = camera->endVpTransX = 0.0f;
+            camera->startVpTransY = camera->endVpTransY = 0.0f;
+        }
+    }
+#endif
+
     camera->currentScissorLeft = camera->startScissorLeft = camera->endScissorLeft = scissorBox->left;
     camera->currentScissorTop = camera->startScissorTop = camera->endScissorTop = scissorBox->top;
     camera->currentScissorRight = camera->startScissorRight = camera->endScissorRight = scissorBox->right;
@@ -2684,10 +2674,8 @@ void Camera_UpdateMode(Camera* camera, CameraSettings* cameraSettings, CameraScr
                 if (cameraReadyForRace) {
                     camera->mode = CAMERA_MODE_RACE;
 #ifdef PORT
-                    /* Frame-interpolation cut: the intro fly-around hands off to the gameplay
-                       follow camera here — a hard camera-mode switch. Snap the whole frame this
-                       tick so the view does not whip-pan-smear across the handoff. Render-only;
-                       a no-op unless interpolation is on. */
+                    /* Hard cut (intro fly-around -> follow cam): snap the interpolated
+                       frame this tick so the view does not whip-pan-smear. Render-only. */
                     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
 #endif
                     cameraSettings->parameters.fovLerpFactor = 0.2f;

@@ -1,20 +1,6 @@
-/* PORT NOTE — texture-replacement (hi-res pack) implementers, read this first.
- *
- * This file's blit helpers carry three shipped-on-console quirks, flagged
- * below with //! @bug annotations:
- *   1. gSPScisTextureRectangle s/t arguments ordered contrary to convention;
- *   2. G_IM_SIZ_4b vs else gDPLoadTile branches swapped relative to what
- *      `size` suggests (the 4b branch uses G_TEXTURE_IMAGE_FRAC - 1 shifts).
- * Each quirk is internally consistent: the tile setup and the rectangle
- * always agree, so the rasterized output is correct and identical to
- * hardware. They must NOT be "fixed" in isolation — reordering either side
- * alone transposes or misaligns every menu/HUD image in the game.
- *
- * Consequence for texture replacement: key replacements on TEXTURE DATA
- * (load-block/load-tile payload hashes), never on the command-stream
- * coordinate pattern. Data-keyed packs are unaffected by these quirks.
- * Any future normalization of this file must be output-identical and must
- * happen BEFORE a pack's hash database is frozen, or not at all. */
+/* The //! @bug quirks below are internally consistent: tile setup and rectangle always
+ * agree, so the rasterized output matches hardware. Fixing one side alone transposes or
+ * misaligns every menu/HUD image. */
 #include "global.h"
 #include ASSET_HEADER(setup_gfx.h)
 
@@ -80,15 +66,10 @@ void func_8007A828(u16* pixel, size_t size, s32 arg2, s32 arg3, s32 arg4) {
 
     for (i = 0; i < (size / sizeof(u16)); i++, pixel++) {
 #ifdef PORT
-        /* Every caller passes an MIO0-decoded ROM texture, which the port keeps in original
-         * big-endian byte order (the gfx bridge samples RGBA16 big-endian unless a buffer is
-         * explicitly registered as host-order). Swap on read AND on write so the buffer stays
-         * big-endian; reading the texel as a native u16 on a little-endian host garbles the
-         * channels before the luminance math and then compounds when the bridge re-reads the
-         * host-order result raw (the corrupted Options/Course Select backgrounds).
-         * func_8007A59C above is intentionally NOT given this treatment: its only caller is
-         * the transition system, whose source is a HOST-ORDER framebuffer capture that is
-         * separately registered native -- swapping there would break it. */
+        /* Callers pass MIO0-decoded ROM textures, which stay big-endian (the gfx bridge samples
+         * RGBA16 big-endian unless a buffer is registered host-order), so swap on read and on
+         * write. func_8007A59C above must NOT do the same: its source is a host-order
+         * framebuffer capture, registered native. */
         texel = (u16) ((*pixel << 8) | (*pixel >> 8));
         red = ((texel & 0xF800) >> 11) * 77;
         green = ((texel & 0x7C0) >> 6) * 150;
@@ -150,7 +131,20 @@ Gfx* func_8007AC48(Gfx* gfx, u16 red, u16 green, u16 blue) {
     gDPPipeSync(gfx++);
     gDPSetCycleType(gfx++, G_CYC_FILL);
     gDPSetFillColor(gfx++, PACK_5551(red, green, blue, 1) << 16 | PACK_5551(red, green, blue, 1));
+#ifdef PORT
+    /* Generic solid background clear; with the overscan frame removed it must reach the true
+       edges or every screen built on it keeps a black margin. */
+    {
+        extern int gdx_remove_borders(void);
+        if (gdx_remove_borders()) {
+            gDPFillRectangle(gfx++, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
+        } else {
+            gDPFillRectangle(gfx++, 12, 8, 307, 231);
+        }
+    }
+#else
     gDPFillRectangle(gfx++, 12, 8, 307, 231);
+#endif
     return gfx;
 }
 

@@ -1,0 +1,28 @@
+# rsp_blob.yaml — RSP microcode raw-blob recipe
+#
+# The aspMain audio microcode is Nintendo-copyrighted code and must never ship in the source
+# tree; it is extracted from the user's own ROM into the locally-generated archive, same as
+# every other game asset. port/gdx_audio_lle.c loads these entries at runtime.
+#
+# Same flat, no-`:config: segments:` mechanism as segment_blob.yaml (see that file's header for
+# the full rationale): with no segments block, Decompressor::AutoDecode returns
+# buffer[offset : offset+size] verbatim. Only the Binary exporter runs under gdx-extract.
+#
+# Archive keys derive as `rsp_blob/<entryName>` (yaml stem / entry key). These entries do NOT
+# join the sSegmentBlobMap containment table: no code path reads these ROM ranges through
+# GdxSegmentSourceRead, so tools/gen_asset_bindings.py deliberately does not list this file in
+# BLOB_RECIPE_FILENAMES.
+#
+# Offsets are ABSOLUTE ROM byte ranges (zero top byte, so torch's TranslateAddr treats them as
+# absolute). US rev0: RAM symbols rspbootTextStart=0x800C7930 / aspMainTextStart=0x800CC270 /
+# aspMainDataStart=0x800D7CA0 sit in the main code segment at a fixed -0x80066000 ROM bias.
+
+aspmain_text:
+  type: BLOB
+  offset: 0x66270  # PORT_aspmain_text_ROM_START
+  size: 0xD30      # 0x66FA0 - 0x66270 (PORT_aspmain_text_ROM_END)
+
+aspmain_data:
+  type: BLOB
+  offset: 0x71CA0  # PORT_aspmain_data_ROM_START
+  size: 0x2E0      # 0x71F80 - 0x71CA0 (PORT_aspmain_data_ROM_END)

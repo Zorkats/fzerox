@@ -126,21 +126,15 @@ u8 sSeqInstructionArgsTable[] = {
 };
 
 #ifdef PORT
-/* Seq-embedded envelope conversion (missing boost/low-energy root cause).
-   Envelopes referenced by the layer ASEQ_OP_LAYER_ENV (0xCB) and channel LDENV
-   commands live INSIDE the raw sequence blob, which stays BIG-ENDIAN on this
-   port (the script interpreter reads it bytewise) -- but Audio_AdsrUpdate
-   consumes EnvelopePoint.delay/.arg as host-order s16s. Font envelopes are
-   converted by the font loader; these never were. Measured on the boost SE:
-   point (delay=1, arg=0x7FBC) read little-endian became (256, -17281), so the
-   ADSR crawled toward 28% volume over ~190 ticks instead of hitting ~100% in
-   one -- the note played at -77 dB ([boost-vol] adsrScale 0.0014..0.0188 ramp,
-   exactly target(0.278)/delay(192) per tick). Convert on first use into a
-   pointer-keyed cache: the blob itself must stay untouched (layer scripts
-   re-run per note; swapping in place would double-swap), and re-triggered
-   notes reuse the cached host-order copy. GOTO/RESTART markers are
-   non-terminal (GOTO's arg indexes within the same envelope), so conversion
-   only stops at DISABLE/HANG or the point cap. Audio-thread-only state. */
+/* Envelopes referenced by the layer/channel ENV ops live inside the raw sequence blob,
+   which stays big-endian on this port (the script interpreter reads it bytewise), while
+   Audio_AdsrUpdate consumes EnvelopePoint.delay/.arg as host-order s16s. The font loader
+   converts font envelopes; these never were, so the boost SE's (delay=1, arg=0x7FBC) read
+   back as (256, -17281) and the note crawled to 28% volume over ~190 ticks. The blob
+   itself must stay untouched -- layer scripts re-run per note, so an in-place swap would
+   double-swap -- hence the pointer-keyed cache. GOTO/RESTART are non-terminal (GOTO
+   indexes within the same envelope), so conversion stops only at DISABLE/HANG or the
+   point cap. Audio-thread-only state. */
 static EnvelopePoint* AudioSeq_PortConvertSeqEnvelope(u8* raw) {
     enum { kMaxEnvs = 64, kMaxPoints = 32 };
     static struct {
@@ -157,9 +151,8 @@ static EnvelopePoint* AudioSeq_PortConvertSeqEnvelope(u8* raw) {
         }
     }
     if (sCount >= kMaxEnvs) {
-        /* Cache full: fail open to the raw pointer (pre-fix behavior). 64 slots
-           is far above the handful of distinct seq envelopes the SE/BGM
-           sequences define; log once if this ever trips. */
+        /* Fail open to the raw pointer. 64 slots is far above the handful of distinct
+           envelopes the SE/BGM sequences define; log once if this ever trips. */
         extern void gdx_cki(const char* s, int v);
         static s32 sOverflowLogged = 0;
         if (!sOverflowLogged) {
@@ -178,8 +171,8 @@ static EnvelopePoint* AudioSeq_PortConvertSeqEnvelope(u8* raw) {
         }
     }
     if (p == kMaxPoints) {
-        /* Unterminated within the cap: force a hang on the last point so the
-           ADSR can never walk past the converted copy. */
+        /* Unterminated within the cap: force a hang so the ADSR can never walk past
+           the converted copy. */
         sCache[sCount].pts[kMaxPoints - 1].delay = ADSR_HANG;
     }
     sCache[sCount].raw = raw;
@@ -777,8 +770,7 @@ s32 AudioSeq_SeqLayerProcessScriptStep2(SequenceLayer* layer) {
             case ASEQ_OP_LAYER_ENV:
                 cmdArg = AudioSeq_ScriptReadS16(state);
 #ifdef PORT
-                /* Host-order copy of the BE seq-embedded envelope -- see
-                   AudioSeq_PortConvertSeqEnvelope's contract comment. */
+                /* See AudioSeq_PortConvertSeqEnvelope: the seq blob stays big-endian. */
                 layer->adsr.envelope = AudioSeq_PortConvertSeqEnvelope(seqPlayer->seqData + (u16) cmdArg);
 #else
                 layer->adsr.envelope = (EnvelopePoint*) (seqPlayer->seqData + (u16) cmdArg);
@@ -1111,9 +1103,8 @@ s32 AudioSeq_SeqLayerProcessScriptStep3(SequenceLayer* layer, s32 cmd) {
 
     if (channel->gateTimeRandomVariance != 0) {
         //! @bug should probably be gateTimeRandomVariance
-        /* AVOID_UB: modulo by velocityRandomVariance divides by zero (hardware
-           exception on x86) whenever gate variance is set but velocity
-           variance is not. Use the guarded field. */
+        /* AVOID_UB: modulo by velocityRandomVariance divides by zero (a hardware
+           trap on x86) whenever gate variance is set but velocity variance is not. */
         intDelta = (layer->gateDelay * (gAudioCtx.audioRandom % channel->gateTimeRandomVariance)) / 100;
         if ((gAudioCtx.audioRandom & 0x4000) != 0) {
             intDelta = -intDelta;
@@ -1606,8 +1597,7 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
 
                 case ASEQ_OP_CHAN_LDSEQTOPTR:
                     cmdArgU16 = (u16) cmdArgs[0];
-                    /* seqData is big-endian bytecode; assemble the u16 from
-                       bytes (host u16* reads swap it on little-endian). */
+                    /* seqData stays big-endian; a host u16* read would byte-swap it. */
                     {
                         u8* seqPtr = seqPlayer->seqData + (u32) (cmdArgU16 + scriptState->value * 2);
                         channel->unk_22 = (u16) ((seqPtr[0] << 8) | seqPtr[1]);

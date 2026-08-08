@@ -389,9 +389,7 @@ void func_80068DCC(void) {
     }
     if (D_800CD154 != bgm) {
 #ifdef PORT
-        /* Proves whether the game-side BGM-change decision fires and reaches the
-           EK-live func_8070DAD4() -> Audio_RomBgmStart() call. Capped so it does
-           not print on every mode change for the life of the process. */
+        /* Probe: does the BGM-change decision reach func_8070DAD4 -> Audio_RomBgmStart? */
         {
             extern void gdx_cki(const char* s, int v);
             static s32 sBgmChangeLogCount = 0;
@@ -498,10 +496,9 @@ void func_800690FC(void) {
         gTitleDemoState = TITLE_DEMO_INACTIVE;
         gMenuChangeMode = MENU_CHANGE_INACTIVE;
         if (gGameMode != GAMEMODE_FLX_TITLE) {
-            /* Only replace the queued destination at a stable game-flow boundary. The normal
-             * gGameMode != gQueuedGameMode path below starts and owns the complete transition.
-             * Forcing CHANGE_START while another transition is active skips teardown/init phases
-             * and can leave the overlay/object arena in a partially reinitialized state. */
+            /* Only swap the queued destination; the gGameMode != gQueuedGameMode path below
+             * owns the transition. Forcing CHANGE_START mid-transition skips teardown/init
+             * phases and can leave the overlay/object arena partially reinitialized. */
             gQueuedGameMode = GAMEMODE_FLX_TITLE;
         }
     }
@@ -617,12 +614,10 @@ void func_800690FC(void) {
             }
             gGameMode = gQueuedGameMode;
 #ifdef PORT
-            /* Republish the fixed-aspect flag at the flip itself: the port's per-frame tick
-             * only sees gGameMode as of the previous dispatch, so consumers that read the
-             * CVar live in THIS frame's rendering (Transition_Draw's stretch gate, the
-             * renderer's 4:3 composite) would otherwise use the pre-flip mode -- one whole
-             * pillarboxed menu frame on every editor exit. See gdx_fixed_aspect_publish
-             * in port/input_bridge.c. */
+            /* Republish at the flip itself: the port's per-frame tick only sees gGameMode as
+             * of the previous dispatch, so consumers reading the CVar live in THIS frame
+             * (Transition_Draw's stretch gate, the 4:3 composite) would pillarbox one menu
+             * frame on every editor exit. port/input_bridge.c. */
             {
                 extern void gdx_fixed_aspect_publish(void);
                 gdx_fixed_aspect_publish();
@@ -855,25 +850,9 @@ void func_800690FC(void) {
     gQueuedGameMode = sGamemodeUpdateFuncs[GET_MODE(gGameMode)]();
 #ifdef PORT
     { extern void gdx_ck(const char*); if (gdx_diag_verbose()) gdx_ck("[game] GMI_H_pre_68F04"); }
-    /* [taend] DIAGNOSTIC, not a fix: Time Attack ending-screen black region.
-     *
-     * The affected screen is drawn by Race_Draw while gGameMode is still
-     * GAMEMODE_TIME_ATTACK; Menus_Draw reaches it at ovl_i3/menus.c:5919-5922.
-     * GAMEMODE_FLX_MAIN_MENU only becomes the mode AFTER the player picks QUIT
-     * (MENU_CHANGE_QUIT, func_80068BC0 above), so a main-menu mode line in the
-     * log is a consequence of leaving this screen, not the state on display.
-     *
-     * The gfx bridge's [bigtri] / [geodiag] / [gpustate] families already report
-     * the offending triangle and the RDP viewport/scissor, but none of them can
-     * see the CPU-side camera state feeding
-     * gSPViewport(&D_1000000.unk_2C2C8[cameraIndex]) on the
-     * CAMERA_VP_TRANSITION_ACTIVE branch of Camera_Draw (game/camera.c:1447-1450),
-     * nor the colour-clear countdown D_i2_80106F10 that camera.c:2842 reloads
-     * when a viewport transition starts. Log exactly that, on the same
-     * GDX_DIAG_VERBOSE gate, so one run correlates them.
-     *
-     * Rate-limited to state changes plus a 120-frame heartbeat: this runs on the
-     * game tick, so an unconditional print would flood the log. */
+    /* Probe for the Time Attack ending-screen black region: the gfx bridge's [bigtri] /
+     * [gpustate] logs cannot see the CPU-side camera viewport state feeding Camera_Draw's
+     * CAMERA_VP_TRANSITION_ACTIVE branch, nor the D_i2_80106F10 clear countdown. */
     if (gdx_diag_verbose() && (GET_MODE(gGameMode) == GAMEMODE_TIME_ATTACK)) {
         extern void gdx_dbg_logf(const char* fmt, ...);
         extern Camera gCameras[];

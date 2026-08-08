@@ -198,7 +198,7 @@
 #define G_TEXRECT		0xe4	/* -28 */
 
 #ifdef PORT
-/* LibUltraShip custom command used by G-Diffuser to scope aspect-aware 2D draws. */
+/* LibUltraShip extension command; scopes aspect-aware 2D draws. */
 #define G_EXTRAGEOMETRYMODE 0x3a
 
 #define G_EX_INVERT_CULLING             0x00000001
@@ -1713,29 +1713,18 @@ typedef struct {
  */
 #ifdef PORT
 /*
- * PC port (Phase G1): the pointer-carrying display-list word (w1) must hold a
- * FULL host pointer, not a truncated 32-bit token. Under the port the decomp
- * compiles with a 32-bit uintptr_t shim (libc/stdint.h), so the original
- * `(unsigned int)(ptr)` casts in the gbi macros would truncate every runtime
- * pointer stored into a display list. We widen w1 to pointer width while w0
- * stays 32-bit (opcode/params).
- *
- * Layout on a 64-bit host: w0 @ offset 0 (4 bytes), 4 bytes natural padding,
- * w1 @ offset 8 (8 bytes) => sizeof(Gfx) == 16. The port graphics bridge reads
- * host-built lists at this stride (kHostBuiltGfxStride) and takes w1 from byte
- * offset 8 as a real pointer. Static asset Gfx[] arrays recompile to this
- * layout automatically; segmented addresses stay 32-bit VALUES in the wide
- * field (their high 32 bits are zero, which the bridge treats as "resolve via
- * the segment table" rather than "already a host pointer").
- * See docs/PIPELINE_REDESIGN_SCOPE.md section 2, G1.
- *
- * NOTE: never store a raw N64/ROM 8-byte Gfx blob through this type — those
- * enter the bridge on the narrow 8-byte path (Phase G2 converts them).
+ * w1 is widened to host pointer width so display lists can carry real pointers; the
+ * original `(unsigned int)` casts truncated every one of them. w0 stays 32-bit.
+ * Layout on a 64-bit host: w0 @ 0, 4 bytes padding, w1 @ 8, sizeof(Gfx) == 16 -- the
+ * port graphics bridge reads host-built lists at exactly this stride
+ * (kHostBuiltGfxStride). Segmented addresses stay 32-bit values in the wide field:
+ * the bridge reads high32 == 0 as "resolve via the segment table" rather than
+ * "already a host pointer", so a raw 8-byte N64 Gfx blob must never be stored
+ * through this type -- those enter the bridge on the narrow path.
  */
-typedef unsigned long long GfxW1; /* pointer-width display-list word (host) */
-/* Cast helper used by every pointer-carrying macro so the address reaches w1
- * intact. For a host pointer this preserves all 64 bits; for a segmented/int
- * value it zero-extends. Value-family macros keep their own (unsigned int). */
+typedef unsigned long long GfxW1;
+/* Used by every pointer-carrying macro; the value-family macros deliberately keep
+ * their own (unsigned int) cast. */
 #define _GFXW1_PTR(x) ((GfxW1)(x))
 typedef struct {
 	unsigned int w0;

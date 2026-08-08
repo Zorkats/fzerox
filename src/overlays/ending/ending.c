@@ -43,11 +43,9 @@ s16 sCupDifficulty;
 s16 sDrawThanksForPlaying;
 s16 sThanksForPlayingFade;
 #ifdef PORT
-// PORT-only watchdog for the terminal ENDING_THANKS_FOR_PLAYING gate. The gate only
-// opens once the character fireworks finish (sFireworksType==NONE && gActiveFireworks==0).
-// If a firework effect never resolves on the port, that gate can stay shut forever and
-// permanently freeze the ceremony. These latch the gate open after a bounded dwell so
-// THANKS always appears and the A/START exit is always reachable.
+// PORT watchdog for the terminal ENDING_THANKS_FOR_PLAYING gate, which only opens once the
+// character fireworks finish. A firework effect that never resolves leaves it shut forever
+// and hangs the ceremony, with no reachable A/START exit.
 s32 sEndingThanksGateWatchdog = 0;
 bool sEndingThanksGateBypassed = false;
 #endif
@@ -600,12 +598,9 @@ s32 EndingCutscene_UpdateState(void) {
             break;
         case ENDING_THANKS_FOR_PLAYING:
 #ifdef PORT
-            // Bound the fireworks sub-gate wait. The gate normally opens when the
-            // character fireworks finish; if they never resolve on the port (empty mask
-            // buffer producing no particles, or a launcher that never recycles) the
-            // scene would freeze here forever. Latch the gate open after a generous
-            // dwell (~40s @30Hz) so the ceremony always progresses. Console behavior is
-            // unchanged: there the fireworks resolve well within the timeout.
+            // Bound the fireworks sub-gate: an empty mask buffer or a launcher that never
+            // recycles would freeze the scene here forever. ~40s @30Hz, far past the time
+            // the fireworks actually take to resolve, so console behavior is unchanged.
             if ((sFireworksType == FIREWORKS_NONE) && (gActiveFireworks == 0)) {
                 sEndingThanksGateWatchdog = 0;
             } else if (!sEndingThanksGateBypassed) {
@@ -655,25 +650,6 @@ s32 EndingCutscene_UpdateState(void) {
         }
         cutsceneResults++;
     }
-#ifdef PORT
-    /* GDX ceremony diag: once per second (30 frames @30Hz) dump the GP-end ceremony state so a
-       stalled fireworks gate is diagnosable -- sFireworksType/gActiveFireworks never reaching
-       (NONE,0) is exactly what keeps sEndingState pinned at ENDING_THANKS_FOR_PLAYING and drives
-       the watchdog toward its 1200 bypass. Strip once the ceremony renders correctly. */
-    {
-        extern void gdx_dbg_logf(const char* fmt, ...);
-        static s32 sGdxCeremonyDiagCounter = 0;
-        if ((sGdxCeremonyDiagCounter++ % 30) == 0) {
-            gdx_dbg_logf("[GDX ceremony] sEndingState=%d (0x%x)\n", (int) sEndingState, (unsigned) sEndingState);
-            gdx_dbg_logf("[GDX ceremony] sEndingTimer=%d (0x%x)\n", (int) sEndingTimer, (unsigned) sEndingTimer);
-            gdx_dbg_logf("[GDX ceremony] sFireworksType=%d (0x%x)\n", (int) sFireworksType, (unsigned) sFireworksType);
-            gdx_dbg_logf("[GDX ceremony] gActiveFireworks=%d (0x%x)\n", (int) gActiveFireworks,
-                         (unsigned) gActiveFireworks);
-            gdx_dbg_logf("[GDX ceremony] thanksGateWatchdog=%d (0x%x)\n", (int) sEndingThanksGateWatchdog,
-                         (unsigned) sEndingThanksGateWatchdog);
-        }
-    }
-#endif
     if ((exitState != 0) && (gEndingFlags & ENDING_FOLLOW_WITH_CREDITS)) {
         exitState = 2;
     }
@@ -1052,13 +1028,10 @@ Gfx* EndingCutscene_DrawThanksForPlayingWindow(Gfx* gfx) {
     {
         extern int CVarGetInteger(const char* name, int defaultValue);
         extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
-        /* The "Thanks for Playing" backdrop fade must cover the whole viewport. It is a single
-           fill that inherits whatever scissor the results chain last latched, so on a widescreen
-           frame it does not reach the stretched viewport edges. Gate on the 3D Widescreen CVar
-           alone -- NOT WidescreenUI, which only governs 2D anchoring: the fade must cover the
-           viewport whenever the frame is widescreen -- and exclude forced-4:3 editor frames. When
-           set, pin an explicit full-screen scissor and STRETCH the fill so it reaches edge to
-           edge instead of relying on the fragile inherited scissor. */
+        /* The backdrop fade is a single fill that inherits whatever scissor the results chain
+           last latched, so on a widescreen frame it stops short of the stretched viewport
+           edges. Gate on the 3D Widescreen CVar alone -- NOT WidescreenUI, which only governs
+           2D anchoring -- and exclude forced-4:3 editor frames. */
         gdxWideThanks = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
                         !gdx_get_force_fixed_aspect();
         if (gdxWideThanks) {
@@ -1068,13 +1041,23 @@ Gfx* EndingCutscene_DrawThanksForPlayingWindow(Gfx* gfx) {
     }
 #endif
 
+#ifdef PORT
+    {
+        extern int gdx_remove_borders(void);
+        if (gdx_remove_borders()) {
+            gfx = func_8007A440(gfx, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, sThanksForPlayingBackgroundAlpha);
+        } else {
+            gfx = func_8007A440(gfx, 12, 8, 308, 232, 0, 0, 0, sThanksForPlayingBackgroundAlpha);
+        }
+    }
+#else
     gfx = func_8007A440(gfx, 12, 8, 308, 232, 0, 0, 0, sThanksForPlayingBackgroundAlpha);
+#endif
 
 #ifdef PORT
-    /* Close the widescreen scope so the trailing "Thanks" text and the following EndScreen logos
-       draw with a bounded safe-area scissor: clear STRETCH and pin the fade's own 12,8,308,232
-       rect. The stock (gate-off) path is left untouched because the inherited scissor state at
-       this call site cannot be proven from the surrounding chain. */
+    /* Close the widescreen scope before the trailing "Thanks" text and the EndScreen logos,
+       pinning the fade's own rect: the inherited scissor at this call site cannot be proven
+       from the surrounding chain, so the stock path is left untouched. */
     if (gdxWideThanks) {
         gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);

@@ -3,9 +3,8 @@
 #include "leo/mfs.h"
 
 #ifdef PORT
-/* Host format guard (port/disk_savefile.cpp): default-off predicate plus an
-   always-on refusal log. Raw externs -- this decomp TU cannot include the host
-   headers. Used by the D6 template-write guard in func_80706518 below. */
+/* port/disk_savefile.cpp: default-off format predicate plus a refusal log. Raw externs --
+   this decomp TU cannot include the host headers. */
 extern int gdx_disk_allow_format(void);
 extern void gdx_disk_log_format_refused(void);
 #endif
@@ -951,25 +950,14 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
     PRINTF("MEDIA INIT OK !!\n");
 
 #ifdef PORT
-    /* Port D6 guard (terminal media-init recovery path). This routine
-       template-formats the MFS RAM area (the write burst below). It is one of the
-       two genuinely terminal not-initialized sites -- the other is
-       func_i1_80404830's second-pass failure in mfs_ram.c -- and is only ever
-       reached from the SLMFS wrappers' N64DD_MEDIA_NOT_INIT / UNRECOVERED_READ_ERROR
-       error handlers, i.e. after the mount path has already proven the on-disk
-       volume unusable. Gate the whole format behind the host format predicate
-       (default off) so an uninitialized or foreign disk is never auto-formatted
-       unprompted -- which, with the durable disk sidecar, would wipe the user's
-       prior saved content. When refused, latch the Workshop status and skip the
-       format entirely; both the template read and its paired completion wait are
-       skipped together, so the Leo message queue stays balanced and the game
-       continues as if the disk is not yet initialized. Because both callers are
-       terminal, the refusal latch here carries the same terminal-only truthfulness
-       as the func_i1_80404830 site. The one-shot opt-in is consumed at whichever
-       terminal site fires first this boot; if func_i1_80404830 already formatted
-       and returned success, no N64DD_MEDIA_NOT_INIT propagates here, so this path
-       is not reached and there is no double format. Port-only: hardware builds
-       keep retail behavior. */
+    /* The write burst below template-formats the MFS RAM area, and with the durable disk
+       sidecar an unprompted auto-format would wipe the user's saved content -- so gate it on
+       the host predicate (default off). Refusing skips the template read AND its paired
+       completion wait together, keeping the Leo message queue balanced. Only reached from the
+       SLMFS wrappers' terminal error handlers, i.e. after the mount path has already proven
+       the volume unusable, so the refusal latch is never spurious. The other terminal site is
+       func_i1_80404830 (mfs_ram.c); whichever fires first consumes the one-shot opt-in, and if
+       that one formatted successfully no error propagates here, so there is no double format. */
     if (!gdx_disk_allow_format()) {
         gdx_disk_log_format_refused();
         return;
@@ -984,22 +972,12 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
         osRecvMesg(&gDmaMesgQueue, NULL, OS_MESG_BLOCK);
         osWritebackDCacheAll();
 #ifdef PORT
-        /* Port: template-copy destination LBA. Must be a LOGICAL (user-area) LBA,
-           because the whole port disk stack -- SLLeoReadWrite_DATA -> LeoReadWrite
-           (port/n64_leo.c) -> LeoLBAToByte (leo/lib/lbatobyte.c) -- adds the 0x18
-           system-area LBAs internally when mapping an LBA to a byte offset. The
-           MFS RAM area therefore begins at logical LBA (LEORAM_START_LBA[type] -
-           0x18); this is exactly gRamAreaCapacity.startLBA, the base MFS itself
-           uses everywhere (see mfs_ram.c / mfs_copy.c) and the value LeoReadCapacity
-           reports for OS_WRITE (readcapacity.c:11, n64_leo.c:258).
-
-           The prior literal 1442 was the PHYSICAL start LEORAM_START_LBA[0] used
-           without the -0x18 bias, so the template landed 0x18 LBAs (24 blocks) past
-           the true RAM-area start and the volume header at the base was never
-           written -- Mfs_ValidateRamVolume kept reporting the save area as
-           uninitialized forever. Using LEORAM_START_LBA[LEOdisk_type] (not a fixed
-           index) also tracks the actual loaded disk type. Port-only; hardware
-           builds retain retail behavior. */
+        /* The destination must be a LOGICAL (user-area) LBA: the whole port disk stack down to
+           LeoLBAToByte adds the 0x18 system-area LBAs itself, so the RAM area begins at
+           LEORAM_START_LBA[type] - 0x18 -- exactly gRamAreaCapacity.startLBA. Without the bias
+           the template lands 24 blocks past the true start, the volume header at the base is
+           never written, and Mfs_ValidateRamVolume reports the save area uninitialized forever.
+           Indexing by LEOdisk_type rather than a fixed 0 tracks the loaded disk type. */
         SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, (LEORAM_START_LBA[LEOdisk_type] - 0x18) + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);
 #else
         SLLeoReadWrite_DATA(&D_800E32E8, OS_WRITE, 3062 + D_8079F9CC, D_i1_80415190, 1, &gDmaMesgQueue);

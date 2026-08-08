@@ -27,9 +27,8 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     OSTask* task;
     s32 index;
 #ifdef PORT
-    /* osRecvMesg writes a full OSMesg (pointer-width on host) through &sp4C;
-       the N64's u32 local overflows the stack by 4 bytes here. The
-       queued values are small command tokens, truncated back at the use. */
+    /* osRecvMesg writes a pointer-width OSMesg; the u32 local overflows the stack by
+       4 bytes on host. The queued values are small tokens, truncated back at the use. */
     OSMesg sp4C;
 #else
     u32 sp4C;
@@ -52,18 +51,12 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     }
 
 #ifdef PORT
-    /* Release-build 64DD SIGABRT: this per-tick osSendMesg was the last decomp osSendMesg the
-       dedicated audio OS thread still reached. A core dump caught the audio thread here
-       (osSendMesg <- AudioThread_CreateTaskImpl <- Audio_SetupCreateTask <-
-       gdx_audio_produce_one_tick) running CONCURRENT with the boot fiber's own osSendMesg
-       (osSendMesg <- LeoSpdlMotor <- SLMFSLoad, the 64DD disk mount) -> glibc heap/list abort.
-       Moving AudioThread_ScheduleProcessCmds off the kernel was not enough on its own: this send
-       kept the audio thread entering the libultra osSendMesg kernel body every tick during the boot
-       window. taskStartQueue has NO consumer in this port -- AudioThread_WaitForAudioTask, its only
-       reader, is never called -- so the message only ever satisfied a waiter that does not exist.
-       Route it to a plain host-side atomic counter (port/gdx_audio_thread.cpp) so the audio thread
-       never touches libultra's run-queue/waiter machinery here. Independent of the kill switch:
-       nothing consumes the queue on the legacy fiber path either. */
+    /* This per-tick osSendMesg was the last decomp osSendMesg the dedicated audio thread
+       still reached, and it raced the boot fiber's own osSendMesg (LeoSpdlMotor, the 64DD
+       mount) into a glibc heap abort. taskStartQueue has no consumer in this port --
+       AudioThread_WaitForAudioTask, its only reader, is never called, on either thread path
+       -- so post to a host-side atomic counter instead and keep the audio thread out of
+       libultra's run-queue machinery. */
     {
         extern void gdx_audio_taskstart_post(unsigned int token);
         gdx_audio_taskstart_post((unsigned int) gAudioCtx.totalTaskCount);
@@ -83,9 +76,8 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
             gdx_unlock_audio_capture_ai_buffer(gAudioCtx.aiBuffers[index],
                                                (unsigned int) gAudioCtx.aiBufLengths[index],
                                                (unsigned int) gAudioCtx.audioBufferParameters.samplingFrequency);
-            /* Bit-identical PCM gate: stream the same pre-post-processing tap to the
-               streaming capture module. No-op unless GDX_PCM_CAPTURE is set. Runs alongside — not
-               instead of — the dormant unlock diagnostic above. See port/gdx_audio_capture.c. */
+            /* Pre-post-processing tap for the bit-identical PCM gate; no-op unless
+               GDX_PCM_CAPTURE is set. See port/gdx_audio_capture.c. */
             {
                 extern void gdx_pcm_capture_feed(const s16* frames, unsigned int frameCount,
                                                  unsigned int sampleRate);
@@ -174,9 +166,8 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     j = 0;
     if (gAudioCtx.resetStatus == 0) {
 #ifdef PORT
-        /* Drain the lock-free cmd ring (see AudioThread_ScheduleProcessCmds' PORT branch and
-           port/gdx_audio_thread.cpp) instead of the decomp osRecvMesg. sp4C stays declared for
-           the non-PORT path's OSMesg-width overflow note above; unused here by design. */
+        /* Drain the lock-free cmd ring (port/gdx_audio_thread.cpp) instead of osRecvMesg;
+           sp4C goes unused on this path. */
         {
             extern int gdx_audio_cmdring_pop(unsigned int* out);
             unsigned int cmdToken;
@@ -201,20 +192,18 @@ AudioTask* AudioThread_CreateTaskImpl(void) {
     gAudioCtx.curAbiCmdBuf =
         AudioSynth_Update(gAudioCtx.curAbiCmdBuf, &abiCmdCount, curAiBuffer, gAudioCtx.aiBufLengths[index]);
 #ifdef PORT
-    /* RNG determinism pin. osGetCount() is a free-running CPU-cycle counter —
-       pure hardware entropy — that feeds gAudioCtx.audioRandom, which is content-affecting (it
-       perturbs sequencer velocity/gate variance). The bit-identical PCM gate therefore cannot be
-       reached while this term varies run-to-run. Under capture-armed mode ONLY, substitute a
-       deterministic monotonic counter for osGetCount(); normal gameplay (capture inactive) keeps
-       the original hardware-entropy expression byte-for-byte, so this change is provably inert off
-       capture (gdx_pcm_capture_active() is 0 whenever GDX_PCM_CAPTURE is unset, i.e. all real play,
-       and the static counter is never touched in that branch). */
+    /* RNG determinism pin. osGetCount() is hardware entropy feeding gAudioCtx.audioRandom,
+       which is content-affecting (it perturbs sequencer velocity/gate variance), so the
+       bit-identical PCM gate can never reproduce while this term varies run to run.
+       Substitute a deterministic counter under capture-armed mode only --
+       gdx_pcm_capture_active() is 0 whenever GDX_PCM_CAPTURE is unset, i.e. all real play,
+       which keeps the original expression byte for byte. */
     {
         extern int gdx_pcm_capture_active(void);
         u32 gdxRandTick;
         if (gdx_pcm_capture_active()) {
             static u32 sGdxDetCount = 0;
-            sGdxDetCount += 0x9E3779B9u; /* fixed golden-ratio step: deterministic, distinct per tick */
+            sGdxDetCount += 0x9E3779B9u; /* golden-ratio step: distinct per tick */
             gdxRandTick = sGdxDetCount;
         } else {
             gdxRandTick = (u32) osGetCount();
@@ -438,12 +427,9 @@ void AudioThread_InitMesgQueuesImpl(void) {
 
 void AudioThread_QueueCmd(u32 opArgs, void** data) {
 #ifdef PORT
-    /* Dedicated audio thread: this ring is written by the GAME thread and
-       drained by the dedicated audio thread (AudioThread_CreateTaskImpl's
-       loop inside gdx_audio_thread.cpp's mutexed tick). Take the same mutex
-       here so a producer write can never interleave with the drain — this is
-       the single chokepoint every QueueCmd* variant funnels through. No-op
-       cost when the kill switch has the audio thread disabled. */
+    /* The game thread writes this ring while the dedicated audio thread drains it inside
+       gdx_audio_thread.cpp's mutexed tick. Take that same mutex here -- this is the single
+       chokepoint every QueueCmd* variant funnels through. */
     extern void gdx_audio_ctx_lock(void);
     extern void gdx_audio_ctx_unlock(void);
     gdx_audio_ctx_lock();
@@ -475,25 +461,14 @@ void AudioThread_QueueCmdU32(s32 opArgs, s32 data) {
 
 void AudioThread_QueueCmdS8(s32 opArgs, s8 data) {
 #ifdef PORT
-    /* Root cause of total SFX silence. AudioCmd's second union (asSbyte/asUShort/
-       asFloat/asInt/...) is a plain, non-bitfield union, so every member shares byte
-       offset 0 regardless of host endianness -- unlike the opArgs bitfield struct
-       above, which needed the PORT-only field reversal. The N64 original shifts data
-       into the TOP byte of a 32-bit word (data << 24) because on a big-endian target
-       that top byte IS byte-offset-0, exactly where an `s8`/`u8` union member lives.
-       On a little-endian host byte-offset-0 is the LOW byte, so `data << 24` puts the
-       value at byte-offset-3 and `cmd->asSbyte`/`asUbyte` always read 0. That zeroed
-       every AUDIOCMD_CHANNEL_SET_IO write, including Audio_SEStart's sfxId, so each
-       SFX channel's seqScriptIO[0] port held 0 rather than the real sfxId or the
-       SEQ_IO_VAL_NONE=-1 "empty" sentinel. Channel scripts poll that port with
-       `LDIO port0; RBLTZ` (sleep again only when the value is < 0), so a 0 fell
-       through into CHAN_DYNTBL/CHAN_DYNCALL with index 0 == NA_SE_NONE, a silent
-       no-op entry: no note was ever born on seqPlayer 0's SE font. Music was
-       unaffected because BGM commands are almost all QueueCmdF32/QueueCmdU32, a
-       different and coincidentally safe type-punning path (see AudioThread_QueueCmd),
-       not QueueCmdS8/QueueCmdU16. Store the byte at offset 0 directly, with no shift,
-       so it lands under `asSbyte`/`asUbyte` on a little-endian host and matches
-       console semantics without depending on memory byte order. */
+    /* Root cause of total SFX silence. AudioCmd's data union is a plain union, so every
+       member sits at byte offset 0 whatever the host endianness. The original shifts data
+       into the top byte (data << 24) because on big-endian that top byte IS offset 0; on a
+       little-endian host it lands at offset 3 and cmd->asSbyte always reads 0. That zeroed
+       every AUDIOCMD_CHANNEL_SET_IO write, including Audio_SEStart's sfxId, so SE channel
+       scripts read port 0 as NA_SE_NONE instead of a real id or the SEQ_IO_VAL_NONE
+       sentinel and never started a note. BGM was unaffected: it goes through
+       QueueCmdF32/QueueCmdU32. Store the byte at offset 0 with no shift. */
     u32 uData = (u8) data;
 #else
     u32 uData = data << 0x18;
@@ -504,9 +479,7 @@ void AudioThread_QueueCmdS8(s32 opArgs, s8 data) {
 
 void AudioThread_QueueCmdU16(s32 opArgs, u16 data) {
 #ifdef PORT
-    /* Same little-endian fix as AudioThread_QueueCmdS8 above, for the u16 union
-       members (asUShort, used by e.g. AUDIOCMD_CHANNEL_SET_COMB_FILTER_GAIN and
-       AUDIOCMD_GLOBAL_SET_CHANNEL_MASK). */
+    /* Same little-endian fix as AudioThread_QueueCmdS8, for the asUShort union member. */
     u32 uData = data;
 #else
     u32 uData = data << 0x10;
@@ -521,9 +494,8 @@ s32 AudioThread_ScheduleProcessCmds(void) {
 
 #ifdef PORT
     /* Route the cross-thread cmd token over the lock-free ring in port/gdx_audio_thread.cpp
-       instead of the decomp libultra osSendMesg, so neither the game/host thread (this producer)
-       nor the dedicated audio thread (the consumer, plus a rare self-reschedule producer) touches
-       the fiber run queue for it. Same OS_MESG_NOBLOCK convention: 0 = queued, -1 = ring full. */
+       instead of osSendMesg, so neither the producer nor the dedicated audio thread touches
+       the fiber run queue for it. Same OS_MESG_NOBLOCK convention: 0 = queued, -1 = full. */
     extern int gdx_audio_cmdring_push(unsigned int token);
     sendResult = gdx_audio_cmdring_push(
         (unsigned int) (((gAudioCtx.threadCmdReadPos & 0xFF) << 8) | (gAudioCtx.threadCmdWritePos & 0xFF)));
@@ -623,9 +595,8 @@ void AudioThread_ProcessCmds(u32 msg) {
 
 u32 AudioThread_GetAsyncLoadStatus(u32* outData) {
 #ifdef PORT
-    /* Same OSMesg-width overflow as AudioThread_ResetComplete's specId: the
-       receive writes pointer-width on host; a u32 local overflows the stack
-       (RTC "stack around loadStatus corrupted"). */
+    /* Same OSMesg-width overflow as AudioThread_ResetComplete's specId: osRecvMesg writes
+       pointer-width, so a u32 local overflows the stack (RTC flags loadStatus). */
     OSMesg loadMesg;
     u32 loadStatus;
 
@@ -658,8 +629,8 @@ void Audio_GetSampleBankIdsOfFont(s32 fontId, u32* sampleBankId1, u32* sampleBan
 s32 AudioThread_ResetComplete(void) {
     s32 pad;
 #ifdef PORT
-    /* Same OSMesg-width overflow as AudioThread_CreateTaskImpl's sp4C: the
-       receive writes pointer-width on host; an s32 local overflows the stack. */
+    /* Same OSMesg-width overflow as AudioThread_CreateTaskImpl's sp4C: osRecvMesg writes
+       pointer-width, so an s32 local overflows the stack. */
     OSMesg specId;
 
     if (osRecvMesg(gAudioCtx.audioResetQueueP, &specId, OS_MESG_NOBLOCK) == -1) {

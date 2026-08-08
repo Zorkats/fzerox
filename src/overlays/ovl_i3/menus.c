@@ -231,9 +231,7 @@ extern s32 gTotalRacers;
 extern s16 D_80115D50[];
 
 #ifdef PORT
-// G-Diffuser autosave-on-record (ghost). Defined after Menus_CheckGhostCanSave below, where the
-// ghost globals and Save_* helpers are already in scope. Gated by the
-// gEnhancements.Gameplay.AutosaveOnRecord CVar (default off) -- a no-op unless enabled.
+// Defined after Menus_CheckGhostCanSave, where the ghost globals and Save_* helpers are in scope.
 void Gdx_AutosaveGhostOnRecord(void);
 #endif
 
@@ -266,10 +264,8 @@ void Menus_Update(void) {
                     Save_SaveCourseRecordProfiles(gCourseIndex);
                 }
 #ifdef PORT
-                // G-Diffuser autosave-on-record: also persist the best ghost replay here (stock
-                // F-Zero X only saves it via the manual Save-Ghost prompt). Gated by
-                // gEnhancements.Gameplay.AutosaveOnRecord (default off); no-op unless enabled.
-                // func_80089BD0() (above) has just refreshed gFastestGhost for this race.
+                // Also persist the best ghost replay (stock only saves it via the manual
+                // Save-Ghost prompt); func_80089BD0 above just refreshed gFastestGhost.
                 Gdx_AutosaveGhostOnRecord();
 #endif
             } else if (gGameMode == GAMEMODE_GP_RACE) {
@@ -1826,16 +1822,11 @@ Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
         {
             extern int CVarGetInteger(const char* name, int defaultValue);
             extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
-            /* The retire fade must black out the whole viewport. Its quads take the default
-               hor+ 4:3 confinement (GfxDrawRectangle) while the safe-area scissor above is
-               scaled linearly, so on a widescreen frame the two mismatch and leave uncovered
-               vertical strips at the sides. Gate on the 3D Widescreen CVar alone -- NOT
-               WidescreenUI, which only governs 2D anchoring: a fullscreen fade must cover the
-               viewport whenever the frame is widescreen -- and exclude forced-4:3 editor frames
-               so their fade matches the pillarboxed content. When set, reopen the scissor to the
-               full screen and STRETCH the fade quads so both reach edge to edge. The row loop's
-               x=12..308 span is deliberately left untouched: the interpreter's stretchActive
-               kSafeAreaScale is calibrated for exactly that span. */
+            /* The fade quads take the default hor+ 4:3 confinement while the safe-area scissor
+               scales linearly, leaving uncovered side strips on a widescreen frame. Gate on the
+               3D Widescreen CVar -- not WidescreenUI, which only governs 2D anchoring -- and
+               exclude forced-4:3 editor frames. The row loop's x=12..308 span must stay: the
+               interpreter's stretch kSafeAreaScale is calibrated for exactly that span. */
             gdxWideGameover = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
                               !gdx_get_force_fixed_aspect();
             if (gdxWideGameover) {
@@ -1845,7 +1836,17 @@ Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
         }
 #endif
 
+#ifdef PORT
+        /* Rows extend to the full frame under RemoveBorders (the alpha ramp is |row-124|, valid
+           on any row); x stays 12..308 -- the stretch's kSafeAreaScale is calibrated to it. */
+        {
+            extern int gdx_remove_borders(void);
+            s32 gdxRowStart = gdx_remove_borders() ? 0 : 16;
+            s32 gdxRowEnd = gdx_remove_borders() ? SCREEN_HEIGHT : 224;
+            for (row = gdxRowStart; row < gdxRowEnd; row++) {
+#else
         for (row = 16; row < 224; row++) {
+#endif
             alpha = (row - 124);
             if (row < 124) {
                 alpha = -alpha;
@@ -1862,8 +1863,11 @@ Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
             gSPTextureRectangle(gfx++, 12 << 2, row << 2, 308 << 2, (row + 1) << 2, 0, 0, 0, 1 << 10, 1 << 10);
         }
 #ifdef PORT
-        /* Close the widescreen scope so the following 3D GAMEOVER logo draws with stock state:
-           clear the STRETCH mode and restore the safe-area scissor the stock path leaves latched. */
+        }
+#endif
+#ifdef PORT
+        /* Restore stock state before the 3D GAMEOVER logo; the stock path expects the safe-area
+           scissor to still be latched here. */
         if (gdxWideGameover) {
             gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
             gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
@@ -2238,14 +2242,10 @@ s32 Menus_CheckGhostCanSave(void) {
 }
 
 #ifdef PORT
-// Autosave-on-record (G-Diffuser). When gEnhancements.Gameplay.AutosaveOnRecord is enabled, persist
-// the current best ghost to the per-course PC library at race finish so a good run is never lost to a quit before the
-// manual "Save Ghost" prompt. Called once per Time Attack finish from Menus_Update (latched by
-// sRaceFinishSaveTriggered), right after the numeric-record autosave the game already performs.
-//
-// The library owns one exact-course player ghost and does not replace a different course. The
-// vanilla SRAM slot remains a compatibility mirror: write it when empty, or update the same course
-// on a strict improvement, but never evict another course merely because autosave is enabled.
+// Persist the current best ghost to the per-course PC library at Time Attack finish, so a good run
+// is not lost to quitting before the manual "Save Ghost" prompt. Latched once per finish by
+// sRaceFinishSaveTriggered. The vanilla SRAM slot stays a compatibility mirror: written when empty
+// or on a strict same-course improvement, never evicting another course's ghost.
 void Gdx_AutosaveGhostOnRecord(void) {
     extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
     extern int gdx_ghost_library_get_player_stats(s32 encodedCourseIndex, s32* outRaceTime,
@@ -2721,22 +2721,16 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
     gDPPipeSync(gfx++);
 #ifdef PORT
     {
-        /* The reveal wipe counts sGeneralRaceMenuScissorBoxTimer 60 -> 0. For the first frames
-           (timer > 46) the stock scissor is INVERTED: ulx = timer+205 > lrx = 305-timer, and/or
-           uly = timer+132 > lry = 225-timer. On real RDP an inverted scissor rejects every pixel,
-           which IS the intended "panel not yet revealed" state. The port's software scissor does
-           not replicate that and instead renders the panel at a degenerate/oversized rect (the
-           giant black panel at the TA finish). Clamp each axis so an inverted range collapses to a
-           zero-area rect -> nothing drawn, matching console. Once the window becomes valid the stock
-           coordinates are emitted unchanged, so the reveal animation is preserved. */
+        /* For the first frames of the reveal wipe the stock scissor is INVERTED (ulx > lrx and/or
+           uly > lry). Real RDP rejects every pixel then -- the intended "not yet revealed" state
+           -- but the port's software scissor renders a degenerate giant rect instead. Clamping
+           collapses an inverted range to zero area and leaves valid windows untouched, so the
+           reveal animation is preserved. */
         s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
         s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 225 - sGeneralRaceMenuScissorBoxTimer;
-        /* WIDESCREEN: same right-anchored panel family as Menus_DrawDeathRaceEndMenu (RETRY/
-           SETTINGS/QUIT/CHANGE_MACHINE box at x 210-300). Re-center the reveal scissor about the
-           same pivot (160) the panel geometry is hor+ compressed around, so the scissor tracks the
-           panel at any aspect. Identity on 4:3 / widescreen off. */
+        /* Re-center about the hor+ pivot 160; see the RETIRE panel in Menus_DrawDeathRaceEndMenu. */
         extern float gdx_get_widescreen_geometry_xscale(void);
         f32 wsx = gdx_get_widescreen_geometry_xscale();
         if (wsx != 1.0f) {
@@ -2933,17 +2927,12 @@ Gfx* Menus_DrawGpResultsEndMenu(Gfx* gfx) {
     gDPPipeSync(gfx++);
 #ifdef PORT
     {
-        /* Same inverted-reveal-scissor bug class as Menus_DrawTimeAttackFinishMenu: clamp each
-           axis so an inverted range collapses to a zero-area rect (nothing drawn), replicating the
-           console "not yet revealed" state that an inverted RDP scissor produces. */
+        /* Inverted-reveal-scissor clamp; see Menus_DrawTimeAttackFinishMenu. */
         s32 ulx = sGpResultsEndMenuScissorBoxTimer + 205;
         s32 uly = sGpResultsEndMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGpResultsEndMenuScissorBoxTimer;
         s32 lry = 225 - sGpResultsEndMenuScissorBoxTimer;
-        /* WIDESCREEN: same right-anchored panel family as Menus_DrawDeathRaceEndMenu (RETRY/
-           SETTINGS/CHANGE_MACHINE/CHANGE_COURSE/QUIT box at x 210-300). Re-center the reveal
-           scissor about the same pivot (160) the panel geometry is hor+ compressed around, so the
-           scissor tracks the panel at any aspect. Identity on 4:3 / widescreen off. */
+        /* Re-center about the hor+ pivot 160; see the RETIRE panel in Menus_DrawDeathRaceEndMenu. */
         extern float gdx_get_widescreen_geometry_xscale(void);
         f32 wsx = gdx_get_widescreen_geometry_xscale();
         if (wsx != 1.0f) {
@@ -3083,17 +3072,12 @@ Gfx* Menus_DrawRetiredEndMenu(Gfx* gfx) {
     gDPPipeSync(gfx++);
 #ifdef PORT
     {
-        /* Same inverted-reveal-scissor bug class as Menus_DrawTimeAttackFinishMenu: clamp each
-           axis so an inverted range collapses to a zero-area rect (nothing drawn), replicating the
-           console "not yet revealed" state that an inverted RDP scissor produces. */
+        /* Inverted-reveal-scissor clamp; see Menus_DrawTimeAttackFinishMenu. */
         s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
         s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 226 - sGeneralRaceMenuScissorBoxTimer;
-        /* WIDESCREEN: same right-anchored panel family as Menus_DrawDeathRaceEndMenu (RETRY/
-           SETTINGS/QUIT/CHANGE_MACHINE box at x 210-300). Re-center the reveal scissor about the
-           same pivot (160) the panel geometry is hor+ compressed around, so the scissor tracks the
-           panel at any aspect. Identity on 4:3 / widescreen off. */
+        /* Re-center about the hor+ pivot 160; see the RETIRE panel in Menus_DrawDeathRaceEndMenu. */
         extern float gdx_get_widescreen_geometry_xscale(void);
         f32 wsx = gdx_get_widescreen_geometry_xscale();
         if (wsx != 1.0f) {
@@ -3232,22 +3216,15 @@ Gfx* Menus_DrawDeathRaceEndMenu(Gfx* gfx) {
     gDPPipeSync(gfx++);
 #ifdef PORT
     {
-        /* Same inverted-reveal-scissor bug class as Menus_DrawTimeAttackFinishMenu: clamp each
-           axis so an inverted range collapses to a zero-area rect (nothing drawn), replicating the
-           console "not yet revealed" state that an inverted RDP scissor produces. */
+        /* Inverted-reveal-scissor clamp; see Menus_DrawTimeAttackFinishMenu. */
         s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
         s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 210 - sGeneralRaceMenuScissorBoxTimer;
-        /* WIDESCREEN: the blue RETIRE panel (Menus_DrawBeveledBox + option textures, all
-           gSPTextureRectangle) is hor+ compressed about screen center 160, but gDPSetScissor
-           maps this native box linearly across the full frame. On a widescreen frame the two
-           no longer coincide: the linear scissor sits right of the confined panel, clipping its
-           left edge and the selection cursor while leaving dead space to the right. Re-center
-           the reveal box by the same x-scale the geometry receives (identity on 4:3 / widescreen
-           off, so the stock clamp is unchanged there) so the scissor tracks the panel at any
-           aspect. Center 160 == the NDC origin AdjXForAspectRatio scales about; y is untouched
-           because the aspect correction is horizontal only. */
+        /* The RETIRE panel is hor+ compressed about screen center 160, but gDPSetScissor maps its
+           native box linearly across the full frame, so on widescreen the scissor sits right of
+           the panel and clips its left edge and the cursor. Re-center by the same x-scale the
+           geometry receives (identity at 4:3 / widescreen off). Y needs no correction. */
         extern float gdx_get_widescreen_geometry_xscale(void);
         f32 wsx = gdx_get_widescreen_geometry_xscale();
         if (wsx != 1.0f) {
@@ -4260,11 +4237,8 @@ Gfx* Menus_DrawPlayerRetire(Gfx* gfx, s32 playerIndex) {
         gDPSetCombineMode(gfx++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
         gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
 #ifdef PORT
-        /* Same widescreen-coverage mismatch as the Gameover fade above: the fade quads take
-           the default hor+ 4:3 confinement while the safe-area scissor scales linearly,
-           leaving uncovered vertical strips at the sides on a widescreen frame. Same gate
-           (3D Widescreen CVar, not WidescreenUI) and same STRETCH bracket; the scissor is
-           restored after the loop so the RETIRE letters keep their safe-area clip. */
+        /* Same coverage mismatch, gate, and STRETCH bracket as the Gameover fade above; the
+           scissor is restored after the loop so the RETIRE letters keep their safe-area clip. */
         {
             extern int CVarGetInteger(const char* name, int defaultValue);
             extern int gdx_get_force_fixed_aspect(void);
@@ -4275,21 +4249,29 @@ Gfx* Menus_DrawPlayerRetire(Gfx* gfx, s32 playerIndex) {
                 gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
             }
 
-            for (row = 16; row < 224; row++) {
-                alpha = (row - 120);
-                if (row < 120) {
-                    alpha = -alpha;
+            /* Rows extend to the full frame under RemoveBorders (|row-120| ramp is valid on any
+               row); x stays 12..308 for the same kSafeAreaScale reason as the Gameover fade. */
+            {
+                extern int gdx_remove_borders(void);
+                s32 gdxRowStart = gdx_remove_borders() ? 0 : 16;
+                s32 gdxRowEnd = gdx_remove_borders() ? SCREEN_HEIGHT : 224;
+                for (row = gdxRowStart; row < gdxRowEnd; row++) {
+                    alpha = (row - 120);
+                    if (row < 120) {
+                        alpha = -alpha;
+                    }
+                    alpha = (sPlayerRetireGameoverFadeTransitionTimer[0] + alpha) - 150;
+                    if (alpha < 0) {
+                        alpha = 0;
+                    }
+                    if (alpha > 255) {
+                        alpha = 255;
+                    }
+                    gDPPipeSync(gfx++);
+                    gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, alpha);
+                    gSPTextureRectangle(gfx++, 12 << 2, row << 2, 308 << 2, (row + 1) << 2, 0, 0, 0, 1 << 10,
+                                        1 << 10);
                 }
-                alpha = (sPlayerRetireGameoverFadeTransitionTimer[0] + alpha) - 150;
-                if (alpha < 0) {
-                    alpha = 0;
-                }
-                if (alpha > 255) {
-                    alpha = 255;
-                }
-                gDPPipeSync(gfx++);
-                gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, alpha);
-                gSPTextureRectangle(gfx++, 12 << 2, row << 2, 308 << 2, (row + 1) << 2, 0, 0, 0, 1 << 10, 1 << 10);
             }
 
             if (gdxWideRetireFade) {
@@ -5505,31 +5487,13 @@ extern s32 gRaceTimeIntervalToggle;
 extern s32 sEADDemoQueueState;
 
 #ifdef PORT
-/* G-Diffuser: widescreen anchor selection for the three per-player race overlays emitted from
- * Menus_Draw's player loop (minimap, position, speed). Returning the mode bit rather than
- * branching at each call site keeps every Set paired with an identical Clear and puts the
- * layout reasoning in one place.
- *
- * WHY THE ANSWER DEPENDS ON THE PLAYER COUNT. The N64 split-screen viewports are 4:3 in native
- * space (aVpTopHalf/aVpBottomHalf are a full 320x240 offset in Y; the quarter viewports are
- * 160x120), and AdjustVIewportOrScissor maps native coordinates linearly onto the window, so
- * every one of them ends up with the WINDOW's aspect ratio -- 2P halves span the full window
- * width, 3P/4P quadrants span exactly half of it (NDC x [-1,0] for the left column, [0,+1] for
- * the right). An element therefore has to be glued to a different edge depending on which
- * column its sub-viewport occupies:
- *   full-width sub-viewport (1P, 2P) : screen left = ANCHOR_LEFT, screen right = ANCHOR_RIGHT
- *   quadrant, OUTER edge             : same two bits (the outer edge IS a screen edge)
- *   quadrant, INNER edge             : NO bit -- AdjXForAspectRatio already scales about NDC 0,
- *                                      which is precisely the column boundary, so an unscoped
- *                                      rect near native x=160 stays glued to it. Adding an
- *                                      anchor here would drag it out to a screen edge.
- * Native X values quoted below come from the layout tables: sPlayerMinimapPositions
- * (minimap.c:37), sPositionPositions and sSpeedPositions (hud.c).
- *
- * `wide1p` is the existing 1P switch (gEnhancements.Graphics.WidescreenUI) and `wideSplit` the
- * separate split-screen switch, so the 1P display list is unaffected by the split-screen work
- * and either can be turned off independently. With both off every helper returns 0 and the
- * emitted display list is bit-identical to stock. */
+/* Anchor selection for the per-player race overlays in Menus_Draw's loop. Returning the mode bit
+ * keeps every Set paired with an identical Clear. Same column rules as Hud_DrawHud: 2P halves span
+ * the full window width and 3P/4P quadrants span half, so only outer (screen) edges take
+ * ANCHOR_LEFT/RIGHT; inner-edge elements stay unscoped because AdjXForAspectRatio already scales
+ * about NDC 0 = the column boundary, and anchoring one would drag it to a screen edge. Native X
+ * values below come from sPlayerMinimapPositions (minimap.c) and sPositionPositions/sSpeedPositions
+ * (hud.c). `wide1p` and `wideSplit` are independent switches. */
 static u32 GdxRaceMinimapAnchor(s32 numPlayers, s32 playerIndex, s32 wide1p, s32 wideSplit) {
     if (numPlayers == 1) {
         return wide1p ? G_EX_WIDESCREEN_ANCHOR_RIGHT : 0; /* x=232, right safe-area edge */
@@ -5556,10 +5520,9 @@ static u32 GdxRacePositionAnchor(s32 numPlayers, s32 playerIndex, s32 wide1p, s3
     if (numPlayers == 2) {
         return G_EX_WIDESCREEN_ANCHOR_LEFT; /* x=-4, hard against the left edge */
     }
-    /* Left column x=4 is the outer edge. The right column's table entry is x=146, which is
-       BELOW the 160 column boundary and so straddles it -- there is no defensible edge to glue
-       it to, and guessing one would move it off its quadrant. Left unscoped: report this as a
-       known residual rather than inventing a placement. */
+    /* Left column x=4 is the outer edge. The right column's entry is x=146, below the 160 column
+       boundary and so straddling it -- no defensible edge to glue to, and guessing one would move
+       it off its quadrant. Left unscoped as a known residual. */
     return (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : 0;
 }
 
@@ -5573,10 +5536,9 @@ static u32 GdxRaceSpeedAnchor(s32 numPlayers, s32 playerIndex, s32 wide1p, s32 w
     if (numPlayers == 2) {
         return G_EX_WIDESCREEN_ANCHOR_RIGHT; /* x=226 in a full-width half -> screen right */
     }
-    /* Quadrants: players 0/1 at x=24 is the left column's outer edge; players 2/3 at x=168 sit
-       8px past the boundary, i.e. the right column's INNER edge -> unscoped. This slot is
-       shared with the lap-flash timer (Hud_UpdatePlayerHudInfo), which hud.c anchors the same
-       way, so the two never disagree about where the slot lives. */
+    /* Players 0/1 at x=24 is the left column's outer edge; players 2/3 at x=168 sit 8px past the
+       boundary, i.e. the right column's INNER edge -> unscoped. This slot is shared with the
+       lap-flash timer (Hud_UpdatePlayerHudInfo), which hud.c must keep anchored the same way. */
     return (playerIndex < 2) ? G_EX_WIDESCREEN_ANCHOR_LEFT : 0;
 }
 #endif
@@ -5595,10 +5557,9 @@ Gfx* Menus_Draw(Gfx* gfx) {
     extern int gdx_widescreen_split_ui_active(void); // port/input_bridge.c
     s32 gdxPhotoActive = gdx_photo_mode_active();
     /* Read once so every anchor Set below pairs with its Clear even if the CVar toggles
-     * mid-build. With this false (stock default) the display list is bit-identical. */
+     * mid-build. */
     s32 gdxWideHud = gdx_widescreen_ui_active();
-    /* Separate switch for the 2P/3P/4P layouts; see gdx_widescreen_split_ui_active in
-     * port/input_bridge.c for why the split-screen policy does not ride the 1P CVar. */
+    /* Deliberately a separate CVar for split-screen; see gdx_widescreen_split_ui_active. */
     s32 gdxWideSplitHud = gdx_widescreen_split_ui_active();
     u32 gdxRaceAnchor;
 #endif
@@ -5721,12 +5682,10 @@ Gfx* Menus_Draw(Gfx* gfx) {
 #endif
                     }
                     if (gNumPlayers == 3) {
-                        /* The 3P layout draws a fourth minimap into the empty bottom-right
-                           quadrant (sPlayerMinimapPositions[2][3] = {210,152}). That entry sits
-                           mid-column rather than on either edge, and the quadrant holds no 3D
-                           view to align against, so it is deliberately left on the stock centred
-                           path -- anchoring it would only move it away from where the other
-                           three minimaps land. */
+                        /* The fourth minimap goes in 3P's empty bottom-right quadrant
+                           (sPlayerMinimapPositions[2][3] = {210,152}), mid-column rather than on
+                           an edge and with no 3D view to align against. Left on the stock centred
+                           path: anchoring it would only move it away from the other three. */
                         gfx = Minimap_DrawCourseMinimap(gfx, gNumPlayers - 1, 3);
                     }
 #ifdef PORT
@@ -5794,10 +5753,9 @@ Gfx* Menus_Draw(Gfx* gfx) {
             if (gGameMode == GAMEMODE_GP_RACE) {
                 if (gRaceTimeIntervalToggle) {
 #ifdef PORT
-                    /* WIDESCREEN-UI: the L-button gap-to-rival interval draws at a right-edge-native
-                       base X (222), but outside any anchor scope, so in widescreen it stays at the
-                       4:3 column instead of gluing to the physical right edge like the lap timer
-                       above it. Same Set/Clear idiom as the Hud_DrawHud right-edge group. */
+                    /* The L-button gap-to-rival interval has a right-edge-native base X (222) but
+                       sits outside any anchor scope, so in widescreen it stays at the 4:3 column
+                       instead of following the lap timer above it to the physical right edge. */
                     if (gdxWideHud) {
                         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
                     }
@@ -5853,7 +5811,7 @@ Gfx* Menus_Draw(Gfx* gfx) {
                     sFastestGhostRacerRacer->lapDistance + sFastestGhostRacerLapsCompletedDistance;
                 if (gRaceTimeIntervalToggle) {
 #ifdef PORT
-                    /* WIDESCREEN-UI: same right-edge glue as the GP-race interval above. */
+                    /* Same right-edge glue as the GP-race interval above. */
                     if (gdxWideHud) {
                         gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
                     }

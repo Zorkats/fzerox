@@ -8,6 +8,20 @@
 #include ASSET_HEADER(hud_gfx.h)
 #include ASSET_HEADER(common_assets_compressed.h)
 
+#ifdef PORT
+/* The fireworks cull below tests 320-space scissor bounds describing the 4:3 frame, so under
+   hor+ everything between the 4:3 edge and the real frame edge was dropped (fireworks bunched
+   to centre at 21:9). Widen about the native centre x=160 by the same factor the chunk/racer
+   culls use -- exactly 1.0f, i.e. bit-identical bounds, unless
+   gEnhancements.Graphics.UltrawideMode is on. Y is untouched; hor+ adds no vertical field. */
+extern float gdx_get_ultrawide_cull_xscale(void);
+#define GDX_UW_SCISSOR_L(cam) (160.0f - ((160.0f - (cam)->currentScissorLeft) * gdx_get_ultrawide_cull_xscale()))
+#define GDX_UW_SCISSOR_R(cam) (160.0f + (((cam)->currentScissorRight - 160.0f) * gdx_get_ultrawide_cull_xscale()))
+#else
+#define GDX_UW_SCISSOR_L(cam) ((cam)->currentScissorLeft)
+#define GDX_UW_SCISSOR_R(cam) ((cam)->currentScissorRight)
+#endif
+
 s16 sFireworksLauncherCount;
 s16 gActiveFireworks;
 Firework* sFireworks;
@@ -262,19 +276,6 @@ void EndingCutsceneEffects_InitPodiumRacerCharacters(void) {
         sPodiumRacerCharacterTextures[1] = sPodiumRacerCharacterTextureP2;
         sPodiumRacerCharacterTextures[2] = sPodiumRacerCharacterTextureP3;
     }
-#ifdef PORT
-    /* GDX ceremony diag: one-shot at ceremony entry. Confirms whether the podium racer
-       portraits were allocated (allocationState 1 requires difficulty > NOVICE and a
-       top-3 finish) and the podium activation mask baseline -- if allocation is 0 the
-       podiums/characters cannot render regardless of the fireworks gate. Strip later. */
-    {
-        extern void gdx_dbg_logf(const char* fmt, ...);
-        gdx_dbg_logf("[GDX ceremony] allocationState=%d (0x%x)\n", (int) sPodiumRacerCharacterAllocationState,
-                     (unsigned) sPodiumRacerCharacterAllocationState);
-        gdx_dbg_logf("[GDX ceremony] gPodiumActiveFlags=%d (0x%x)\n", (int) gPodiumActiveFlags,
-                     (unsigned) gPodiumActiveFlags);
-    }
-#endif
 }
 
 void EndingCutsceneEffects_UpdatePodiumRacerCharacters(void) {
@@ -561,15 +562,12 @@ void EndingCutsceneEffects_Update(void) {
                             case FIREWORKS_STYLE_CHARACTER:
 #ifdef PORT
                                 {
-                                    // PORT hardening: sCharacterFireworkBuffer is filled at
-                                    // init from a common-asset via func_80077CF0. If that asset
-                                    // fails to resolve on the port (o2r/cache miss serving zero
-                                    // bytes), the buffer can be all-zero and this scan would
-                                    // never find a set bit, spinning forever and hard-hanging the
-                                    // game fiber on the frozen podium frame (the GP-ceremony
-                                    // softlock). Bound the scan to the bitmask size so a bad
-                                    // buffer degrades to a plain burst instead of an infinite
-                                    // loop, letting the launcher recycle and the ceremony advance.
+                                    // sCharacterFireworkBuffer comes from a common asset; a
+                                    // failed resolve leaves it all-zero, so this scan never
+                                    // finds a set bit and spins forever, hard-hanging the game
+                                    // fiber on the frozen podium (the GP-ceremony softlock).
+                                    // Bound it to the bitmask size so a bad buffer degrades to
+                                    // a plain burst and the launcher still recycles.
                                     s32 scanGuard = 0x1000;
                                     while (!(sCharacterFireworkBuffer[var_s1 >> 3] &
                                              sFireworksBitMask[var_s1 & 7])) {
@@ -723,8 +721,8 @@ void EndingCutsceneEffects_Update(void) {
                         fireworksLauncher->top =
                             camera->currentVpTransY - ((var_fs1 * camera->currentVpScaleY) / var_fs0);
 
-                        if ((fireworksLauncher->left < camera->currentScissorLeft) ||
-                            (camera->currentScissorRight < fireworksLauncher->left) ||
+                        if ((fireworksLauncher->left < GDX_UW_SCISSOR_L(camera)) ||
+                            (GDX_UW_SCISSOR_R(camera) < fireworksLauncher->left) ||
                             (fireworksLauncher->top < camera->currentScissorTop) ||
                             (camera->currentScissorBottom < fireworksLauncher->top)) {
                             fireworksLauncher->left = fireworksLauncher->top = FIREWORK_OFFSCREEN;
@@ -769,8 +767,8 @@ void EndingCutsceneEffects_Update(void) {
                             firework->left = camera->currentVpTransX + ((var_fs2 * camera->currentVpScaleX) / var_fs0);
                             firework->top = camera->currentVpTransY - ((var_fs1 * camera->currentVpScaleY) / var_fs0);
 
-                            if ((firework->left < camera->currentScissorLeft) ||
-                                (camera->currentScissorRight < firework->left) ||
+                            if ((firework->left < GDX_UW_SCISSOR_L(camera)) ||
+                                (GDX_UW_SCISSOR_R(camera) < firework->left) ||
                                 (firework->top < camera->currentScissorTop) ||
                                 (camera->currentScissorBottom < firework->top)) {
                                 firework->left = firework->top = FIREWORK_OFFSCREEN;
@@ -787,25 +785,6 @@ void EndingCutsceneEffects_Update(void) {
             gActiveFireworks++;
         }
     }
-#ifdef PORT
-    /* GDX ceremony diag: at ~1Hz (30 frames @30Hz), when any launcher is still active dump
-       its index + state. A launcher stuck above FIREWORKS_CREATE that never recycles keeps
-       gActiveFireworks > 0 forever, so the thanks gate never opens -- this distinguishes that
-       from an empty-buffer stall (where gActiveFireworks would already be 0). Strip later. */
-    {
-        extern void gdx_dbg_logf(const char* fmt, ...);
-        static s32 sGdxFireworksDiagCounter = 0;
-        if (((sGdxFireworksDiagCounter++ % 30) == 0) && (gActiveFireworks > 0)) {
-            for (j = 0; j < sFireworksLauncherCount; j++) {
-                if (sFireworksLaunchers[j].state != FIREWORKS_CREATE) {
-                    gdx_dbg_logf("[GDX ceremony] launcher idx=%d (0x%x)\n", (int) j, (unsigned) j);
-                    gdx_dbg_logf("[GDX ceremony] launcher state=%d (0x%x)\n", (int) sFireworksLaunchers[j].state,
-                                 (unsigned) sFireworksLaunchers[j].state);
-                }
-            }
-        }
-    }
-#endif
 }
 
 Gfx* EndingCutsceneEffects_DrawFireworks(Gfx* gfx) {

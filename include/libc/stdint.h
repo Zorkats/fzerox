@@ -4,16 +4,13 @@
 #include "PR/ultratypes.h"
 
 #if defined(PORT) && defined(__LP64__)
-/* Campaign W2 (LP64 hosts): 64-bit pointer round-trips, spelled EXACTLY like glibc's
- * <stdint.h> (long, not long long) so a TU that sees both headers gets identical
- * typedefs instead of a conflicting-types error. Same width either way. */
+/* Spelled exactly like glibc's <stdint.h> (long, not long long, same width either way)
+ * so a TU that sees both headers gets identical typedefs, not a conflicting-types error. */
 typedef long intptr_t;
 typedef unsigned long uintptr_t;
 #elif defined(PORT)
-/* Campaign W2 (Windows LLP64): retire the truncated-pointer contract. On the host PORT
- * build, pointers are 64-bit; a 32-bit uintptr_t truncated every pointer stored through
- * game code into a low32 token. Widening to 64-bit makes pointer round-trips
- * lossless. The console build keeps the N64 32-bit definition below. */
+/* Windows LLP64: host pointers are 64-bit, and the N64-width uintptr_t below truncated
+ * every pointer round-tripped through game code into a low32 token. */
 typedef s64 intptr_t;
 typedef u64 uintptr_t;
 #else

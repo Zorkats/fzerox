@@ -204,13 +204,11 @@ Gfx* EADDemo_DrawBackground(Gfx* gfx, FrameBuffer* fb, s32 topR, s32 topG, s32 t
 extern uintptr_t gSegments[];
 
 #ifdef PORT
-/* PORT (graphics wave W3/W4a): the N64 body truncated the 64-bit host segment
- * base through OS_PHYSICAL_TO_K0's (u32) cast, and the signed intptr_t return
- * then SIGN-EXTENDED the low32 (e.g. 0xF95E1910 -> 0xFFFFFFFFF95E1910) — the
- * exact fault addresses of the attract-demo memmove crashes. Resolve through
- * the port's address resolver instead: real host pointers pass through
- * unchanged, segmented/KSEG0 tokens resolve via gSegments/asset bindings, and
- * nothing is ever truncated or sign-extended. */
+/* The N64 body truncates the 64-bit host segment base through OS_PHYSICAL_TO_K0's (u32)
+ * cast, and the signed return then sign-extends the low 32 bits (0xF95E1910 ->
+ * 0xFFFFFFFFF95E1910) -- the exact fault addresses of the attract-demo memmove crashes.
+ * The port resolver passes real host pointers through and resolves segmented/KSEG0
+ * tokens via gSegments. */
 intptr_t EADDemo_SegmentedToVirtual(uintptr_t segmentedAddr) {
     extern void* gdx_segmented_to_host_pointer(uintptr_t segmentedAddr);
     return (intptr_t)gdx_segmented_to_host_pointer(segmentedAddr);
@@ -463,19 +461,11 @@ void EADDemo_DrawEADSkeleton(Gfx** gfxP) {
     static s32 sAnimFrame = 0;
 
 #ifdef PORT
-    /* Graphics wave W3/W4a: aEADDemoSkeleton / aEADDemoSkeletonLimbN are raw
-     * N64-layout disk data (EADDemoLimb: 0x36 bytes, 4-byte pointers) while
-     * this code reads them through the host struct (8-byte pointers, different
-     * field offsets), so EVERY field read is garbage. The walk then:
-     *  - submits garbage limb->dl values as G_DL (the recurring [gdl-bad]
-     *    raw=AA97F060 pointing into aEADDemoSugoiTex),
-     *  - writes sEADDemoMatrix[limbId] with an out-of-range limbId, corrupting
-     *    the live GfxPool (the race-frame ucode_unknown=125 raw=DDDDDDDD
-     *    poison), and
-     *  - crashed in memmove on sign-extended anim-data pointers (fixed in
-     *    EADDemo_SegmentedToVirtual, but the layout mismatch remains).
-     * Skip the skeleton overlay under PORT until an N64->host limb converter
-     * exists. The attract demo race itself still runs and renders. */
+    /* aEADDemoSkeleton / aEADDemoSkeletonLimbN are raw N64-layout disk data (EADDemoLimb:
+     * 0x36 bytes, 4-byte pointers) read here through the host struct, so every field read
+     * is garbage: bad limb->dl values submitted as G_DL, and an out-of-range limbId writing
+     * past sEADDemoMatrix into the live GfxPool. Skipped until an N64->host limb converter
+     * exists; the attract demo race itself still runs and renders. */
     {
         static s32 sSkeletonSkipLogged = 0;
         if (!sSkeletonSkipLogged) {

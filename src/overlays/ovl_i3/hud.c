@@ -13,19 +13,10 @@
 #include ASSET_HEADER(common_assets_compressed.h)
 #include "segment_symbols.h"
 
-/* G-Diffuser split-screen widescreen HUD anchor scopes.
- *
- * WHY THESE MACROS EXIST. The 1P HUD below already brackets element groups with explicit
- * `#ifdef PORT { if (gdxWideHud) gSPSetExtraGeometryMode(...); }` blocks. Doing the same for
- * 2P/3P/4P means roughly thirty more bracketed groups in Hud_DrawHud's `case 2/3/4`, which
- * would bury the stock draw order under preprocessor noise. These two macros expand to
- * NOTHING in a non-PORT build, so the matching N64 translation unit sees exactly the stock
- * statement sequence (an empty `do {} while (0)` emits no code and no data), while the port
- * build gets the same guarded emit the 1P path uses.
- *
- * `cond` is read once per Hud_DrawHud call into a local, so every Set pairs with its Clear
- * even if the CVar is toggled while the display list is being built.
- */
+/* Anchor Set/Clear for the split-screen HUD; expands to nothing in a non-PORT build. Macros
+ * rather than open-coded #ifdef blocks so the stock draw order stays readable across cases
+ * 2/3/4. `cond` must be a local read once per Hud_DrawHud call so every Set pairs with its
+ * Clear even if the CVar flips mid-build. */
 #ifdef PORT
 #define GDX_WIDE_SPLIT_SET(cond, bit)                    \
     do {                                                 \
@@ -1059,23 +1050,19 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 #ifdef PORT
     int gdxWideHud;
     int gdxWideSplitHud;
-    // G-Diffuser photo mode: hide the race HUD for a clean shot in every race mode. The shared
-    // predicate combines the explicit ImGui toggle with the game's existing pause state.
-    // When inactive (the default), execution falls straight through to the original display list.
-    // Emitting nothing here is safe because the follow-on overlays each load their own render state;
-    // Menus_Draw suppresses those separate overlays with the same shared predicate.
+    // Photo mode: bailing before any HUD command is safe because the follow-on overlays load
+    // their own render state, and Menus_Draw suppresses them with the same predicate.
     {
         extern int gdx_photo_mode_active(void);          // port/input_bridge.c
         extern int gdx_widescreen_ui_active(void);       // port/input_bridge.c
         extern int gdx_widescreen_split_ui_active(void); // port/input_bridge.c
         if (gdx_photo_mode_active()) {
-            return gfx; // photo mode active: emit no HUD commands this frame
+            return gfx;
         }
-        // Read once per frame so every anchor Set below pairs with its Clear even if the CVar
-        // is toggled mid-build. With this false (stock default) the display list is bit-identical.
+        // Read once so every anchor Set below pairs with its Clear even if the CVar flips
+        // mid-build.
         gdxWideHud = gdx_widescreen_ui_active();
-        // Separate switch for the split-screen layouts (case 2/3/4 below); see
-        // gdx_widescreen_split_ui_active in port/input_bridge.c for why it is not the same CVar.
+        // Deliberately a separate CVar for split-screen; see gdx_widescreen_split_ui_active.
         gdxWideSplitHud = gdx_widescreen_split_ui_active();
     }
 #endif
@@ -1085,7 +1072,6 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
     switch (gNumPlayers) {
         case 1:
 #ifdef PORT
-            /* Right-edge group: time label, timer, and Death Race best label. */
             if (gdxWideHud) {
                 gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
             }
@@ -1109,11 +1095,8 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
             gfx = Hud_UpdatePlayerHudInfo(gfx, 0, 0);
 
 #ifdef PORT
-            /* The lap-complete interval is center-native (base X=120) and must sit dead
-               center with Booster OK / Final Lap. Inside the timer group's ANCHOR_RIGHT
-               scope the edge-glue drifts a center-native rect visibly right of center, so
-               close the scope before the interval draw; the timer and time label above
-               already drew anchored. */
+            /* The lap-complete interval is center-native (base X=120); left inside the timer's
+               ANCHOR_RIGHT scope the edge-glue drifts it visibly right of center. */
             if (gdxWideHud) {
                 gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
             }
@@ -1123,17 +1106,13 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
             // Best Lap Time
             gfx = Hud_DrawPracticeBestLap(gfx);
 #ifdef PORT
-            // G-Diffuser Practice HUD lap-split delta: gEnhancements.Practice.ShowLapDeltas
-            // (default off). See Hud_DrawPracticeLapDelta below for the full CVar/mode gate;
-            // this call is a no-op unless both GAMEMODE_PRACTICE and the CVar are true, so stock
-            // (CVar unset/0) behavior is unchanged -- nothing new is drawn.
+            // No-op unless GAMEMODE_PRACTICE and the ShowLapDeltas CVar are both set.
             {
                 extern Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx);
                 gfx = Hud_DrawPracticeLapDelta(gfx);
             }
 #endif
 #ifdef PORT
-            /* Death Race timer/best and the energy meter belong to the right edge. */
             if (gdxWideHud) {
                 gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
             }
@@ -1197,11 +1176,8 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
             }
 #endif
 #ifdef PORT
-            /* Destroyed-vehicle KO stars sit on the right safe-area edge (x ~= 235-285), like
-               the energy bar. They are emitted AFTER the last anchor Clear above, so without
-               their own scope they render unanchored and drift inward from the physical 16:9
-               right edge. Glue them to the right edge, mirroring the energy-bar group's
-               ANCHOR_RIGHT Set/Clear idiom. */
+            /* KO stars sit on the right safe-area edge but are emitted after the last anchor
+               Clear above, so they need their own ANCHOR_RIGHT scope or they drift inward. */
             if (gdxWideHud) {
                 gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_RIGHT);
             }
@@ -1214,25 +1190,12 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
 #endif
             break;
         case 2:
-            /* 2P LAYOUT (top half / bottom half). Both sub-viewports are FULL WIDTH -- the
-               N64 viewports aVpTopHalf/aVpBottomHalf are 320x240 and merely offset in Y, and
-               only the scissor (gScissorBoxTopHalf {12,8,307,119}) crops them to a band. So
-               each player's usable left/right edges ARE the screen's left/right edges, and the
-               already-shipped ANCHOR_LEFT / ANCHOR_RIGHT bits -- which glue a rect to the true
-               viewport edge instead of the hor+-compressed 4:3 band -- are exactly correct here
-               with no new renderer primitive.
-
-               Group membership comes from the layout tables at the top of this file, column 0
-               (native X) of index [1]:
-                 left edge : sPlayerTimerPositions 24, sLapPositions 24  -> ANCHOR_LEFT
-                 right edge: sEnergyOutlinePositions 224, sEnergyBarPositions 226 -> ANCHOR_RIGHT
-                 centre    : sIntervalPositions 120, sReversePositions 104 -> no scope, the
-                             stock centred hor+ path already keeps them centred.
-               The energy OUTLINE and the energy BAR must share one anchor: the anchor applies
-               a single affine map (AdjXForAspectRatio then a constant NDC offset) to every rect
-               in scope, so equal anchors keep the variable-width bar registered inside its fixed
-               outline at any window aspect. They are emitted far apart in this display list but
-               both carry ANCHOR_RIGHT, so the map is identical. */
+            /* 2P: aVpTopHalf/aVpBottomHalf are full 320x240 viewports merely cropped by the
+               scissor, so each player's left/right edges are the true screen edges and the 1P
+               anchor bits apply unchanged. Per layout index [1]: timer/lap (x=24) anchor left,
+               energy outline/bar (224/226) anchor right, interval/reverse stay unscoped. Outline
+               and bar must carry the SAME anchor -- one affine map per scope is what keeps the
+               variable-width bar registered inside its fixed outline at any aspect. */
             // Timer
             gDPPipeSync(gfx++);
             gDPSetTextureFilter(gfx++, G_TF_POINT);
@@ -1296,36 +1259,11 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
                                 G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
                                 G_TX_NOLOD, G_TX_NOLOD);
 
-            /* 3P LAYOUT (quadrants: P1 top-left, P2 bottom-left, P3 top-right; the fourth
-               quadrant stays empty). The N64 quarter viewports (aVpTopLeftQuarter etc.) are
-               160x120, i.e. exactly half the screen on BOTH axes, so each quadrant maps to a
-               half-width column of the window: the left column occupies NDC x [-1, 0] and the
-               right column [0, +1].
-
-               No new renderer primitive is needed for that, because the two anchor bits already
-               express every edge a quadrant HUD element can hug:
-                 - left column, OUTER edge (screen left, NDC -1) -> ANCHOR_LEFT
-                 - left column, INNER edge (column boundary, NDC 0) -> NO scope: the stock hor+
-                   correction scales about NDC 0, so an element already sitting near native x=160
-                   stays glued to the boundary; adding an anchor would drag it to a screen edge.
-                 - right column, INNER edge (NDC 0) -> NO scope, same reason.
-                 - right column, OUTER edge (screen right, NDC +1) -> ANCHOR_RIGHT
-               (Derivation: anchoring about a pivot c is u' = c + (u - c)*aspectScale. For c = 0
-               that is exactly AdjXForAspectRatio, which is what an unscoped rect already gets.)
-
-               Group membership from the layout tables, index [2] column 0 (native X):
-                 timer/speed slot sPlayerTimerPositions  24 / 24 / 168
-                     -> P1,P2 left-column outer = ANCHOR_LEFT; P3 sits at 168, 8px past the
-                        column boundary, i.e. the right column's INNER edge -> no scope.
-                 energy sEnergyOutlinePositions  96 / 96 / 240 (54px wide at the 0.75 scale)
-                     -> P1,P2 end at 150, the left column's inner edge -> no scope;
-                        P3 ends at 294, the right column's outer edge -> ANCHOR_RIGHT.
-                 lap sLapPositions  130 / 130 / 272 -> same split as energy.
-                 interval sIntervalPositions 48/48/196 and reverse sReversePositions 44/44/188
-                     sit mid-column; neither edge is the right target, so they stay unscoped and
-                     keep the stock centred behaviour.
-               As in case 2, the energy OUTLINE and BAR for a given player carry the SAME anchor
-               so the variable-width bar stays registered inside its fixed outline. */
+            /* 3P: quarter viewports are 160x120, so each quadrant is a half-width column. Only
+               outer screen edges take ANCHOR_LEFT/RIGHT; elements hugging the column boundary
+               (NDC 0) must stay UNSCOPED, since hor+ scales about NDC 0 and already holds them
+               there -- anchoring one would drag it to a screen edge. Hence P3's timer (x=168)
+               is unscoped while P1/P2's (x=24) anchor left. Shared outline/bar anchor as case 2. */
             GDX_WIDE_SPLIT_SET(gdxWideSplitHud, G_EX_WIDESCREEN_ANCHOR_LEFT);
             gfx = Hud_UpdatePlayerHudInfo(gfx, 2, 0);
             gfx = Hud_UpdatePlayerHudInfo(gfx, 2, 1);
@@ -1389,12 +1327,8 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
                                 G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
                                 G_TX_NOLOD, G_TX_NOLOD);
 
-            /* 4P LAYOUT. Identical quadrant geometry and identical anchor reasoning to case 3
-               above; the only difference is that the bottom-right quadrant is occupied, so the
-               right column holds players 2 AND 3 while the left column holds players 0 and 1
-               (race.c:282-295 binds P1->top-left, P2->bottom-left, P3->top-right,
-               P4->bottom-right). Layout table index [3] repeats index [2]'s X values for the
-               fourth player, so the column assignment is purely by player index. */
+            /* 4P: same quadrant geometry and anchor reasoning as case 3; the bottom-right
+               quadrant is occupied, so players 0/1 are the left column and 2/3 the right. */
             GDX_WIDE_SPLIT_SET(gdxWideSplitHud, G_EX_WIDESCREEN_ANCHOR_LEFT);
             gfx = Hud_UpdatePlayerHudInfo(gfx, 3, 0);
             gfx = Hud_UpdatePlayerHudInfo(gfx, 3, 1);
@@ -1799,11 +1733,6 @@ Gfx* Hud_UpdateRaceIntervalInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex, 
         }
     }
     if ((D_i3_80141EA8[playerIndex].lapIntervalCounter % 20) >= 5) {
-        /* The gap-to-1st interval keeps its stock center-native base X (120): it belongs
-           visually with the centered "Booster OK"/"Final Lap" messages, not the right-edge
-           timer column. Under widescreen it still draws inside Hud_DrawHud's ANCHOR_RIGHT
-           scope, but a center-native rect is only nudged slightly off center by the uniform
-           edge-glue -- the intended near-centered placement -- so no unanchoring is needed. */
         s32 intervalLeft = sIntervalPositions[numPlayersIndex][playerIndex][0];
         gfx = Hud_DrawRaceTimeInterval(gfx, sPlayerLeadInterval[playerIndex], intervalLeft,
                                        sIntervalPositions[numPlayersIndex][playerIndex][1], scale);
@@ -1993,13 +1922,12 @@ Gfx* Hud_DrawPlayerLives(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 }
 
 #ifdef PORT
-/* Segment-4 offset of aPortraitCaptainFalconTex, the first of the three
- * consecutive 0x800 replaceable portraits (Falcon / Goroh / Summer at 0x1AA20,
- * 0x1B220, 0x1BA20). Recorded in port/gen/AssetBindings.c's hud_gfx rows. */
+/* Segment-4 offset of aPortraitCaptainFalconTex, first of the three consecutive 0x800
+ * replaceable portraits (Falcon / Goroh / Summer at 0x1AA20, 0x1B220, 0x1BA20). Recorded in
+ * port/gen/AssetBindings.c's hud_gfx rows. */
 #define GDX_PORTRAIT_SEG4_OFFSET 0x1AA20
-/* super_textures-relative offset of D_276FF0 -- slots 5/6/7 of 8. Equals the
- * linker script's `D_276FF0 = 0x2800` (decomp/linker_scripts/jp/ek/undefined_syms.ld),
- * and 0x276FF0 - 0x2747F0 independently. */
+/* super_textures-relative offset of D_276FF0 -- slots 5/6/7 of 8. Matches the linker script's
+ * `D_276FF0 = 0x2800`, and 0x276FF0 - 0x2747F0 independently. */
 #define GDX_SUPER_PORTRAIT_SEG_OFFSET 0x2800
 #endif
 
@@ -2014,13 +1942,8 @@ void Hud_ReplaceCharacterPortrait(s32 character) {
 
     textureOffset = textureIndex * 0x800;
 #ifdef PORT
-    /* SEGMENT_OFFSET(sym) is `(unsigned int)(sym) & 0x00FFFFFF`. On N64 these two
-     * symbols are ROM addresses, so masking yields a real segment offset. Under
-     * PORT they are host arrays (aPortraitCaptainFalconTex in AssetBindings.c,
-     * D_276FF0 a one-element placeholder), so masking a 64-bit host pointer
-     * yields garbage for BOTH the destination and the source and the DMA lands
-     * nowhere. Use the segment-relative literals the linker script and the asset
-     * bindings already record. */
+    /* SEGMENT_OFFSET masks a ROM address down to a segment offset; under PORT these symbols are
+     * host arrays, so masking a 64-bit pointer yields garbage. Use the literals instead. */
     vramOffset = (void*) (Segment_GetAddress(4) + GDX_PORTRAIT_SEG4_OFFSET + textureOffset);
 #else
     vramOffset = (Segment_GetAddress(4) + SEGMENT_OFFSET(aPortraitCaptainFalconTex)) + textureOffset;
@@ -2042,13 +1965,10 @@ void Hud_ReplaceCharacterPortrait(s32 character) {
 }
 
 #ifdef PORT
-/* Restore one of the three replaceable portraits from pristine hud_gfx.
- * Hud_ReplaceCharacterPortrait overwrites texels in the live segment-4 carve,
- * and gdx_load_seg4_if_needed SKIPS the reload when the same variant is already
- * resident -- so without this a Super portrait written in one race persists into
- * the next race for a non-Super racer. Textures carry no endian fixup rows in
- * segment 4 (only kind 1/3 rows exist there), so a raw re-copy of the same ROM
- * range the carve was loaded from restores the original bytes exactly. */
+/* Hud_ReplaceCharacterPortrait overwrites the live segment-4 carve, and
+ * gdx_load_seg4_if_needed skips the reload when the same variant is already resident,
+ * so a Super portrait would otherwise persist into the next race for a non-Super racer.
+ * A raw re-copy from hud_gfx ROM is exact: segment-4 textures have no endian fixup rows. */
 static void Hud_PortRestoreCharacterPortrait(s32 textureIndex) {
     size_t textureOffset = textureIndex * 0x800;
 
@@ -2061,9 +1981,6 @@ void Hud_UpdateCharacterPortraits(void) {
     s32 i;
 
 #ifdef PORT
-    /* Restore first, then replace: the overwrite below is not undone by a segment
-     * reload when the same seg-4 variant is still resident, so a Super portrait
-     * from a previous race would otherwise stick to a non-Super racer. */
     for (i = 0; i < 3; i++) {
         Hud_PortRestoreCharacterPortrait(i);
     }
@@ -2133,25 +2050,12 @@ Gfx* Hud_DrawPracticeBestLap(Gfx* gfx) {
 }
 
 #ifdef PORT
-// Practice HUD lap-split delta, gated by gEnhancements.Practice.ShowLapDeltas (default off).
-// When the CVar is 0/unset Hud_DrawPracticeLapDelta returns immediately and draws nothing, so
-// a stock boot is byte-for-byte unaffected.
-//
-// Reference lap time is the loaded ghost's same-lap split (gFastestGhostRacer->ghost->lapTimes[])
-// when a ghost racer is active; otherwise the player's own best completed lap this session.
-// Native F-Zero X only populates gGhostRacers / gFastestGhostRacer for GAMEMODE_TIME_ATTACK (see
-// the race-init ghost setup in racer.c) -- GAMEMODE_PRACTICE always leaves gFastestGhostRacer
-// NULL, even though Ghost::lapTimes[3] is itself a clean per-lap split. So this always falls
-// through to the own-best branch today; the ghost-relative branch is wired in so that applying a
-// ghost to Practice would light it up with no HUD change.
-//
-// Whole laps only: there is no checkpoint or track-progress model to derive sub-lap sector
-// deltas from.
+// Practice lap-split delta vs. the loaded ghost's same-lap split, falling back to the session's
+// own best lap. The ghost branch is dead today: the game only populates gFastestGhostRacer for
+// Time Attack. Whole laps only -- there is no checkpoint model for sub-lap sector deltas.
 
-// Signed MM'SS"HH delta timer: a color-parameterized twin of the native Hud_DrawRaceTimeInterval
-// above (identical digit layout/spacing/macros), except the caller supplies the prim color instead
-// of the hardcoded yellow, so ahead/behind can be colored independently of the native "gap to
-// leader" readout that the (0, 0, 255, 255, 0, 255) yellow belongs to.
+// Color-parameterized twin of Hud_DrawRaceTimeInterval (identical digit layout), duplicated
+// so ahead/behind colors are not tied to the native hardcoded yellow.
 static Gfx* Hud_DrawPracticeLapDeltaTimer(Gfx* gfx, s32 time, s32 left, s32 top, f32 scale, u8 r, u8 g, u8 b) {
     s32 offset = 0;
     s32 timeField;
@@ -2256,8 +2160,8 @@ Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx) {
 
     racer = &gRacers[0];
 
-    // racer->raceTime regressing means a fresh race (mode entry or Racer_Init retry, racer.c)
-    // started; drop all session-local state so a new session never inherits a stale delta/best.
+    // raceTime regressing means a fresh race started (mode entry or retry); drop session
+    // state so it never inherits a stale delta/best.
     if (racer->raceTime < sLastRaceTime) {
         sLastSeenLap = 0;
         sOwnBestLapTime = -1;
@@ -2266,11 +2170,10 @@ Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx) {
     }
     sLastRaceTime = racer->raceTime;
 
-    // Detect a completed lap purely from racer->lap transitions -- no dependency on the native
-    // startNewPracticeLap flag, which Hud_UpdatePlayerHudInfo (above) already consumes earlier in
-    // the same frame's draw (see the Hud_DrawHud call order). racer->lap wraps back to 1 after the
-    // final lap in Practice mode (racer.c), so a *decrease* here means "the final lap just
-    // completed", not "no change"; sLastSeenLap != 0 skips the initial 0-lap sync frame.
+    // Detect lap completion from racer->lap transitions, not startNewPracticeLap -- that flag
+    // is already consumed by Hud_UpdatePlayerHudInfo earlier in the same frame. racer->lap
+    // wraps back to 1 after the final Practice lap, so a decrease means the final lap just
+    // completed; sLastSeenLap != 0 skips the initial sync frame.
     if ((sLastSeenLap != 0) && (racer->lap != sLastSeenLap)) {
         if (racer->lap > sLastSeenLap) {
             completedLapIndex = sLastSeenLap - 1;
@@ -2295,7 +2198,7 @@ Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx) {
                     } else {
                         sDeltaValue -= 5;
                     }
-                    sDeltaTimer = 180; // ~3s at 60Hz, matches sPracticeBestLapCounter's flash budget above.
+                    sDeltaTimer = 180; // same flash budget as sPracticeBestLapCounter
                 }
 
                 if ((sOwnBestLapTime < 0) || (lapTime < sOwnBestLapTime)) {
@@ -2313,18 +2216,17 @@ Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx) {
         sDeltaTimer--;
     }
     if ((sDeltaTimer % 20) < 5) {
-        return gfx; // blink cadence matches the native lap-interval readout (Hud_UpdateRaceIntervalInfo above).
+        return gfx; // blink cadence of the native lap-interval readout
     }
 
     if (sDeltaValue < 0) {
-        r = 40; g = 230; b = 90; // ahead of reference: green
+        r = 40; g = 230; b = 90; // ahead: green
     } else {
-        r = 255; g = 60; b = 60; // behind reference: red
+        r = 255; g = 60; b = 60; // behind: red
     }
 
-    // Reuses sIntervalPositions[0][0] (120,72), the native 1-player "gap to leader" slot -- always
-    // empty on-screen in Practice mode since Hud_UpdateRaceIntervalInfo (above) bails out for
-    // GAMEMODE_PRACTICE before ever drawing there.
+    // (120,72) is the native 1P "gap to leader" slot, always empty in Practice mode --
+    // Hud_UpdateRaceIntervalInfo bails out for GAMEMODE_PRACTICE before drawing there.
     return Hud_DrawPracticeLapDeltaTimer(gfx, sDeltaValue, 120, 72, 1.0f, r, g, b);
 }
 #endif

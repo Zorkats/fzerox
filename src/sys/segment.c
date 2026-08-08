@@ -72,10 +72,9 @@ extern u8 D_8024DC80[];
 void Arena_StartInit(void) {
 #ifdef PORT
     {
-        /* Do NOT touch arenas 0 and 2 — they were set up by Arena_DefaultStartInit.
-         * Only update arena 1's start to the free RDRAM boundary after the race GFX
-         * segments; in non-race mode leave arena 1 as the zero-size sentinel so that
-         * all allocations fall to the 2MB arena 0. */
+        /* Arenas 0 and 2 belong to Arena_DefaultStartInit; only arena 1 moves, to the free
+         * RDRAM boundary after the race GFX segments. Outside race modes it stays a
+         * zero-size sentinel so every allocation falls to the 2MB arena 0. */
         extern unsigned char* gdx_rdram;
         switch (gGameMode) {
             case GAMEMODE_TIME_ATTACK:
@@ -140,10 +139,9 @@ void Arena_StartInit(void) {
 void Arena_DefaultStartInit(void) {
 #ifdef PORT
     {
-        /* Carve a 2MB RDRAM arena for slot 0 (menus / non-race mode allocations).
-         * Slots 1 and 2 are set to zero-size sentinels here; Arena_StartInit
-         * resets slot 1's start to after the race GFX segments, making it the
-         * smallest finite arena and the preferred allocation target in race mode. */
+        /* Slot 0 serves menus and non-race modes. Slots 1 and 2 start as zero-size sentinels;
+         * Arena_StartInit later gives slot 1 a real extent, making it the smallest finite
+         * arena and so the preferred allocation target in race mode. */
         extern unsigned char* gdx_rdram;
         extern void* gdx_rdram_alloc_raw(size_t size, size_t align);
         void* arena0 = gdx_rdram_alloc_raw(2u * 1024u * 1024u, 16u);
@@ -923,19 +921,13 @@ void Segment_LoadSegment9(void) {
 }
 
 #ifdef PORT
-/* Venue textures are static ROM data (11 venues, see enum Venue) decompressed via mio0Decode
- * into gSegment235130VramStart on every visit to a race/course-edit mode for that venue --
- * identical work on N64 too (this mirrors the stock decomp flow byte for byte), but there the
- * decode cost was inherent to cart hardware. Here it is pure host CPU time paid again each time
- * the player revisits a venue in the same run (menu -> race -> results -> race again, course
- * select preview, etc.). Cache the DECODED bytes per venue (keyed by venue index, ROM data is
- * immutable for the process lifetime) and memcpy on a repeat visit instead of re-DMA'ing +
- * re-decoding -- skips the mio0_decode() loop entirely (see torch/lib/libmio0/mio0.c) on cache
- * hits. Shared by Segment_LoadSegment10 and Segment_LoadSegment10CourseEdit, which load the same
- * per-venue data for two different flows (racing vs. course-edit venue preview). */
-/* gdiffuser_game (this TU) must not include MSVC system headers, so malloc/calloc are not
- * declared here -- go through the host CRT wrapper (port/shims.c), same convention already used
- * by decomp_port.c's gdx_rdram allocation. */
+/* Stock re-DMAs and re-decodes a venue's textures on every entry into a race or course-edit
+ * mode. Keyed by venue index because the ROM data is immutable for the process lifetime, so a
+ * repeat visit can memcpy instead of running mio0_decode again. Shared by
+ * Segment_LoadSegment10 and Segment_LoadSegment10CourseEdit, which load the same per-venue
+ * data for racing and for the course-edit venue preview. */
+/* This TU must not include MSVC system headers, so malloc/calloc go through the host CRT
+ * wrapper in port/shims.c, as decomp_port.c's gdx_rdram allocation does. */
 extern void* gdx_host_calloc(size_t count, size_t size);
 
 #define GDX_VENUE_TEXTURE_CACHE_COUNT 11

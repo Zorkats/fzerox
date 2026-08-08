@@ -223,11 +223,9 @@ void Fault_Init(void);
 
 Gfx* Camera_Draw(Gfx* gfx, s32 scissorBoxType, s32 cameraIndex);
 #ifdef EXPANSION_KIT
-/* Defined in camera.c under the same guard. Without this prototype the sole
- * caller (course_edit/1A2D70.c) falls back to the implicit-int rule, and the
- * returned Gfx* is truncated to 32 bits and sign-extended. Harmless on MIPS,
- * where pointers were 32-bit and that sign-extension was the native ABI; fatal
- * on x64, where it faults on the next display-list write. */
+/* Defined in camera.c under the same guard. Without a prototype the sole caller
+ * (course_edit/1A2D70.c) falls back to implicit int and the returned Gfx* is
+ * truncated to 32 bits -- the native ABI on MIPS, a fault on x64. */
 Gfx* Camera_DrawCourseEditTestRun(Gfx* gfx);
 #endif
 void Camera_Init(void);

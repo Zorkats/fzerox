@@ -597,40 +597,15 @@ void Background_Update(void) {
 
 #if defined(PORT)
         {
-            /* Widescreen backdrop coverage fix.
-
-               The 3D backdrop quads (skybox strip, venue floor, clouds) are built at
-               4:3 proportions here, and the interpreter's hor+ correction
-               (Interpreter::AdjXForAspectRatio) then multiplies every rendered vertex
-               X by xscale = (4/3)/windowAspect, compressing that 4:3 geometry inward to
-               fit the wider framebuffer. With the stock EK factor 1.5f the skybox strip
-               reached only NDC x = +/-0.98 AFTER that compression at 16:9 (proven by a
-               clip-space draw-marker probe: pos.x/w = 6862/7000 = 0.980), leaving a ~2%
-               unwritten black gutter at the left/right screen edges -- the reported
-               "black lines at the corners of the Mute City backdrop".
-
-               Scale the horizontal factor by 1/xscale so that after the hor+
-               compression the horizontal coverage is restored to the 4:3-equivalent
-               full width (1.2f is the factor that fills 4:3 exactly), plus a 2% safety
-               margin. Overscan is free here: the skybox strip samples CLAMP and the
-               floor/clouds sample WRAP, so any extent past the screen edge clips
-               cleanly with no artifact.
-
-               gdx_get_widescreen_geometry_xscale() returns exactly 1.0f when widescreen
-               is off, at 4:3, or under a forced-fixed aspect (EK editors). The max()
-               floor keeps the stock EK 1.5f in every one of those cases, so
-               non-widescreen framing is byte-behavior-identical to before; the factor
-               only ever grows (never shrinks) coverage, so no new gutter can appear on
-               any axis.
-
-               Vertical: verticalRange = horizontalRange * aspectRatio is kept intact.
-               Y receives NO hor+ compression, so the widened horizontalRange also grows
-               verticalRange (~9% at 16:9, more at ultrawide). That is pure overscan --
-               coverage only increases -- so a top/bottom gutter is impossible; and the
-               stock geometry sat at exactly NDC y = +/-1.0 (one float-rounding step from
-               a hairline top/bottom gutter), so the added vertical margin is beneficial.
-               The skybox gradient (S axis maps across verticalRange) simply stretches
-               slightly and clamps at its top/bottom edge texels -- never black. */
+            /* The backdrop quads are built at 4:3 proportions here, then the interpreter's
+               hor+ correction (AdjXForAspectRatio) multiplies every vertex X by
+               xscale = (4/3)/windowAspect, compressing them inward. With the stock EK 1.5f
+               the skybox strip reached only NDC x = +/-0.98 after that compression at 16:9,
+               leaving a black gutter at the screen edges. Pre-divide by xscale (1.2f is the
+               factor that fills 4:3 exactly) plus a 2% margin. Overscan costs nothing: the
+               skybox samples CLAMP and the floor/clouds WRAP. xscale is exactly 1.0f when
+               widescreen is off, at 4:3, or under a forced-fixed aspect, and the 1.5f floor
+               keeps stock EK framing in all of those cases. */
             extern float gdx_get_widescreen_geometry_xscale(void);
             f32 xscale = gdx_get_widescreen_geometry_xscale();
             f32 wideFactor;
@@ -649,6 +624,25 @@ void Background_Update(void) {
         background->horizontalRange = (background->scrollDepth + sBackgroundScale) * depthFovRatio * 1.2f;
 #endif
         background->verticalRange = background->horizontalRange * background->aspectRatio;
+#ifdef PORT
+        /* verticalRange inherits the full horizontal widening above, but hor+ adds no vertical
+           field, so at 21:9 the factor reaches ~2.19x and visibly flattens the sky gradient.
+           The 1.5*1.15 cap sits above the 16:9 maximum (~1.63), leaving 16:9-and-below
+           untouched while ultrawide stops scaling vertically with the window width. */
+        {
+            extern float gdx_get_widescreen_geometry_xscale(void);
+            f32 gdxVxs = gdx_get_widescreen_geometry_xscale();
+            f32 gdxVFactor;
+            if (gdxVxs <= 0.0f) {
+                gdxVxs = 1.0f;
+            }
+            gdxVFactor = (1.2f / gdxVxs) * 1.02f;
+            if (gdxVFactor > 1.5f * 1.15f) {
+                background->verticalRange = (background->scrollDepth + sBackgroundScale) * depthFovRatio *
+                                            (1.5f * 1.15f) * background->aspectRatio;
+            }
+        }
+#endif
 
         xScale = camera->xzNormalizedX;
         zScale = camera->xzNormalizedZ;
@@ -1308,19 +1302,13 @@ void Background_InitBackgroundSprites(void) {
 }
 
 #ifdef PORT
-/* The night flashing building-window color is computed at runtime as a native
-   u16 (host little-endian in memory), but the port's CI texture decoder reads
-   TLUT entries big-endian -- the same bug class fixed for the minimap outline
-   in minimap.c. Every other entry in this replacement palette was copied from
-   asset data and is already big-endian in host memory (so it decodes correctly),
-   which makes this runtime-written entry the lone outlier. Pre-swap it so its
-   in-memory bytes are big-endian, matching what the decoder reads. Without this,
-   the decoder byte-swaps the flashing color: e.g. PACK_5551(31,10,0,1)=0xFA81
-   becomes 0x81FA, zeroing the RGBA5551 alpha bit (LSB) -- so the lit windows
-   flicker fully transparent and wrong-colored instead of cycling. The 0xFFFF
-   white source entry it replaces is a byte-palindrome, so whiteIndex detection
-   is already endian-safe. In the stock (non-PORT) build this is an identity
-   cast, keeping the write byte-identical. */
+/* The night window color is computed at runtime as a native u16, but the port's CI decoder
+   reads TLUT entries big-endian (same class as the minimap outline in minimap.c). Every other
+   entry in this replacement palette came from asset data and is already big-endian in host
+   memory, making this one the lone outlier: unswapped, PACK_5551(31,10,0,1)=0xFA81 decodes as
+   0x81FA, zeroing the RGBA5551 alpha bit so lit windows flicker transparent. The 0xFFFF white
+   entry it replaces is a byte-palindrome, so whiteIndex detection stays endian-safe. Identity
+   cast in the non-PORT build. */
 #define TLUT_HOST_TO_BE16(v) ((u16)(((u16)(v) >> 8) | ((u16)(v) << 8)))
 #else
 #define TLUT_HOST_TO_BE16(v) ((u16)(v))
@@ -1524,6 +1512,23 @@ void Background_UpdateStars(s32 cameraIndex, Background* background, Camera* cam
             star->screenPosition[cameraIndex].top =
                 camera->currentVpTransY - ((temp_ft4 * camera->currentVpScaleY) / temp_ft5);
             screenPosition = &star->screenPosition[cameraIndex];
+#ifdef PORT
+            /* Widen the X acceptance band about native x=160 by the same factor as the
+               chunk/racer/fireworks culls, so stars populate the full frame instead of only
+               the central 4:3 band. Identity unless UltrawideMode is on. */
+            {
+                extern float gdx_get_ultrawide_cull_xscale(void);
+                f32 gdxCx = gdx_get_ultrawide_cull_xscale();
+                if ((screenPosition->left < 160.0f - ((160.0f - camera->currentScissorLeft) * gdxCx)) ||
+                    (160.0f + ((camera->currentScissorRight - 160.0f) * gdxCx) < screenPosition->left) ||
+                    ((screenPosition->top < camera->currentScissorTop)) ||
+                    (camera->currentScissorBottom < screenPosition->top)) {
+                    star->isVisible[cameraIndex] = false;
+                } else {
+                    star->isVisible[cameraIndex] = true;
+                }
+            }
+#else
             if ((screenPosition->left < camera->currentScissorLeft) ||
                 (camera->currentScissorRight < screenPosition->left) ||
                 ((screenPosition->top < camera->currentScissorTop)) ||
@@ -1532,6 +1537,7 @@ void Background_UpdateStars(s32 cameraIndex, Background* background, Camera* cam
             } else {
                 star->isVisible[cameraIndex] = true;
             }
+#endif
         }
     }
 }

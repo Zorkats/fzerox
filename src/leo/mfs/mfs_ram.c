@@ -3,11 +3,8 @@
 #include "libc/stddef.h"
 
 #ifdef PORT
-/* Host format guard (port/disk_savefile.cpp): default-off predicate plus an
-   always-on refusal log. Raw externs -- this decomp TU cannot include the host
-   headers. Used by the D6 terminal format gate in func_i1_80404830 below, at the
-   genuine not-initialized decision point (NOT inside Mfs_ValidateRamVolume, which
-   is a pure comparison invoked transiently against a wiped cache on every mount). */
+/* port/disk_savefile.cpp: default-off format predicate plus a refusal log. Raw externs --
+   this decomp TU cannot include the host headers. */
 extern int gdx_disk_allow_format(void);
 extern void gdx_disk_log_format_refused(void);
 #endif
@@ -395,12 +392,10 @@ s32 Mfs_ValidateRamVolume(void) {
     }
 
     if (j != 0) {
-        /* PORT: this is a PURE comparison again -- the D6 auto-format/refusal
-           gate was moved out to func_i1_80404830's terminal decision point. This
-           function runs transiently against the wiped cache (func_i1_804040EC
-           clears id.diskId[0]) on the first pass of every mount, so gating here
-           latched a false "uninitialized" status and could consume the one-shot
-           format opt-in spuriously. It must only report the mismatch. */
+        /* Keep this a pure comparison: the format gate lives in func_i1_80404830. This runs
+           transiently against the wiped cache (func_i1_804040EC clears id.diskId[0]) on the
+           first pass of every mount, so gating here latched a false "uninitialized" status
+           and spuriously consumed the one-shot format opt-in. */
         gMfsError = N64DD_MEDIA_NOT_INIT;
         return -1;
     }
@@ -527,29 +522,12 @@ s32 func_i1_80404830(void) {
 #endif
 
 #ifdef PORT
-    /* Port D6 terminal format gate (relocated from Mfs_ValidateRamVolume).
-       Reached ONLY when the on-disk MFS RAM volume is genuinely invalid: the
-       transient wiped-cache first-pass Mfs_ValidateRamVolume failed, the real
-       volume was re-read via Mfs_ReadRamArea, and the SECOND validate still
-       failed. (A read error returns -1 earlier; a MEDIUM_MAY_HAVE_CHANGED status
-       returns -1 earlier; a passing volume returns 0 earlier. So this is the sole
-       genuine not-initialized decision point.) gMfsError is already
-       N64DD_MEDIA_NOT_INIT here.
-
-       Because the gate now lives here and not inside Mfs_ValidateRamVolume, the
-       per-mount transient first-pass failure can neither latch the Workshop
-       "uninitialized" status (gdx_disk_log_format_refused) nor consume the
-       one-shot format opt-in (gdx_disk_allow_format) spuriously.
-
-       Policy (host predicate, default off): when a format is authorized, format
-       the RAM area exactly as retail's not-initialized recovery would -- the same
-       Mfs_InitRamArea(1, ...) that the func_80706518 media-init path performs --
-       and report the volume as mounted (return 0). When refused, latch the
-       Workshop status and fall through to retail's not-initialized error path
-       (return -1, no disk write) so callers behave as for a not-yet-initialized
-       disk. The format lands in the in-memory disk image and the dirty-range
-       sidecar only, never in the user's pristine .ndd. Port-only; hardware builds
-       keep the retail error path. */
+    /* The sole genuine not-initialized decision point: every other outcome (read error,
+       MEDIUM_MAY_HAVE_CHANGED, passing volume) has already returned above, so reaching here
+       means the second validate failed against a freshly re-read volume. Authorized formats
+       run retail's own not-initialized recovery, Mfs_InitRamArea(1, ...); refusals fall
+       through to retail's error path with no disk write. Either way the write lands in the
+       in-memory image and the dirty-range sidecar, never in the user's .ndd. */
     if (gdx_disk_allow_format()) {
 #if MFS_VERSION == MFS_VERSION_A
         if (Mfs_InitRamArea(1) == 0) {

@@ -130,19 +130,14 @@ extern u8 gLeoFontBuffer[];
 
 void LeoFault_LoadFontSet(void) {
 #ifdef PORT
-    /* The kanji glyphs live in the 64DD drive's INTERNAL ROM, normally DMA'd
-       through gDriveRomHandle — hardware that does not exist on PC. The same
-       font block ships inside the user-supplied 64DD IPL ROM image
-       (N64DDIPLROM.n64, loaded by port/disk_buffer.cpp), so resolve each
-       Shift-JIS code with LeoGetKAdr and copy its 16x16 I4 cell straight out of
-       that image, mirroring the EK setup-font path (A2E90.c func_xk1_800260F0).
+    /* The kanji glyphs live in the 64DD drive's internal ROM, normally DMA'd through
+       gDriveRomHandle. No such hardware here, but the same font block ships inside the
+       user-supplied IPL ROM image, so copy each cell out of that instead.
 
-       sLeoFontLoadedCharacters MUST be populated unconditionally: func_8070F634
-       matches every error-message code against this table to find its glyph, so
-       leaving it zeroed (the previous early-return behavior) made every lookup
-       fail and the error box drew empty. When the IPL image is absent or a code
-       is unknown (LeoGetKAdr returns -1 => fontAddr < DDROM_FONT_START) the cell
-       is zeroed so it renders blank instead of sampling uninitialized memory. */
+       sLeoFontLoadedCharacters must be populated unconditionally: func_8070F634 matches every
+       error-message code against this table, so an early return on a missing image left every
+       lookup failing and the error box empty. Unknown codes get a zeroed cell, which renders
+       blank rather than sampling uninitialized memory. */
     u16 i;
     extern unsigned char* gdx_ddipl_buffer;
     extern unsigned int gdx_ddipl_size;

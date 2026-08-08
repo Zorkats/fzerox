@@ -152,9 +152,8 @@ void* AudioLoad_DmaSampleData(uintptr_t devAddr, size_t size, s32 arg2, u8* dmaI
     if (!hasDma) {
         if (gAudioCtx.sampleDmaReuseQueue1RdPos == gAudioCtx.sampleDmaReuseQueue1WrPos) {
 #ifdef PORT
-            /* [dma-pool] starvation counter: every NULL here is one synthesis
-               setup aborted mid-note (see synthesis.c sampleData == NULL) --
-               the streamed-instrument beep mechanism. Capped log. */
+            /* Probe: each NULL here aborts a note's synthesis setup mid-way (see
+               synthesis.c sampleData == NULL) -- the streamed-instrument beep mechanism. */
             {
                 extern void gdx_cki(const char* s, int v);
                 static s32 sDmaNullCount = 0;
@@ -251,13 +250,8 @@ void AudioLoad_InitSampleDmaBuffers(s32 numNotes) {
     gAudioCtx.sampleDmaReuseQueue2RdPos = 0;
     gAudioCtx.sampleDmaReuseQueue2WrPos = gAudioCtx.sampleDmaCount - gAudioCtx.sampleDmaListSize1;
 #ifdef PORT
-    /* [dma-pool] streaming-sample pool census: 48/71 SE-font
-       instruments stream per-note from the cart BGM bank through
-       AudioLoad_DmaSampleData; a NULL return there (pool exhausted or
-       zero-sized under heap pressure) aborts the note's synthesis setup and
-       the voice decodes stale DMEM -- a sustained beep on exactly those
-       instruments. This names the pool size actually achieved; the NULL
-       counter below names starvation at run time. */
+    /* Probe: the DMA pool size actually achieved; the NULL counter in
+       AudioLoad_DmaSampleData names starvation at run time. */
     {
         extern void gdx_cki(const char* s, int v);
         gdx_cki("[dma-pool] sampleDmaCount", (int) gAudioCtx.sampleDmaCount);
@@ -384,13 +378,11 @@ void AudioLoad_SyncLoadSeqParts(s32 seqId, s32 flags) {
 }
 
 /* AVOID_UB helper: AudioHeap_AllocSampleCache stores its second argument as
-   entry->sampleBankId, which cache eviction later compares against real sample
-   bank ids (AudioHeap_DiscardSampleCacheEntry). Two call sites passed fontId
-   instead — a wrong match unapplies the cache for the wrong font, restoring
-   ROM addresses for samples that are still resident. Map fontId to the bank
-   whose table medium matches the sample, mirroring how SampleBankRelocInfo
-   pairs medium1/medium2 with sampleBankId1/2 (0xFE for disk-drive samples,
-   as in AudioLoad_PreloadSamplesForFont). */
+   entry->sampleBankId, which eviction later compares against real sample bank ids. Two
+   call sites passed fontId, so a wrong match unapplied the cache for the wrong font and
+   restored ROM addresses for still-resident samples. Map fontId to the bank whose table
+   medium matches, mirroring SampleBankRelocInfo's medium1/2 to sampleBankId1/2 pairing
+   (0xFE for disk-drive samples). */
 static s32 AudioLoad_GetSampleBankIdForFont(s32 fontId, s32 medium) {
     s32 bankId1 = gAudioCtx.soundFontList[fontId].sampleBankId1;
     s32 bankId2 = gAudioCtx.soundFontList[fontId].sampleBankId2;
@@ -409,12 +401,9 @@ static s32 AudioLoad_GetSampleBankIdForFont(s32 fontId, s32 medium) {
 }
 
 #ifdef PORT
-/* [sample-census] one log block per UNIQUE sample load:
-   pairs every audible garbage SFX with the exact sample entry that fed it --
-   caller tag/font, source medium/address, and the first 8 loaded bytes
-   (all-zero or implausible ADPCM frames name a bad source directly). Shared
-   by the on-demand path (AudioLoad_SyncLoadSample) and the batch preload
-   path (AudioLoad_ProcessSampleLoads). */
+/* Probe, one block per unique sample load: pairs an audible garbage SFX with the sample
+   entry that fed it -- source medium/address and the first 8 loaded bytes, where all-zero
+   or implausible ADPCM frames name a bad source directly. */
 static void GDX_SampleCensus(const char* tag, s32 fontId, Sample* sample, u8* loadedAddr) {
     extern void gdx_cki(const char* s, int v);
     static uintptr_t sCensusSeen[48];
@@ -595,13 +584,10 @@ s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
     s32 numFonts;
     s32 fontId;
 #ifdef PORT
-    /* PRINTF is a compiled-out no-op in this build (macros.h), so the original
-       "==BANDO==" traces never fire. gdx_cki/gdx_ck are the port's PORT-only log shims
-       for decomp .c files that can't include <stdio.h>/<windows.h> (see port/n64_sched.c).
-       This traces whether the sequencer ever enables a seqPlayer, and with which seqId,
-       or whether every BGM-start request fails silently at the disk sequence load
-       (seqData == NULL) -- which would explain all-zero audio output with no
-       interpreter-side errors. */
+    /* PRINTF is compiled out in this build (macros.h), so the original "==BANDO==" traces
+       never fire. gdx_cki is the PORT-only log shim for decomp TUs that cannot include
+       <stdio.h>. Probe: does the sequencer ever enable a seqPlayer, or does every BGM
+       start fail silently at the disk sequence load? */
     extern void gdx_cki(const char* s, int v);
 #endif
 
@@ -677,22 +663,10 @@ void* AudioLoad_TrySyncLoadSampleBank(u32 sampleBankId, u32* outMedium, bool noL
     cachePolicy = sampleBankTable->entries[sampleBankId].cachePolicy;
     if (cachePolicy == 4 || noLoad == true) {
 #ifdef PORT
-        /* CACHEPOLICY_4 disposition. gSampleBankTable (audio/disk/audio_tables.c) has three
-         * CACHEPOLICY_4 entries -- SAMPLE_SOUND_EFFECTS, SAMPLE_BGM, SAMPLE_DDBGM_TITLE --
-         * all MEDIUM_CART, so this branch returns an ABSOLUTE cart ROM offset (post
-         * AudioLoad_InitTable relocation, inside the audio_table span 0x528730..0xF67900)
-         * with *outMedium = MEDIUM_CART. That offset is only ever a DMA device-address
-         * base: it becomes SampleBankRelocInfo.baseAddr{1,2}, and gdx_fontconv_sample adds
-         * a per-sample rawAddr to it while sample->medium inherits medium{1,2} ==
-         * MEDIUM_CART (never MEDIUM_RAM, because the bank medium is CART). Every such
-         * sample therefore streams on demand through AudioLoad_DmaSampleData ->
-         * AudioLoad_Dma -> sDmaHandler (osEPiStartDma), back through the single
-         * byte-source shim (GdxSegmentSourceRead). It is never dereferenced as a host
-         * pointer -- osEPiStartDma masks the offset (devAddr & 0x0FFFFFFF) and the shim's
-         * audio_table containment serves it archive-first -- so no extra handling belongs
-         * here, and dropping the ROM is gated by the same condition as every other audio
-         * read: the audio_table blob must be resident and registered so the shim never
-         * needs its raw-ROM fallback. */
+        /* The three CACHEPOLICY_4 entries are all MEDIUM_CART, so this returns an absolute
+         * cart ROM offset used only as a DMA device-address base. Such samples stream through
+         * AudioLoad_DmaSampleData -> osEPiStartDma -> GdxSegmentSourceRead and are never
+         * dereferenced as host pointers, so no pointer fix-up belongs here. */
 #endif
         *outMedium = sampleBankTable->entries[sampleBankId].medium;
         return sampleBankTable->entries[realTableId].romAddr;
@@ -853,11 +827,10 @@ s32 AudioLoad_GetLoadTableIndex(s32 tableType, u32 entryId) {
     AudioTable* table = AudioLoad_GetLoadTable(tableType);
 
 #ifdef PORT
-    /* Stability guard: the DD BGM check (Audio_CheckBgmLoad -> IsSeqLoadComplete)
-       can reach here with a not-yet-initialized table or an out-of-range id,
-       faulting on table->entries[entryId]. Callers only use the return value to
-       index the fixed load-status arrays, so returning the id unchanged is safe
-       and just reports "not loaded" instead of crashing the race. */
+    /* The DD BGM check (Audio_CheckBgmLoad -> IsSeqLoadComplete) can reach here with a
+       not-yet-initialized table or an out-of-range id and fault on table->entries[entryId].
+       Callers only use the result to index fixed load-status arrays, so returning the id
+       unchanged reports "not loaded" instead of crashing the race. */
     if (table == NULL || (s16) table->header.numEntries <= 0 ||
         entryId >= (u32) (s16) table->header.numEntries) {
         return (s32) entryId;
@@ -904,15 +877,12 @@ AudioTable* AudioLoad_GetLoadTable(s32 tableType) {
 }
 
 #ifdef PORT
-/* ---- Host soundfont conversion ------------------------------------------
- * The console relocation (AudioLoad_RelocateFont/RelocateSample below, kept
- * for reference under #else-style exclusion) patches the font BINARY in
- * place: 32-bit offset slots become 32-bit KSEG0 pointers, and Drum/
- * Instrument/Sample structs are read directly out of that binary. Neither
- * works on a 64-bit host: pointers no longer fit the binary's 32-bit slots,
- * struct layouts differ (pointer fields are 8 bytes), and the data is
- * big-endian. Instead, parse the raw big-endian font image into freshly
- * allocated host-native structs and hand those to gAudioCtx.soundFontList.
+/* Host soundfont conversion. The console relocation (AudioLoad_RelocateFont/RelocateSample
+ * below) patches the font binary in place -- 32-bit offset slots become 32-bit KSEG0
+ * pointers, and Drum/Instrument/Sample structs are read straight out of that binary. None
+ * of that works on a 64-bit host: pointers no longer fit the 32-bit slots, struct layouts
+ * differ, and the data is big-endian. Parse the raw image into freshly allocated
+ * host-native structs instead.
  *
  * N64 font image layout (offsets relative to image start, all big-endian):
  *   u32[0]            drum pointer-array offset (u32[numDrums] entries)
@@ -955,26 +925,19 @@ typedef struct {
     s32 numEnvs;
 } GdxFontConv;
 
-/* Every allocation for a font is tracked so a cache-evicted font that
-   reloads frees its previous conversion instead of leaking. */
+/* Vestigial: tracking so a re-converted font could free its previous conversion.
+   Conversions now come from the RDRAM arena and are never freed (see gdx_fontconv_alloc). */
 static void* sGdxFontAllocs[GDX_FONTCONV_MAX_FONTS][GDX_FONTCONV_MAX_OBJS * 4];
 static s32 sGdxFontAllocCounts[GDX_FONTCONV_MAX_FONTS];
 
 static void* gdx_fontconv_alloc(s32 fontId, size_t size) {
-    /* Allocate from the RDRAM arena, NOT the CRT heap. AdpcmBook/AdpcmLoop
-       pointers from these conversions get packed into 32-bit Acmd words
-       (aLoadADPCM/aSetLoop) and reconstructed by the audio HLE via low32
-       lookup. Registering hundreds of tiny CRT-heap ranges for that (the
-       previous approach) polluted the low32 space: sample-chunk pointers
-       began false-matching into font-conversion memory, feeding the ADPCM
-       decoder struct bytes instead of sample data (invalid predictor
-       nibbles in the decoder I/O tap = the base-game static). RDRAM interior
-       pointers resolve through the single existing arena window with zero
-       new ranges. Font conversions are effectively permanent (fonts are
-       CACHEPOLICY_0), so they must come from the persistent top-of-RDRAM
-       region: the main arena is rewound at every game-mode transition
-       (Arena_StartInit), which would leave soundFontList pointing into
-       reclaimed memory. */
+    /* Allocate from the RDRAM arena, not the CRT heap: these AdpcmBook/AdpcmLoop pointers
+       get packed into 32-bit Acmd words and reconstructed by the audio HLE via low32
+       lookup, and registering hundreds of tiny CRT ranges for that polluted the low32
+       space until sample chunks false-matched into font memory. Must be the persistent
+       top-of-RDRAM region: fonts are CACHEPOLICY_0 and the main arena is rewound at every
+       game-mode transition, which would leave soundFontList pointing into reclaimed
+       memory. */
     extern void* gdx_rdram_persist_alloc_raw(unsigned long long size, unsigned long long align);
     void* p = gdx_rdram_persist_alloc_raw((unsigned long long) size, 16u);
     if (p != NULL) {
@@ -989,8 +952,8 @@ static void* gdx_fontconv_alloc(s32 fontId, size_t size) {
 }
 
 static void gdx_fontconv_free_font(s32 fontId) {
-    /* Conversions live in the RDRAM arena now (see gdx_fontconv_alloc) —
-       nothing to free; fonts are permanent-cached and never reconvert. */
+    /* Conversions live in the RDRAM arena (see gdx_fontconv_alloc) and fonts are
+       permanent-cached, so nothing ever reconverts and nothing needs freeing. */
     (void) fontId;
 }
 
@@ -1029,10 +992,9 @@ static void gdx_fontconv_remember(GdxFontConvEntry* list, s32* count, u32 offset
     }
 }
 
-/* Capped diagnostic when a converted envelope would overrun the copied window --
-   either an ADSR_GOTO whose target index lands outside [0, GDX_FONTCONV_ENV_POINTS) (the runtime
-   would index neighbor font bytes as envelope data) or an envelope with no terminator within the
-   cap (its tail is truncated). Names the font (fontId) and localizes the point. */
+/* Capped warning when a converted envelope would overrun the copied window: an ADSR_GOTO
+   target outside [0, GDX_FONTCONV_ENV_POINTS), which would make the runtime read neighbour
+   font bytes as envelope data, or an envelope with no terminator within the cap. */
 static void gdx_fontconv_env_warn(s32 fontId, u32 offset, s32 index, s32 target, s32 kind) {
     static s32 sEnvWarns = 0;
 
@@ -1068,10 +1030,9 @@ static EnvelopePoint* gdx_fontconv_envelope(GdxFontConv* conv, u32 offset) {
         env[i].delay = gdx_rd_s16(conv->data + offset + i * 4);
         env[i].arg = gdx_rd_s16(conv->data + offset + i * 4 + 2);
     }
-    /* Bound-check the copied window. Scan up to the first terminator (delay <= 0). Clamp any
-       ADSR_GOTO target that points outside the window so playback (effects.c ADSR_GOTO) can never
-       index past the cap into neighbor font bytes, and warn if the envelope never terminates within
-       the cap (its real tail is longer than we copied). */
+    /* Clamp any ADSR_GOTO target outside the window so playback (effects.c) can never index
+       past the cap into neighbour font bytes, and warn if the envelope never terminates
+       within it. */
     terminated = 0;
     for (i = 0; i < GDX_FONTCONV_ENV_POINTS; i++) {
         s16 delay = env[i].delay;
@@ -1398,11 +1359,10 @@ void AudioLoad_SyncDiskDrive(uintptr_t devAddr, u8* ramAddr, size_t size, s32 lb
     s32 pad;
 
     Audio_InvalDCache(ramAddr, size);
-    /* GetStartLbaAddr MUTATES adjustedDevAddr, which is also passed by value in
-       the same argument list. C leaves argument evaluation order unspecified:
-       GCC captured the PRE-walk devAddr (MSVC the post-walk one), so any load
-       whose devAddr crosses an LBA boundary read from the wrong disk offset on
-       Linux. Sequence the calls. Same fix at every GetStartLbaAddr call site. */
+    /* GetStartLbaAddr MUTATES adjustedDevAddr, which is also passed by value in the same
+       argument list, and C leaves argument evaluation order unspecified: GCC captured the
+       pre-walk devAddr, MSVC the post-walk one, so any load crossing an LBA boundary read
+       the wrong disk offset on Linux. Sequence the calls. Same fix at every call site. */
     startLba = AudioLoad_GetStartLbaAddr(lba, &adjustedDevAddr);
     AudioLoad_DiskDrive(startLba, adjustedDevAddr, ramAddr, size);
 }
@@ -1494,10 +1454,9 @@ s32 AudioLoad_GetStartLbaAddr(s32 lba, uintptr_t* devAddrPtr) {
     if (AudioLoad_GetLbaAddrInfo(&lba, devAddrPtr) == -1) {
         rmonPrintf("LBA ERROR! \n");
 #ifdef PORT
-        /* On console this is unreachable by construction. On the port a bad
-           lba/devAddr pair must not hang the audio thread in this spin —
-           report it and hand back the inputs so the caller's read fails soft
-           instead. */
+        /* Unreachable by construction on console. Here a bad lba/devAddr pair must not
+           hang the audio thread in the spin -- report it and hand back the inputs so the
+           caller's read fails soft. */
         {
             extern void gdx_cki(const char* s, int v);
             gdx_cki("[audio-diag] GetStartLbaAddr LBA ERROR lba", (int) lba);
@@ -1708,12 +1667,10 @@ void AudioLoad_Init(void* heap, size_t heapSize) {
 
         //! @bug This clearing loop sets one extra byte to 0 following gAudioCtx.
 #ifdef PORT
-        /* That one extra byte is harmless padding on console but a wandering
-           bullet on host: whichever global the linker places right after
-           gAudioCtx gets its low byte zeroed. In Release layouts that was
-           gAudioTableRomStart (0x528730 -> 0x528700), shifting every cart
-           sample-bank fetch -0x30 = the config-flavored static/silence family.
-           Clear exactly sizeof(gAudioCtx) bytes. */
+        /* The extra byte is harmless padding on console but a wandering bullet on host:
+           whichever global the linker places right after gAudioCtx gets its low byte
+           zeroed. In Release layouts that was gAudioTableRomStart (0x528730 -> 0x528700),
+           shifting every cart sample-bank fetch by -0x30. Clear exactly sizeof(gAudioCtx). */
         for (i = sizeof(gAudioCtx); i > 0; i--) {
             *audioContextPtr++ = 0;
         }
@@ -2035,15 +1992,12 @@ s32 AudioLoad_SlowLoadSeq(s32 seqId, u8* ramAddr, s8* status) {
 extern AudioDiskInfo D_806F2350;
 
 #ifdef PORT
-/* The async disk loader shared D_806F2348 (tag + staging buffer) with every
-   synchronous disk read. AudioLoad_ReadWriteDisk stamps pair->lba at REQUEST
-   time (not completion) and AudioLoad_DiskLoad's partial-block bcopys never
-   re-check the tag, so a sync sequence/sample read issued while an async font
-   load was in flight (music changes load both) swapped the staging buffer
-   contents between the stamp and the copy. The font header then converted
-   garbage offsets — the Linux gameplay SIGSEGV in gdx_fontconv_tuned_sample.
-   The boot-time loader already owns a private pair (see func_80738A04's
-   struct); give the async loader one too. */
+/* The async disk loader shared D_806F2348 (tag + staging buffer) with every synchronous
+   disk read. AudioLoad_ReadWriteDisk stamps pair->lba at request time, not completion, and
+   AudioLoad_DiskLoad's partial-block bcopys never re-check the tag, so a sync read issued
+   while an async font load was in flight (music changes load both) swapped the staging
+   buffer between the stamp and the copy, and the font converted garbage offsets. The
+   boot-time loader already owns a private pair; give the async loader one too. */
 static u8 sAsyncLbaBuffer[0x4D10];
 static LbaVaddrPair sAsyncLbaVaddrPair;
 #endif
@@ -2166,9 +2120,9 @@ void AudioLoad_ProcessAsyncLoadDiskDrive(AudioAsyncLoad* asyncLoad, s32 resetSta
         adjustedDevAddr = asyncLoad->curDevAddr;
         Audio_InvalDCache(asyncLoad->curRamAddr, asyncLoad->bytesRemaining);
         /* Sequenced: unspecified argument evaluation order (see AudioLoad_SyncDiskDrive).
-           THIS was the Linux gameplay soundfont crash: GCC passed the pre-walk devAddr
-           alongside the post-walk lba, DiskLoad computed a negative first block, and the
-           font buffer received the next LBA's sample data (instOffset 0x3D89009A). */
+           This site was the Linux gameplay soundfont crash -- GCC passed the pre-walk
+           devAddr with the post-walk lba, DiskLoad computed a negative first block, and the
+           font buffer received the next LBA's sample data. */
         startLba = AudioLoad_GetStartLbaAddr(asyncLoad->diskLba, &adjustedDevAddr);
         AudioLoad_DiskInit(&D_806F2350, startLba, adjustedDevAddr, asyncLoad->curRamAddr,
                            asyncLoad->bytesRemaining);
@@ -2851,9 +2805,9 @@ s32 AudioLoad_DiskLoad(AudioDiskInfo* diskInfo) {
 
             diskInfo->blockSize = AudioLoad_LbaToBlockSize(diskInfo->finalLba) - diskInfo->devAddr;
 #ifdef PORT
-            /* Unreachable when GetStartLbaAddr ran correctly (walk postcondition:
-               devAddr < block size). A negative block silently corrupted the load
-               once (the sequencing bug above) — make any recurrence loud. */
+            /* Unreachable when GetStartLbaAddr ran correctly (walk postcondition: devAddr <
+               block size). A negative block silently corrupted a load once; make any
+               recurrence loud. */
             if (diskInfo->blockSize < 0) {
                 extern void gdx_cki(const char* s, int v);
                 static int sNegBlockLogs = 0;
@@ -2976,11 +2930,10 @@ s32 func_807389AC(unk_807C1948* arg0) {
     return -1;
 }
 
-/* ramAddr is a RAM DESTINATION POINTER (passed straight to AudioLoad_DiskInit's u8* ramAddr).
- * It was typed s32, which truncated the 64-bit heap pointer the caller passes
- * (arg0->unk_00 + arg0->unk_08). Harmless on Windows/LLP64 where the audio heap sits in the
- * low 4 GB, but on LP64 Linux the heap is above 4 GB and the DMA wrote to a truncated address
- * (garbage sample/font data at the intended buffer). Use uintptr_t. */
+/* ramAddr is a RAM destination pointer, handed straight to AudioLoad_DiskInit. As s32 it
+ * truncated the caller's 64-bit heap pointer -- harmless on LLP64 Windows where the audio
+ * heap sits below 4 GB, but on LP64 Linux the heap is above it and the DMA wrote to a
+ * truncated address. */
 s32 func_80738A04(unk_807C1948* arg0, uintptr_t ramAddr, s32 bytesRemaining) {
     uintptr_t adjustedDevAddr;
     s32 startLba;

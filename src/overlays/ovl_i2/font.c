@@ -231,9 +231,10 @@ unk_80077D50* sFont3CompTexInfos[] = {
     sFont3ACompTexInfo,         sFont3ACompTexInfo,
 };
 
-// FONT_SET_4 sources are 16x8 I4 textures whose glyph occupies the left 8 pixels.
-// Keep the visible width at 8; the renderer preserves the 16-pixel source stride
-// while cropping texture sampling to this logical glyph width.
+//! @bug These textures actually have width 16 and height 8.
+// They instead should be cropped or reformatted rather than setting the width here
+// The glyph occupies the left 8 pixels, and the port's renderer keeps sampling at the
+// 16-pixel source stride, so the width override still lands on the right texels.
 unk_80077D50 sFont4ACompTexInfo[] = COMP_TEX_INFO_WH(4, aFont4ATex, 8, TEX_HEIGHT(aFont4ATex), 0);
 unk_80077D50 sFont4DCompTexInfo[] = COMP_TEX_INFO_WH(4, aFont4DTex, 8, TEX_HEIGHT(aFont4DTex), 0);
 unk_80077D50 sFont4ECompTexInfo[] = COMP_TEX_INFO_WH(4, aFont4ETex, 8, TEX_HEIGHT(aFont4ETex), 0);

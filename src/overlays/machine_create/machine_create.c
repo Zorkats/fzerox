@@ -122,13 +122,11 @@ Gfx* MachineCreate_Draw(Gfx* gfx) {
         extern int CVarGetInteger(const char* name, int defaultValue);
         extern int gdx_get_force_fixed_aspect(void); // libultraship interpreter.cpp (runtime flag)
 
-        /* Expansion Kit custom-machine entry uses a second machine-selection gradient. Widen this
-         * background independently from the regular 30-machine selector in ovl_i4/machine.c.
-         * The whole Create Machine mode is now forced to a centered 4:3 pillarbox (see
-         * gdx_mode_forces_fixed_aspect in port/input_bridge.c), so gate the STRETCH scope on the
-         * live force-fixed-aspect flag exactly like transition.c / ending.c / menus.c: emitting
-         * G_EX_WIDESCREEN_STRETCH inside the 4:3 composite would visibly stretch the gradient
-         * across the pillarboxed frame. With the mode forced this term keeps the scope inert. */
+        /* Widen this gradient independently of the regular 30-machine selector in
+         * ovl_i4/machine.c. Gated on the live force-fixed-aspect flag, as transition.c and
+         * menus.c are: Create Machine is forced to a centered 4:3 pillarbox by
+         * gdx_mode_forces_fixed_aspect (port/input_bridge.c), and G_EX_WIDESCREEN_STRETCH
+         * inside that composite would stretch the gradient across the pillarboxed frame. */
         gdxWideSelectMachine = CVarGetInteger("gEnhancements.Graphics.Widescreen", 1) &&
                                CVarGetInteger("gEnhancements.Graphics.WidescreenUI", 0) &&
                                !gdx_get_force_fixed_aspect();

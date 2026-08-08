@@ -34,13 +34,11 @@
  */
 #if defined(_LANGUAGE_C) || defined(_LANGUAGE_C_PLUS_PLUS)
 
-/* PORT (host builds): the IDO-era `long` spellings below are 32-bit only on ILP32 (the
- * N64) and LLP64 (Windows). On LP64 Linux/macOS `long` is 64-bit, which would double the
- * size of every u32/s32 field and break every struct layout, save format, and pointer
- * pun in the decomp. Detect via the compiler's own data-model macro and use `int` (32-bit
- * on every supported host ABI) there; keep the original spellings everywhere else so the
- * matching N64/Windows builds are textually untouched. */
-#if defined(__LP64__) /* any LP64 host build; N64 MIPS builds are ILP32 and never define this */
+/* The IDO-era `long` spellings below are 32-bit only on ILP32 (N64) and LLP64 (Windows).
+ * On LP64 hosts `long` is 64-bit, which would double every u32/s32 field and break every
+ * struct layout, save format, and pointer pun in the decomp. Use `int` there; the other
+ * branch stays textually identical to upstream so the matching builds are unaffected. */
+#if defined(__LP64__) /* N64 MIPS builds are ILP32 and never define this */
 typedef unsigned char       u8;     /* unsigned  8-bit */
 typedef unsigned short      u16;    /* unsigned 16-bit */
 typedef unsigned int        u32;    /* unsigned 32-bit */
@@ -93,12 +91,10 @@ typedef unsigned int    size_t;
 #elif (_MIPS_SZLONG == 64)
 typedef unsigned long   size_t;
 #elif defined(__GNUC__) && !defined(_MIPS_SZLONG)
-/* Host build on GCC/Clang: _MIPS_SZLONG is undefined, so neither MIPS branch above
- * typedefs size_t -- yet the _SIZE_T guard set above ALSO makes glibc's <stddef.h>
- * skip its own definition (it honors that guard), leaving size_t undefined for the
- * whole decomp build. Use the compiler built-in so the definition always matches
- * the host ABI. MSVC is unaffected (its runtime uses _SIZE_T_DEFINED and defines
- * size_t before any decomp header runs). */
+/* On host GCC/Clang _MIPS_SZLONG is undefined, so neither branch above fires -- and the
+ * _SIZE_T guard set above also suppresses glibc's own <stddef.h> definition, leaving
+ * size_t undefined for the whole build. The built-in always matches the host ABI.
+ * MSVC is unaffected: it guards on _SIZE_T_DEFINED. */
 typedef __SIZE_TYPE__ size_t;
 #endif
 #endif

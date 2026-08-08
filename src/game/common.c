@@ -376,27 +376,15 @@ void func_8070DAD4(s32 bgm) {
 }
 #endif
 
-/* D_8076CCA0 (EK menu-exit BGM race, fixed in audio/disk/external.c): upstream's
-   record of "which source owns the BGM", set true by func_8070DAD4 (ROM) and
-   false by every stop below, used by the three stop helpers to pick exactly ONE
-   of Audio_RomBgmStop / Audio_DDBgmStop. It is not sufficient:
-
-   1. It only tracks starts that go through this file. The EK menu music is
-      started by Audio_EditorInit's delayed path, which never touches it. So while
-      an editor track plays on seq player 1 the boolean still says "ROM", the exit
-      takes Audio_RomBgmStop(), and all DD-side state (D_80771C74, the D_80771C98
-      deferred start, the armed editor counters) is left uncleared -- only
-      Audio_DDBgmStop() clears those.
-   2. Even for a source it does track, one bool cannot answer "which source is
-      playing" while an async disk load is in flight: the answer at stop time is
-      "ROM, plus a disk start that has not landed yet".
-
-   The cancellation therefore lives on the audio side, in Audio_EditorExit and in
-   the epoch guard on the two delayed editor starts, where the pending-request
-   state actually is. Widening this to "stop both sources" was rejected: an
-   unconditional Audio_DDBgmStop() here would issue DISABLE_SEQPLAYER(1, 120) on
-   every BGM transition, and func_8007E0CC is called all over the race code
-   (racer.c) where disk BGM is the correct and current source. */
+/* D_8076CCA0 cannot decide which source owns the BGM: the EK menu music starts
+   through Audio_EditorInit's delayed path, which never sets it, so the exit takes
+   Audio_RomBgmStop and leaves the DD-side state (D_80771C74, the D_80771C98 deferred
+   start, the armed editor counters) uncleared. Nor can one bool describe a disk start
+   still in flight. The cancellation therefore lives in audio/disk/external.c, in
+   Audio_EditorExit and the epoch guard on the delayed editor starts. Ruled out:
+   stopping both sources here -- func_8007E0CC runs on every race BGM transition
+   (racer.c), where an unconditional Audio_DDBgmStop would issue
+   DISABLE_SEQPLAYER(1, 120) against the correct source. */
 void func_8007E0CC(void) {
     Audio_BetaBgmStop();
 #ifdef EXPANSION_KIT
