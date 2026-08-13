@@ -956,8 +956,8 @@ void func_80706518(s32 copyCount, s32 arg1, char* extension) {
        completion wait together, keeping the Leo message queue balanced. Only reached from the
        SLMFS wrappers' terminal error handlers, i.e. after the mount path has already proven
        the volume unusable, so the refusal latch is never spurious. The other terminal site is
-       func_i1_80404830 (mfs_ram.c); whichever fires first consumes the one-shot opt-in, and if
-       that one formatted successfully no error propagates here, so there is no double format. */
+       func_i1_80404830 (mfs_ram.c) or the Course Edit missing-root recovery may consume the
+       one-shot opt-in first. A successful format prevents the same failure from propagating here. */
     if (!gdx_disk_allow_format()) {
         gdx_disk_log_format_refused();
         return;

@@ -16,6 +16,11 @@ extern LEODiskID D_800CD2B0;
 extern LEODiskID D_i1_80428618;
 extern MfsRamArea gMfsRamArea;
 extern s32 gMfsError;
+#ifdef PORT
+extern s32 gGdxMfsListCompleted;
+extern s32 gGdxMfsListStatus;
+extern void gdx_dbg_logf(const char* fmt, ...);
+#endif
 
 void func_xk1_8002DF10(void) {
     D_i1_80428618 = D_800CD2B0;
@@ -217,10 +222,7 @@ s32 func_xk1_8002E368(void) {
             D_807C6EA8.unk_14 = D_xk1_80033404 = gMfsError;
             D_xk1_80033408 = D_80794CD8;
 #ifdef PORT
-            /* Probe (GDX_TRACE=1): the choke point every EK MFS-management op passes
-             * through, so a failing op is visible here even when nothing reaches the
-             * screen -- the success test below folds N64DD_NOT_FOUND into SUCCESS and
-             * clears unk_08. */
+            /* The in-game prompt is generic, so preserve bounded host diagnostics for invalid MFS roots. */
             {
                 static s32 sPortMfsOpLogs = 0;
 
@@ -230,6 +232,11 @@ s32 func_xk1_8002E368(void) {
                     gdx_cki("[mfs-op]   prompt", D_807C6EA8.unk_08);
                     gdx_cki("[mfs-op]   result", D_xk1_80033404);
                     gdx_cki("[mfs-op]   files", D_807C6F0C);
+                    gdx_dbg_logf("[mfs-op] op=%d prompt=%d result=%d files=%d dir=%u name=%.20s ext=%.5s size=%d write=%d\n",
+                                 D_807C6EA8.unk_00, D_807C6EA8.unk_08, D_xk1_80033404, D_807C6F0C,
+                                 D_807C6EA8.dirId, D_807C6EA8.name != NULL ? D_807C6EA8.name : "<null>",
+                                 D_807C6EA8.extension != NULL ? D_807C6EA8.extension : "<null>",
+                                 D_807C6EA8.fileSize, D_807C6EA8.writeChanges);
                 }
             }
 #endif
@@ -238,6 +245,17 @@ s32 func_xk1_8002E368(void) {
             D_xk1_80033400 = 0;
             sp3C = D_xk1_80033404;
 
+#ifdef PORT
+            if (((D_807C6EA8.unk_00 == 11) || (D_807C6EA8.unk_00 == 12)) && gGdxMfsListCompleted &&
+                (gGdxMfsListStatus != LEO_ERROR_GOOD)) {
+                D_807C6EA8.unk_08 = 0xD;
+                D_80794E24 = 1;
+                D_807C6EA8.unk_14 = gGdxMfsListStatus;
+                gdx_cki("[mfs-list] completed with status", gGdxMfsListStatus);
+                sp3C = LEO_ERROR_GOOD;
+                break;
+            }
+#endif
             if ((D_xk1_80033404 == LEO_ERROR_GOOD) || (D_xk1_80033404 == N64DD_NOT_FOUND)) {
                 D_807C6EA8.unk_08 = 0;
                 switch (D_807C6EA8.unk_00) {

@@ -24,6 +24,44 @@ s32 D_xk1_80032BEC = 0;
 s32* D_xk1_80032BF0 = NULL;
 s32* D_xk1_80032BF4 = NULL;
 s32 D_xk1_80032BF8 = 0;
+#ifdef PORT
+s32 gGdxMfsListCompleted = 0;
+s32 gGdxMfsListStatus = LEO_ERROR_GOOD;
+#endif
+
+#ifdef PORT
+extern int gdx_disk_allow_format(void);
+extern void gdx_dbg_logf(const char* fmt, ...);
+
+static s32 GdxPrepareWorkingDirectory(void) {
+    if ((gDirectoryEntryCount <= 0) && (func_i1_80404204() < 0)) {
+        return -1;
+    }
+    if (Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR) == 0) {
+        return 0;
+    }
+    if (gMfsError != N64DD_NOT_FOUND) {
+        return -1;
+    }
+
+    /* Repairing a missing root is safe only after capacity established the
+       real directory-table bounds; formatting remains an explicit fallback. */
+    if ((gWorkingDirectory == MFS_ENTRY_ROOT_DIR) &&
+        (Mfs_GetDirectoryIndex(MFS_ENTRY_ROOT_DIR) == MFS_ENTRY_DOES_NOT_EXIST) &&
+        (Mfs_CreateRootDirectory(true) == 0)) {
+        gdx_cki("[mfs-list] repaired missing root directory", MFS_ENTRY_ROOT_DIR);
+        return Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR);
+    }
+
+    if (!gdx_disk_allow_format()) {
+        return -1;
+    }
+    if (Mfs_InitRamArea(1, 0, NULL) < 0) {
+        return -1;
+    }
+    return Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR);
+}
+#endif
 
 void func_xk1_8002AED0(void) {
     s32 i;
@@ -302,17 +340,55 @@ s32 func_xk1_8002BD64(u8 arg0, char* extension) {
     D_xk1_8003A5D8[0].attr = 0;
     D_xk1_8003A5D8[0].unk_22 = 1;
     D_xk1_8003A5D0 = arg0;
+#ifdef PORT
+    gGdxMfsListCompleted = 0;
+    gGdxMfsListStatus = LEO_ERROR_GOOD;
+#endif
 
+#ifdef PORT
+    if (GdxPrepareWorkingDirectory() < 0) {
+        static s32 sPortMfsListFailureLogs = 0;
+
+        gGdxMfsListStatus = gMfsError;
+        gGdxMfsListCompleted = 1;
+        D_xk1_80032BF8 = 1;
+        if (sPortMfsListFailureLogs < 16) {
+            sPortMfsListFailureLogs++;
+            gdx_cki("[mfs-list] working directory", gWorkingDirectory);
+            gdx_cki("[mfs-list] directory entry count", gDirectoryEntryCount);
+            if (gDirectoryEntryCount > 0) {
+                gdx_cki("[mfs-list] root attr", gMfsRamArea.directoryEntry[0].attr);
+                gdx_cki("[mfs-list] root dir id", gMfsRamArea.directoryEntry[0].dirId);
+                gdx_cki("[mfs-list] root parent id", gMfsRamArea.directoryEntry[0].parentDirId);
+            }
+            gdx_cki("[mfs-list] preparation failed", gGdxMfsListStatus);
+        }
+        return D_xk1_8003A5D0;
+    }
+#else
     if (Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR)) {
         return D_xk1_8003A5D0;
     }
+#endif
 
+    i = 0;
     var_s6 = 0;
     while (true) {
 
         if ((*var_s1 = Mfs_GetNextFileInPreparedDir()) == MFS_ENTRY_DOES_NOT_EXIST) {
             break;
         }
+#ifdef PORT
+        if (i < 8) {
+            gdx_dbg_logf("[mfs-list] request=%.5s index=%u name=%.20s ext=%.5s attr=%u parent=%u\n",
+                         extension != NULL ? extension : "<all>", *var_s1,
+                         gMfsRamArea.directoryEntry[*var_s1].name,
+                         gMfsRamArea.directoryEntry[*var_s1].extension,
+                         gMfsRamArea.directoryEntry[*var_s1].attr,
+                         gMfsRamArea.directoryEntry[*var_s1].parentDirId);
+            i++;
+        }
+#endif
         if ((extension == NULL) || (mfsStrnCmp(gMfsRamArea.directoryEntry[*var_s1].extension, extension, 3) == 0)) {
             temp_s0 = &D_xk1_8003A5D8[D_xk1_8003A5D0];
             temp_s0->unk_22 = 0;
@@ -334,6 +410,12 @@ s32 func_xk1_8002BD64(u8 arg0, char* extension) {
     D_xk1_80032BD4 = var_s0;
     func_xk1_8002CEF8(&D_xk1_8003A5D8[arg0], D_xk1_8003A5D0 - arg0, sizeof(unk_8003A5D8), func_xk1_8002CA98);
     D_xk1_80032BF8 = var_s0;
+#ifdef PORT
+    gGdxMfsListCompleted = 1;
+    gGdxMfsListStatus = LEO_ERROR_GOOD;
+    gdx_dbg_logf("[mfs-list] request=%.5s start=%u matched=%d result=%d\n",
+                 extension != NULL ? extension : "<all>", arg0, var_s6, D_xk1_8003A5D0);
+#endif
 
     if (var_s6 > 100) {
         for (i = 0; i < var_s6 - 100; i++) {

@@ -3689,6 +3689,9 @@ extern s32 gCourseIndex;
 extern CourseData D_8010C770;
 extern unk_807B3C20 D_802CDFD8;
 extern unk_807B3C20 D_802C2020;
+#ifdef EXPANSION_KIT
+extern CourseSegment D_802D0620[];
+#endif
 
 extern CourseData D_i2_800D0130;
 
@@ -3703,9 +3706,13 @@ void Course_SegmentsInit(void) {
 #endif
 
     courseInfo = &gCourseInfos[gCourseIndex];
+#ifdef EXPANSION_KIT
+    courseInfo->courseSegments = D_802D0620;
+#else
     courseInfo->courseSegments = D_802C2020.unk_0000;
+#endif
 
-    for (i = 0, segment = D_802C2020.unk_0000; i < courseInfo->segmentCount; i++) {
+    for (i = 0, segment = courseInfo->courseSegments; i < courseInfo->segmentCount; i++) {
         segment->segmentIndex = i;
         segment->next = segment + 1;
         segment->prev = segment - 1;
@@ -4404,6 +4411,9 @@ void func_80074428(s32 courseIndex) {
     s32 i;
 #ifdef EXPANSION_KIT
     s32 sp20;
+    CourseSegment* courseSegments = D_802D0620;
+#else
+    CourseSegment* courseSegments = D_802C2020.unk_0000;
 #endif
     CourseSegment* var_v0;
     CourseData* courseData = &COURSE_CONTEXT()->courseData;
@@ -4412,25 +4422,25 @@ void func_80074428(s32 courseIndex) {
         return;
     }
 
-    gCourseInfos[courseIndex].courseSegments = D_802C2020.unk_0000;
+    gCourseInfos[courseIndex].courseSegments = courseSegments;
     gCourseInfos[courseIndex].segmentCount = courseData->controlPointCount;
 
     for (i = 0; i < courseData->controlPointCount; i++) {
-        D_802C2020.unk_0000[i].pos = courseData->controlPoint[i].pos;
-        D_802C2020.unk_0000[i].radiusLeft = courseData->controlPoint[i].radiusLeft;
-        D_802C2020.unk_0000[i].radiusRight = courseData->controlPoint[i].radiusRight;
-        D_802C2020.unk_0000[i].trackSegmentInfo = courseData->controlPoint[i].trackSegmentInfo;
+        courseSegments[i].pos = courseData->controlPoint[i].pos;
+        courseSegments[i].radiusLeft = courseData->controlPoint[i].radiusLeft;
+        courseSegments[i].radiusRight = courseData->controlPoint[i].radiusRight;
+        courseSegments[i].trackSegmentInfo = courseData->controlPoint[i].trackSegmentInfo;
     }
 
-    var_v0 = D_802C2020.unk_0000;
+    var_v0 = courseSegments;
     for (i = 0; i < courseData->controlPointCount; i++, var_v0++) {
         var_v0->segmentIndex = i;
         var_v0->next = var_v0 + 1;
         var_v0->prev = var_v0 - 1;
     }
 
-    D_802C2020.unk_0000[0].prev = &D_802C2020.unk_0000[courseData->controlPointCount - 1];
-    D_802C2020.unk_0000[courseData->controlPointCount - 1].next = &D_802C2020.unk_0000[0];
+    courseSegments[0].prev = &courseSegments[courseData->controlPointCount - 1];
+    courseSegments[courseData->controlPointCount - 1].next = &courseSegments[0];
 
     if (courseData->controlPointCount < 4) {
         return;
