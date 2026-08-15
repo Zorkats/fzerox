@@ -196,13 +196,31 @@ void func_80762330(LEODiskTime* diskTime) {
 #endif
 
 s32 func_i1_804065C0(void) {
+#ifdef PORT
+    /* Host OSMesg is pointer-sized, so receiving it into a 32-bit error slot corrupts adjacent MFS state. */
+    OSMesg message;
+
+    message = (OSMesg) (uintptr_t) (u32) gMfsError;
+#endif
+
     if (D_i1_80428600 != 0) {
+#ifdef PORT
+        while (osRecvMesg(&D_i1_8042A5E8, &message, OS_MESG_NOBLOCK) < 0) {
+#else
         while (osRecvMesg(&D_i1_8042A5E8, &gMfsError, OS_MESG_NOBLOCK) < 0) {
+#endif
             osSendMesg(D_i1_80428604, D_i1_80428608, OS_MESG_BLOCK);
         }
     } else {
+#ifdef PORT
+        osRecvMesg(&D_i1_8042A5E8, &message, OS_MESG_BLOCK);
+#else
         osRecvMesg(&D_i1_8042A5E8, &gMfsError, OS_MESG_BLOCK);
+#endif
     }
+#ifdef PORT
+    gMfsError = (s32) (uintptr_t) message;
+#endif
     if (gMfsError != LEO_ERROR_GOOD) {
         return -1;
     }
