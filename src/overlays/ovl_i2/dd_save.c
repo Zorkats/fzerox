@@ -15,18 +15,54 @@ extern char gEditCupTrackNames[][9];
 extern s32 gLeoDriveConnectionState;
 
 #ifdef PORT
-/* ovl_i2/save.c, next to the checksum routines they pair with. Disk records are big-endian:
- * swap after every MFS/64DD fetch and before any checksum check or field use. */
+/* ovl_i2/save.c, next to the checksum routines they pair with. */
 extern void SaveCourseRecords_FromRom(SaveCourseRecords*);
 extern void GhostRecord_FromRom(GhostRecord*);
 extern void GhostData_FromRom(GhostData*);
 
+/* Unconditional swap, for payloads that are genuinely big-endian at the source: the staff-ghost
+ * segment read straight from the pristine disk image (DDSave_LoadDDCourseGhosts). Never use this
+ * on an MFS file payload -- see the normalize helper below. */
 static void Gdx_SwapGhostSaves_FromRom(GhostSave* ghostSave) {
     s32 i;
 
     for (i = 0; i < 3; i++) {
         GhostRecord_FromRom(&ghostSave[i].record);
         GhostData_FromRom(&ghostSave[i].data);
+    }
+}
+
+/* MFS file payloads are host-native when the port wrote them (LeoReadWrite is a verbatim bcopy
+ * and nothing swaps on write) and big-endian only when they came from real hardware. The byte-sum
+ * checksum is endian-invariant over the payload but the stored checksum field is not, so
+ * "validates as-is" vs "validates after swap" identifies the byte order per slot. An all-zero
+ * slot validates as-is and is never swapped. A slot that validates neither way is reverted (the
+ * swaps are involutions) so the existing broken-data path clears it, same as before. */
+static void Gdx_NormalizeGhostSaves_FromDisk(GhostSave* ghostSave) {
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        GhostRecord* record = &ghostSave[i].record;
+
+        if (record->checksum == Save_CalculateGhostRecordChecksum(record)) {
+            continue;
+        }
+        GhostRecord_FromRom(record);
+        GhostData_FromRom(&ghostSave[i].data);
+        if (record->checksum != Save_CalculateGhostRecordChecksum(record)) {
+            GhostRecord_FromRom(record);
+            GhostData_FromRom(&ghostSave[i].data);
+        }
+    }
+}
+
+static void Gdx_NormalizeSaveCourseRecords_FromDisk(SaveCourseRecords* courseRecords) {
+    if (courseRecords->checksum == Save_CalculateSaveCourseRecordChecksum(courseRecords)) {
+        return;
+    }
+    SaveCourseRecords_FromRom(courseRecords);
+    if (courseRecords->checksum != Save_CalculateSaveCourseRecordChecksum(courseRecords)) {
+        SaveCourseRecords_FromRom(courseRecords);
     }
 }
 #endif
@@ -62,9 +98,9 @@ void DDSave_LoadCourseGhostRecords(s32 courseIndex, GhostRecord* ghostRecord) {
         osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
 #ifdef PORT
         /* One fetch fills ghostSave[3] + saveCourseRecord (contiguous in CourseContext), so
-           both need swapping before the checksum check below. */
-        Gdx_SwapGhostSaves_FromRom(COURSE_CONTEXT()->ghostSave);
-        SaveCourseRecords_FromRom(&COURSE_CONTEXT()->saveCourseRecord);
+           both need normalizing before the checksum check below. */
+        Gdx_NormalizeGhostSaves_FromDisk(COURSE_CONTEXT()->ghostSave);
+        Gdx_NormalizeSaveCourseRecords_FromDisk(&COURSE_CONTEXT()->saveCourseRecord);
 #endif
     }
     for (i = 0; i < 3; i++, ghostRecord++, ghostSave++) {
@@ -146,7 +182,7 @@ void DDSave_LoadCourseGhostData(s32 courseIndex, s32 ghostIndex, GhostData* ghos
                       offsetof(CourseContext, ghostSave), 3 * sizeof(GhostSave));
         osRecvMesg(&gMFSMesgQ, NULL, OS_MESG_BLOCK);
 #ifdef PORT
-        Gdx_SwapGhostSaves_FromRom(COURSE_CONTEXT()->ghostSave);
+        Gdx_NormalizeGhostSaves_FromDisk(COURSE_CONTEXT()->ghostSave);
 #endif
     }
     *ghostData = ghostSave[ghostIndex].data;

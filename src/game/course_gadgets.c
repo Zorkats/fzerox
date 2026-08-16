@@ -3957,23 +3957,43 @@ static void CourseData_FromRom(CourseData* cd) {
 #endif
 
 #if defined(PORT) && defined(EXPANSION_KIT)
-/* func_8076852C fills the whole CourseContext from a big-endian MFS file, so the ghost records
- * and the course record must be swapped before checksum validation or field use, the same way
- * CourseData_FromRom handles courseData. The swappers live in ovl_i2/save.c, next to the
- * checksum routines they pair with. */
+/* func_8076852C fills the whole CourseContext from an MFS file whose payload is host-native when
+ * the port wrote it (nothing swaps on write) and big-endian only when real hardware did. The
+ * byte-sum checksum is endian-invariant over the payload but the stored checksum field is not,
+ * so "validates as-is" vs "validates after swap" identifies the byte order per slot. This mirrors
+ * Gdx_NormalizeGhostSaves_FromDisk in ovl_i2/dd_save.c; courseData is NOT touched here -- it is
+ * host-native by design and handled by CourseData_FromRom only for pristine-image reads. The
+ * swappers live in ovl_i2/save.c, next to the checksum routines they pair with. */
 extern void SaveCourseRecords_FromRom(SaveCourseRecords*);
 extern void GhostRecord_FromRom(GhostRecord*);
 extern void GhostData_FromRom(GhostData*);
 
 static void Gdx_CourseContextSaves_FromRom(void) {
     GhostSave* ghostSave = COURSE_CONTEXT()->ghostSave;
+    SaveCourseRecords* courseRecords = &COURSE_CONTEXT()->saveCourseRecord;
     s32 i;
 
     for (i = 0; i < 3; i++) {
-        GhostRecord_FromRom(&ghostSave[i].record);
+        GhostRecord* record = &ghostSave[i].record;
+
+        if (record->checksum == Save_CalculateGhostRecordChecksum(record)) {
+            continue;
+        }
+        GhostRecord_FromRom(record);
         GhostData_FromRom(&ghostSave[i].data);
+        if (record->checksum != Save_CalculateGhostRecordChecksum(record)) {
+            /* Neither interpretation validates: revert (the swaps are involutions) and let the
+             * existing broken-data path clear the slot, same as before this fix. */
+            GhostRecord_FromRom(record);
+            GhostData_FromRom(&ghostSave[i].data);
+        }
     }
-    SaveCourseRecords_FromRom(&COURSE_CONTEXT()->saveCourseRecord);
+    if (courseRecords->checksum != Save_CalculateSaveCourseRecordChecksum(courseRecords)) {
+        SaveCourseRecords_FromRom(courseRecords);
+        if (courseRecords->checksum != Save_CalculateSaveCourseRecordChecksum(courseRecords)) {
+            SaveCourseRecords_FromRom(courseRecords);
+        }
+    }
 }
 #endif
 
