@@ -984,6 +984,13 @@ void func_xk2_800D8F04(void) {
 
 extern s32 D_800D11C8[];
 
+#ifdef PORT
+// Absolute mouse drive (port/gdx_course_edit_mouse.cpp): returns 1 with the cursor position in
+// 320x240 game space when mouse control is active. The drivers below keep their own stock clamp
+// blocks, so the shim deliberately does not know the per-driver ranges.
+extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+#endif
+
 f32 D_xk2_800F692C[] = { 0.5f, 0.6f, 0.7f, 0.8f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f };
 
 void func_xk2_800D934C(void) {
@@ -992,6 +999,10 @@ void func_xk2_800D934C(void) {
     s32 temp;
     s32 temp_a1;
     s32 temp_a2;
+#ifdef PORT
+    s32 mouseX;
+    s32 mouseY;
+#endif
 
     D_80119720 = &gControllers[gPlayerControlPorts[0]];
 
@@ -1007,8 +1018,19 @@ void func_xk2_800D934C(void) {
     }
     temp_fv0 = D_xk2_800F692C[var_v0] * D_xk2_800F6834;
     temp = gCourseEditCursorYPos;
-    gCourseEditCursorXPos += (temp_fv0 * temp_a1) / 2;
-    gCourseEditCursorYPos -= (temp_fv0 * temp_a2) / 2;
+#ifdef PORT
+    // Mouse assigns absolutely instead of accumulating from the stick. The Y<36 audio cue and
+    // the clamps below stay shared with the stock path so mouse-driven movement behaves
+    // identically at the edges.
+    if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+        gCourseEditCursorXPos = mouseX;
+        gCourseEditCursorYPos = mouseY;
+    } else
+#endif
+    {
+        gCourseEditCursorXPos += (temp_fv0 * temp_a1) / 2;
+        gCourseEditCursorYPos -= (temp_fv0 * temp_a2) / 2;
+    }
     if ((temp >= 36) && (gCourseEditCursorYPos < 36)) {
         Audio_TriggerSystemSE(NA_SE_35);
     }
@@ -1031,26 +1053,40 @@ void func_xk2_800D950C(void) {
     f32 temp_fv0;
     s32 var_a0;
     s32 var_v0;
+#ifdef PORT
+    s32 mouseX;
+    s32 mouseY;
+#endif
 
     var_v0 = D_80119720->stickX;
     var_a0 = D_80119720->stickY;
 
-    if ((SQ(var_v0) + SQ(var_a0)) < 100) {
-        return;
+#ifdef PORT
+    // Same absolute mouse drive as func_xk2_800D934C. Must precede the deadzone early-return:
+    // while the mouse drives the cursor the stick is usually centred.
+    if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+        gCourseEditCursorXPos = mouseX;
+        gCourseEditCursorYPos = mouseY;
+    } else
+#endif
+    {
+        if ((SQ(var_v0) + SQ(var_a0)) < 100) {
+            return;
+        }
+        if (var_v0 < 0) {
+            var_v0 = -var_v0 * var_v0;
+        } else {
+            var_v0 = var_v0 * var_v0;
+        }
+        if (var_a0 < 0) {
+            var_a0 = -var_a0 * var_a0;
+        } else {
+            var_a0 = var_a0 * var_a0;
+        }
+        temp_fv0 = D_xk2_800F692C[D_800D11C8[4]] * D_xk2_800F6834;
+        gCourseEditCursorXPos += (temp_fv0 * var_v0) / 128;
+        gCourseEditCursorYPos -= (temp_fv0 * var_a0) / 128;
     }
-    if (var_v0 < 0) {
-        var_v0 = -var_v0 * var_v0;
-    } else {
-        var_v0 = var_v0 * var_v0;
-    }
-    if (var_a0 < 0) {
-        var_a0 = -var_a0 * var_a0;
-    } else {
-        var_a0 = var_a0 * var_a0;
-    }
-    temp_fv0 = D_xk2_800F692C[D_800D11C8[4]] * D_xk2_800F6834;
-    gCourseEditCursorXPos += (temp_fv0 * var_v0) / 128;
-    gCourseEditCursorYPos -= (temp_fv0 * var_a0) / 128;
     if (gCourseEditCursorXPos < 24) {
         gCourseEditCursorXPos = 24;
     }
@@ -2629,6 +2665,7 @@ extern s32 gCourseEditEntryOption;
 extern s32 D_xk1_80032C20;
 extern u8 D_xk1_8003A570[];
 extern unk_8003A5D8 D_xk1_8003A5D8[];
+extern u8 D_xk2_800F7400;
 
 extern s32 D_xk2_800F7060;
 extern s32 D_xk2_800F7064;
@@ -2639,8 +2676,35 @@ extern s32 D_xk2_80104378;
 void func_xk2_800DD938(void) {
     unk_8003A5D8* sp1C;
 
+#ifdef PORT
+    // Mouse hover over the yes/no dialog moves the selection so the next injected
+    // BTN_A click chooses the intended option.
+    {
+        s32 mouseX;
+        s32 mouseY;
+
+        if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+            if ((mouseX >= 136) && (mouseX < 136 + 48) && (mouseY >= 120) && (mouseY < 120 + 32)) {
+                D_xk1_80032C20 = (mouseY >= 120 + 16) ? 1 : 0;
+            }
+        }
+    }
+#endif
+
     if (D_80119720->buttonPressed & BTN_B) {
         Audio_TriggerSystemSE(NA_SE_37);
+#ifdef PORT
+        // Custom-track load flow: Back returns to the file picker (OFFICIAL + custom tracks)
+        // instead of dropping back to the editor. unk_08 = 3 alone leaves the cursor, directory
+        // slot 0 label, and scroll state unset; go through the official async picker-open path
+        // (0x32 -> 0x31 -> func_xk2_800EB018) so the picker is fully re-initialized.
+        if (D_80119880 == 0) {
+            D_xk2_800F7400 = 1;
+            func_8076877C(1, "CRSD");
+            D_800D6CA0.unk_08 = 0x32;
+            return;
+        }
+#endif
         D_800D6CA0.unk_08 = 0;
         gCourseEditFileOption = -1;
         gCourseEditEntryOption = -1;
@@ -2650,6 +2714,17 @@ void func_xk2_800DD938(void) {
         func_xk1_8002D2F0();
         return;
     }
+#ifdef PORT
+    // Custom-track load flow: "No" on the load-confirm dialog must return to the file picker,
+    // matching the behavior of the Back button. For other operations fall through to stock logic.
+    if ((D_xk1_80032C20 == 0) && (D_80119880 == 0)) {
+        Audio_TriggerSystemSE(NA_SE_37);
+        D_xk2_800F7400 = 1;
+        func_8076877C(1, "CRSD");
+        D_800D6CA0.unk_08 = 0x32;
+        return;
+    }
+#endif
     if (D_xk1_80032C20 == 0) {
         Audio_TriggerSystemSE(NA_SE_37);
         D_800D6CA0.unk_08 = 0;
@@ -2920,6 +2995,12 @@ void func_xk2_800DE4F8(void) {
 extern s32 D_xk1_800305FC;
 extern MenuWidget gCreateWidget;
 
+#ifdef PORT
+extern int gdx_course_edit_mouse_wheel(void);
+extern bool gMenuWidgetOpen;
+extern s32 sMenuPageYOffset;
+#endif
+
 void func_xk2_800DE758(void) {
     s32 pad[4];
     s32 temp_a0;
@@ -2930,6 +3011,17 @@ void func_xk2_800DE758(void) {
     if (D_800D6CA0.unk_08 == 2) {
         return;
     }
+
+#ifdef PORT
+    // Mouse absolute drive already wrote the position into D_xk1_8003A550/554 in 19DD60.c.
+    // Skip the controller-driven vertical lerp and column snap so the cursor can move freely
+    // in CREATE/POINT drop-downs and other sub-menus, but still clamp/scroll long lists.
+    s32 mouseX;
+    s32 mouseY;
+    s32 mouseDriven = gdx_course_edit_mouse_pos(&mouseX, &mouseY);
+
+    if (!mouseDriven) {
+#endif
 
     sp18 = func_xk1_80026914(&gCourseEditWidget);
     temp_v1 = sp18->numItems;
@@ -2962,7 +3054,33 @@ void func_xk2_800DE758(void) {
             D_xk1_8003A554 = temp_a0;
         }
     }
-    func_xk1_800269F4(&gCourseEditWidget, &D_xk1_8003A550, &D_xk1_8003A554);
+#ifdef PORT
+    }
+#endif
+
+#ifdef PORT
+    // When a drop-down is open under mouse control, do not clamp the cursor to the submenu's
+    // single X column; keep raw mouse movement and use the wheel to scroll long vertical lists.
+    if (mouseDriven && (gCourseEditWidget.openIndex != INVALID_OPTION)) {
+        MenuWidget* active = func_xk1_80026914(&gCourseEditWidget);
+        s32 wheel = gdx_course_edit_mouse_wheel();
+
+        if ((wheel != 0) && (active->itemYOffset != 0) && (active->numItems > 10)) {
+            s32 maxOffset = (active->numItems - 10) * active->itemYOffset;
+            s32 newOffset = sMenuPageYOffset + (wheel * active->itemYOffset);
+
+            if (newOffset < 0) {
+                newOffset = 0;
+            } else if (newOffset > maxOffset) {
+                newOffset = maxOffset;
+            }
+            sMenuPageYOffset = newOffset;
+        }
+    } else
+#endif
+    {
+        func_xk1_800269F4(&gCourseEditWidget, &D_xk1_8003A550, &D_xk1_8003A554);
+    }
 }
 
 extern u16* gCourseEditIconTextures[];
@@ -3096,6 +3214,12 @@ extern s32 gCourseIndex;
 extern s32 D_xk2_80103FF0;
 extern s32 D_xk2_80103FF4;
 extern s32 D_xk2_80103FF8;
+#ifdef PORT
+extern s16 gPlayerCharacters[];
+extern s16 gPlayerMachineSkins[];
+extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+f32 func_8008960C(f32 arg0);
+#endif
 
 void func_xk2_800DEE20(void) {
     if (gInCourseEditTestRun || (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A)) {
@@ -3108,6 +3232,15 @@ void func_xk2_800DEE20(void) {
         }
         Audio_TriggerSystemSE(NA_SE_36);
         gInCourseEditTestRun = true;
+#ifdef PORT
+        /* Test-drive entry does not flip gGameMode, so the per-frame fixed-aspect tick would
+           hold the editor's 4:3 pin for one extra frame. Republish at the transition itself --
+           the same mid-dispatch subtlety as the mode-flip site in game.c. port/input_bridge.c. */
+        {
+            extern void gdx_fixed_aspect_publish(void);
+            gdx_fixed_aspect_publish();
+        }
+#endif
         func_xk2_800F1360();
         D_xk2_80103FF0 = 0;
         D_xk2_80103FF4 = 0;
@@ -3119,9 +3252,26 @@ void func_xk2_800DEE20(void) {
         func_80074594();
         func_80074428(gCourseIndex);
         Course_Init();
+#ifdef PORT
+        // Test-drive machine and engine come from the port menu: TestDriveMachine 0
+        // follows the player's last selection, 1-30 pin a roster machine; the skin
+        // always follows the last selection.
+        {
+            s32 testDriveMachine = CVarGetInteger("gEnhancements.Gameplay.TestDriveMachine", 0);
+
+            if (testDriveMachine == 0) {
+                gRacers[0].character = gPlayerCharacters[0];
+            } else {
+                gRacers[0].character = testDriveMachine - 1;
+            }
+            gRacers[0].machineSkinIndex = gPlayerMachineSkins[0];
+            gRacers[0].unk_1A8 = func_8008960C(CVarGetInteger("gEnhancements.Gameplay.TestDriveEngine", 50) / 100.0f);
+        }
+#else
         gRacers[0].character = 0;
         gRacers[0].machineSkinIndex = 0;
         gRacers[0].unk_1A8 = 0.5f;
+#endif
         Racer_Init();
         Camera_Init();
         func_8007F4E0(COURSE_CONTEXT()->courseData.venue, COURSE_CONTEXT()->courseData.skybox);

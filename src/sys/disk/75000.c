@@ -43,6 +43,17 @@ volatile s32 D_80794E2C = 0;
  * consumer side, in func_xk1_8002E9D0 (ABC40.c). */
 volatile s32 gGdxDiskPromptRaised = 0;
 volatile s32 gGdxDiskBannerRaised = 0;
+
+/* E2 .gdxc content import: op slot 30 (dispatched below) ferries port-originated content
+ * installs onto this thread. The request staging, validation chain and completion flag live in
+ * port/gdx_content_import.c; this TU only carries the slot. */
+void GdxContentImport_RunOnDiskThread(void);
+
+/* E3/E4, same shape as op 30: op 31 = Edit-Cup register/unregister (CRS_ENTRY.CENT write), op
+ * 32 = cup-bundle install (per-track CRSD saves + CENT write). Staging and completion live in
+ * port/gdx_content_import.c. */
+void GdxContentCup_RunOnDiskThread(void);
+void GdxContentBundle_RunOnDiskThread(void);
 #endif
 
 void func_80767800(unk_807C6F10 arg0) {
@@ -195,6 +206,30 @@ void func_80767958(void* entry) {
             D_80794E14 = D_80794E18 = 0;
             continue;
         }
+#ifdef PORT
+        /* E2 .gdxc content import. Same completion shape as the unk_00 == 5 path (prompt slot
+         * cleared, busy flags dropped); the import itself never raises a prompt id. */
+        if (D_807C6EA8.unk_00 == 30) {
+            GdxContentImport_RunOnDiskThread();
+            func_80767940();
+            D_80794E14 = D_80794E18 = 0;
+            continue;
+        }
+        /* E3 Edit-Cup register/unregister and E4 cup-bundle install; identical completion
+         * shape. */
+        if (D_807C6EA8.unk_00 == 31) {
+            GdxContentCup_RunOnDiskThread();
+            func_80767940();
+            D_80794E14 = D_80794E18 = 0;
+            continue;
+        }
+        if (D_807C6EA8.unk_00 == 32) {
+            GdxContentBundle_RunOnDiskThread();
+            func_80767940();
+            D_80794E14 = D_80794E18 = 0;
+            continue;
+        }
+#endif
         if (D_807C6EA8.unk_10 == 4) {
 
         } else {
@@ -329,6 +364,50 @@ void func_807680EC(u16 dirId, char* name, char* extension, void* buf, s32 fileSi
         func_80767E98(dirId, name, extension, buf, fileSize, attr, copyCount, writeChanges);
     }
 }
+
+#ifdef PORT
+/* E2 .gdxc content import: menu-thread entry point for port-originated installs. Mirrors
+ * func_807680EC's guard + post shape but carries no arguments -- the validated payload, name and
+ * extension sit in gdx_content_import.c's staging, consumed by GdxContentImport_RunOnDiskThread
+ * on this thread. unk_04/08/0C are zeroed so the prompt snapshot above cannot re-record a stale
+ * id from a previous op. */
+s32 GdxContentImport_EnqueueDiskOp(void) {
+    if (D_80794E18 != 0) {
+        return -1;
+    }
+    D_807C6EA8.unk_00 = 30;
+    D_807C6EA8.unk_04 = 0;
+    D_807C6EA8.unk_08 = 0;
+    D_807C6EA8.unk_0C = 0;
+    osSendMesg(&D_807C6E90, NULL, OS_MESG_BLOCK);
+    return 0;
+}
+
+/* E3/E4 posters: identical guard + post shape, argument-free like the import poster. */
+s32 GdxContentCup_EnqueueDiskOp(void) {
+    if (D_80794E18 != 0) {
+        return -1;
+    }
+    D_807C6EA8.unk_00 = 31;
+    D_807C6EA8.unk_04 = 0;
+    D_807C6EA8.unk_08 = 0;
+    D_807C6EA8.unk_0C = 0;
+    osSendMesg(&D_807C6E90, NULL, OS_MESG_BLOCK);
+    return 0;
+}
+
+s32 GdxContentBundle_EnqueueDiskOp(void) {
+    if (D_80794E18 != 0) {
+        return -1;
+    }
+    D_807C6EA8.unk_00 = 32;
+    D_807C6EA8.unk_04 = 0;
+    D_807C6EA8.unk_08 = 0;
+    D_807C6EA8.unk_0C = 0;
+    osSendMesg(&D_807C6E90, NULL, OS_MESG_BLOCK);
+    return 0;
+}
+#endif
 
 void func_8076814C(u16 dirId, char* name, char* extension, void* buf, s32 fileSize, s32 attr, s32 copyCount,
                    bool writeChanges) {

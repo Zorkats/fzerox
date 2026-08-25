@@ -401,19 +401,9 @@ Gfx* func_xk2_800E0320(Gfx* gfx) {
         var_v1 = gCourseEditCursorYPos;
     }
     // clang-format on
-    if (D_800D6CA0.unk_08 == 0x20) {
-        return gfx;
-    }
-    if (D_800D6CA0.unk_08 == 4) {
-        return gfx;
-    }
-    if (D_800D6CA0.unk_08 == 3) {
-        return gfx;
-    }
-
-    if (D_800D6CA0.unk_08 == 0x10) {
-        return gfx;
-    }
+    // PORT: draw the mouse cursor in full sub-screens (POINT/options, file/load, entry list,
+    // confirm dialogs) as well as the normal editor. The stock code hid the arrow in those
+    // states, but with absolute mouse drive the user needs the cursor to follow the mouse.
     gSPDisplayList(gfx++, D_8014940);
 
     gDPLoadTextureBlock(gfx++, aCourseEditCursorTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, 0, G_TX_NOMIRROR | G_TX_WRAP,

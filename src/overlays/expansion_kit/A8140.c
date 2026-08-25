@@ -33,14 +33,33 @@ s32 gGdxMfsListStatus = LEO_ERROR_GOOD;
 extern int gdx_disk_allow_format(void);
 extern void gdx_dbg_logf(const char* fmt, ...);
 
-static s32 GdxPrepareWorkingDirectory(void) {
+s32 GdxPrepareWorkingDirectory(void) {
     if ((gDirectoryEntryCount <= 0) && (func_i1_80404204() < 0)) {
+        gdx_dbg_logf("[content] prep-wd: initial mount failed (dirCount=%d mfsError=%d)", gDirectoryEntryCount,
+                     gMfsError);
         return -1;
     }
     if (Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR) == 0) {
         return 0;
     }
+
+    /* SLMFSCreateManager latches MEDIUM_MAY_HAVE_CHANGED until a real mount
+       (func_i1_8040428C, via SLMFSNewDisk) runs. Retail clears it from the drive's
+       media-change polling before any menu opens; the port never polls, so the latch
+       survives to the first MFS consumer -- e.g. the Content Library opened straight
+       from the title screen. Run the same remount here, then retry. */
+    if (gMfsError == LEO_ERROR_MEDIUM_MAY_HAVE_CHANGED) {
+        if (func_i1_8040428C() < 0) {
+            gdx_dbg_logf("[content] prep-wd: remount failed (mfsError=%d)", gMfsError);
+            return -1;
+        }
+        if (Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR) == 0) {
+            return 0;
+        }
+    }
+
     if (gMfsError != N64DD_NOT_FOUND) {
+        gdx_dbg_logf("[content] prep-wd: unexpected mfsError=%d dirCount=%d", gMfsError, gDirectoryEntryCount);
         return -1;
     }
 
@@ -54,9 +73,11 @@ static s32 GdxPrepareWorkingDirectory(void) {
     }
 
     if (!gdx_disk_allow_format()) {
+        gdx_dbg_logf("[content] prep-wd: root missing and format not allowed");
         return -1;
     }
     if (Mfs_InitRamArea(1, 0, NULL) < 0) {
+        gdx_dbg_logf("[content] prep-wd: Mfs_InitRamArea failed (mfsError=%d)", gMfsError);
         return -1;
     }
     return Mfs_GetFilesPreparation(MFS_ENTRY_WORKING_DIR);
@@ -220,7 +241,25 @@ Gfx* func_xk1_8002B17C(Gfx* gfx, s32 arg1) {
             }
         }
 
+#ifdef PORT
+        {
+            /* Disk file names reach here from .gdxc imports too, so they can contain '%' and
+               can fill name[16] with no terminator -- both are UB when the string is used as the
+               _Printf format (same class as the track-shape row in course_edit/191080.c). Bound
+               the copy and pass the name as data. Byte-identical output for every name the
+               retail keyboard can produce, so hardware parity is unaffected. */
+            u8 fileName[17];
+            s32 j;
+
+            for (j = 0; (j < 16) && (D_xk1_8003A5D8[i].name[j] != '\0'); j++) {
+                fileName[j] = D_xk1_8003A5D8[i].name[j];
+            }
+            fileName[j] = '\0';
+            gfx = func_xk1_8002924C(gfx, D_xk1_80032BE4, temp_s4, "%s", fileName);
+        }
+#else
         gfx = func_xk1_8002924C(gfx, D_xk1_80032BE4, temp_s4, D_xk1_8003A5D8[i].name);
+#endif
         if ((D_xk1_8003A5D8[i].extension[3] == 'E') && ((gGameFrameCount % 16) < 8)) {
             gSPDisplayList(gfx++, D_7020808);
             gSPTextureRectangle(gfx++, (D_xk1_80032BE4 + 0x1C) << 2, temp_s4 << 2, (D_xk1_80032BE4 + 0x24) << 2,

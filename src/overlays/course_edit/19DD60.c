@@ -4,6 +4,7 @@
 #include "fzx_racer.h"
 #include "fzx_course.h"
 #include "fzx_camera.h"
+#include "fzx_expansion_kit.h"
 #include ASSET_HEADER_EK(course_edit_textures.h)
 
 unk_80128C94* D_80128C90;
@@ -19,6 +20,18 @@ const u16 D_xk2_80104010[] = { BTN_L, BTN_R, BTN_L, BTN_R, BTN_UP, BTN_DOWN, BTN
 extern volatile u8 D_80794E14;
 extern unk_800D6CA0 D_800D6CA0;
 extern s32 D_xk1_80032C20;
+extern s32 gCourseEditCursorXPos;
+extern s32 gCourseEditCursorYPos;
+
+#ifdef PORT
+// Absolute mouse drive (port/gdx_course_edit_mouse.cpp): keeps the Course Edit cursor following
+// the mouse while in-game sub-menus (BGM/background/file pickers, name entry, etc.) are open.
+// The cursor drivers in func_xk2_800DBEE4 are skipped when D_800D6CA0.unk_08 != 0, which would
+// otherwise freeze the cursor in those sub-menus.
+extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+extern int gdx_course_edit_mouse_wheel(void);
+extern void CourseEdit_ApplyMouseToFileList(void);
+#endif
 
 void func_xk2_800EC2A0(void) {
     static s32 D_xk2_80104000 = 0;
@@ -125,6 +138,8 @@ extern s32 D_xk1_80030608;
 extern s32 D_800CCFBC;
 extern CourseEffectsInfo* D_800E12C0;
 extern s32 D_xk1_80032BF8;
+extern s32 D_xk1_80032BDC;
+extern s32 D_xk1_8003A5D0;
 extern s32 D_xk2_800F7058;
 extern s32 D_xk2_80119800;
 extern u8* sCourseMinimapTex;
@@ -248,6 +263,14 @@ void func_xk2_800EC91C(void) {
 
     gGamePaused = false;
     gInCourseEditTestRun = false;
+#ifdef PORT
+    /* Exit side of the entry note in func_xk2_800DEE20 (course_edit/188850.c): re-latch the
+       editor's 4:3 pin on this frame, not one frame later. port/input_bridge.c. */
+    {
+        extern void gdx_fixed_aspect_publish(void);
+        gdx_fixed_aspect_publish();
+    }
+#endif
     func_800A4D0C(0);
     D_xk2_80103FF0 = 0;
     D_xk2_80103FF4 = 0;
@@ -266,10 +289,49 @@ extern s32 D_xk1_8003A550;
 extern s32 D_xk1_8003A554;
 extern s32 D_800D11C8[];
 extern s32 gLastCourseBGM;
+#ifdef PORT
+extern bool gMenuWidgetOpen;
+extern s32 sMenuPageYOffset;
+extern s32 func_xk1_80026958(MenuWidget*, s32, s32);
+#endif
 
 void func_xk2_800EC9BC(void) {
     func_xk2_800DE758();
     func_xk1_80027CFC(&gCourseEditWidget, &D_xk1_8003A550, &D_xk1_8003A554);
+#ifdef PORT
+    // With a drop-down open, hovering a different top-menu tab should switch to that tab
+    // (standard menu-bar behavior) instead of locking left/right movement.
+    if (gCourseEditWidget.openIndex != INVALID_OPTION) {
+        s32 mouseX;
+        s32 mouseY;
+        s32 topIndex;
+        MenuWidget* w;
+        s32 cur;
+
+        if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+            topIndex = func_xk1_80026958(&gCourseEditWidget, mouseX, mouseY);
+            if ((topIndex != INVALID_OPTION) && (topIndex != gCourseEditWidget.openIndex) &&
+                (gCourseEditWidget.menuItems[topIndex].widget != NULL)) {
+                w = &gCourseEditWidget;
+                while (w->openIndex != INVALID_OPTION) {
+                    cur = w->openIndex;
+                    w->openIndex = INVALID_OPTION;
+                    w->highlightedIndex = INVALID_OPTION;
+                    if (w->menuItems[cur].widget == NULL) {
+                        break;
+                    }
+                    w = w->menuItems[cur].widget;
+                    w->openIndex = INVALID_OPTION;
+                    w->highlightedIndex = INVALID_OPTION;
+                }
+                gCourseEditWidget.openIndex = topIndex;
+                gMenuWidgetOpen = true;
+                sMenuPageYOffset = 0;
+                func_xk1_80027CFC(&gCourseEditWidget, &mouseX, &mouseY);
+            }
+        }
+    }
+#endif
     if (D_80794E14 == 1) {
         return;
     }
@@ -412,6 +474,25 @@ s32 CourseEdit_Update(void) {
     func_xk1_8002D810(&gControllers[gPlayerControlPorts[0]]);
     func_xk1_8002D974();
 
+#ifdef PORT
+    // While an in-game Course Edit sub-menu or full overlay is open, func_xk2_800DBEE4 is not
+    // reached, so the cursor drivers cannot move the cursor. Update it directly from the mouse
+    // here so the BGM/background/file pickers, CREATE/POINT screens, and the help overlay stay
+    // mouse-controllable. Also mirror the position into D_xk1_8003A550/554: several of those
+    // screens (entry list, name entry, drop-down widgets) draw their stock cursor from those
+    // variables, not from gCourseEditCursorXPos/YPos.
+    if (!gInCourseEditTestRun && ((D_800D6CA0.unk_08 != 0) || (D_xk2_80119918 != 0))) {
+        s32 mouseX;
+        s32 mouseY;
+        if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+            gCourseEditCursorXPos = mouseX;
+            gCourseEditCursorYPos = mouseY;
+            D_xk1_8003A550 = mouseX;
+            D_xk1_8003A554 = mouseY;
+        }
+    }
+#endif
+
     if (gInCourseEditTestRun) {
         return func_xk2_800ECBC0();
     }
@@ -519,6 +600,24 @@ s32 CourseEdit_Update(void) {
             func_xk2_800ECD90();
             break;
         case 0x3:
+#ifdef PORT
+            CourseEdit_ApplyMouseToFileList();
+            {
+                s32 wheel = gdx_course_edit_mouse_wheel();
+                if (wheel != 0) {
+                    s32 count = D_xk1_8003A5D0;
+                    if (count > 0) {
+                        D_xk1_80032BDC += wheel;
+                        if (D_xk1_80032BDC < 0) {
+                            D_xk1_80032BDC = 0;
+                        } else if (D_xk1_80032BDC >= count) {
+                            D_xk1_80032BDC = count - 1;
+                        }
+                        func_xk1_8002BB50();
+                    }
+                }
+            }
+#endif
             func_xk1_8002BBA4();
             if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) {
                 func_xk2_800EB400();

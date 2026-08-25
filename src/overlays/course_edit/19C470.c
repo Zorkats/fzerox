@@ -223,8 +223,42 @@ extern s32 gCourseEditFileOption;
 extern s32 gCourseEditEntryOption;
 extern s32 D_xk1_80032BF8;
 extern s32 D_xk2_800F684C;
+extern s32 D_xk1_80032BE8;
+extern s32 D_xk1_80032BEC;
+extern s32 D_xk1_80032BDC;
 extern s32 D_xk1_8003A550;
 extern s32 D_xk1_8003A554;
+extern s32 D_xk1_8003A5D0;
+
+#ifdef PORT
+// Absolute mouse drive (port/gdx_course_edit_mouse.cpp): maps the OS cursor to the file-list row
+// under it. The row geometry is taken directly from func_xk1_8002B17C: top D_xk1_80032BE8, scroll
+// D_xk1_80032BEC, row height 8. BTN_A injection handles the actual click selection.
+extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+
+void CourseEdit_ApplyMouseToFileList(void) {
+    s32 mouseX;
+    s32 mouseY;
+    s32 fileIndex;
+    s32 count;
+
+    if (!gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+        return;
+    }
+    count = D_xk1_8003A5D0;
+    if (count <= 0) {
+        return;
+    }
+    fileIndex = (mouseY - D_xk1_80032BE8 + D_xk1_80032BEC) / 8;
+    if (fileIndex < 0) {
+        fileIndex = 0;
+    } else if (fileIndex >= count) {
+        fileIndex = count - 1;
+    }
+    D_xk1_80032BDC = fileIndex;
+    func_xk1_8002BB50();
+}
+#endif
 
 void func_xk2_800EB018(void) {
     s32 pad;
@@ -309,10 +343,24 @@ void func_xk2_800EB304(char* name, s32 attr) {
 }
 
 void func_xk2_800EB3B4(void) {
+#ifdef PORT
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+#endif
     if (D_800D6CA0.unk_08 != 3) {
         return;
     }
     func_xk1_8002BD34();
+#ifdef PORT
+    // Official courses are a nested list, so Back should reopen the parent
+    // picker (OFFICIAL + custom tracks) instead of closing the file menu.
+    if (CVarGetInteger("gEnhancements.Gameplay.CourseEditOfficialBack", 1) && (D_80119880 == 6)) {
+        D_xk2_800F7400 = 1;
+        func_8076877C(1, "CRSD");
+        D_80119880 = 0;
+        D_800D6CA0.unk_08 = 0x32;
+        return;
+    }
+#endif
     D_800D6CA0.unk_08 = 0;
     gCourseEditFileOption = -1;
     gCourseEditEntryOption = -1;

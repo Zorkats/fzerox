@@ -1012,7 +1012,15 @@ void Segment_LoadSegment10(void) {
 }
 
 void func_80077AD8(s32 venue) {
+#ifdef PORT
+    // Stock excludes VENUE_ENDING from the Course Edit preview loader; the port offers it under
+    // gEnhancements.Gameplay.CourseEditEndingVenue.
+    extern int CVarGetInteger(const char* name, int defaultValue);
+    s32 maxVenue = CVarGetInteger("gEnhancements.Gameplay.CourseEditEndingVenue", 1) ? VENUE_ENDING : VENUE_SILENCE;
+    if ((venue >= VENUE_MUTE_CITY) && (venue <= maxVenue) && (D_800CD2F0 < 0)) {
+#else
     if ((venue >= VENUE_MUTE_CITY) && (venue <= VENUE_SILENCE) && (D_800CD2F0 < 0)) {
+#endif
         D_800CD2F0 = venue;
     }
 }

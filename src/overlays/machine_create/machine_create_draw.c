@@ -15,6 +15,13 @@
 // Settings, Weight -- see port/gen/EkTranslatedOverrides.c). The retail-JP disk and any
 // unrecognized disk report 0 and keep the original literal blit dimensions below.
 extern int gdx_ek_disk_is_translated(void);
+
+#include ASSET_HEADER_EK(course_edit_textures.h)
+
+// Absolute mouse drive (port/gdx_course_edit_mouse.cpp).
+extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+extern s32 gMachineCreateCursorX;
+extern s32 gMachineCreateCursorY;
 #endif
 
 Vp gMachinePartViewports[3][7];
@@ -1079,6 +1086,33 @@ Gfx* func_xk3_80131494(Gfx* gfx) {
             gfx = MachineCreate_DrawTextureBlockRGBA16(gfx, aExpansionKitMenuExitTex, 265, 20, 32, 16);
         }
     }
+
+#ifdef PORT
+    // Draw the Course Edit cursor sprite at the raw mouse position whenever the absolute mouse
+    // drive is active. The stock menu highlight (func_xk1_800276B0) is not visible enough on its
+    // own and does not track the free mouse cursor in the parts/settings grids.
+    if (!D_xk3_80136548) {
+        s32 mouseX;
+        s32 mouseY;
+        if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+            // Force the exact RGBA sprite state Course Edit uses before its cursor draw; the
+            // Create Machine RDP pipeline may still carry I8-gradient combine/prim state here,
+            // which is what tints/garbles the cursor when drawn through D_xk3_80137378 alone.
+            gDPPipeSync(gfx++);
+            gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+            gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
+            gDPSetRenderMode(gfx++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
+            gDPSetAlphaCompare(gfx++, G_AC_NONE);
+            gDPSetTextureFilter(gfx++, G_TF_POINT);
+            gDPSetTexturePersp(gfx++, G_TP_NONE);
+            gDPLoadTextureBlock(gfx++, aCourseEditCursorTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, 0,
+                                G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK,
+                                G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+            gSPTextureRectangle(gfx++, mouseX << 2, mouseY << 2, (mouseX + 16) << 2, (mouseY + 16) << 2,
+                                0, 0, 0, 1 << 10, 1 << 10);
+        }
+    }
+#endif
 
     return gfx;
 }

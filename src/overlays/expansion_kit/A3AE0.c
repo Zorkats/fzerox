@@ -283,6 +283,16 @@ MenuDropItem sVenueMenuItems[] = {
       aExpansionKitMenu9Tex, aCourseEditFireFieldSceneTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu10Tex, aCourseEditSilenceSceneTex, NULL, NULL, 16, 16, NULL, NULL },
+#ifdef PORT
+    // Ending venue (VENUE_ENDING): fully wired in the engine but stock keeps it out of the
+    // editor. No ending-scene thumbnail exists; the ending venue reuses Mute City's floor and
+    // BGM, so its scene texture stands in. Offered only under gEnhancements.Gameplay.
+    // CourseEditEndingVenue (see func_xk1_80028250); the entry always exists in the array so a
+    // loaded course with venue 10 can never index out of bounds. It must not reuse
+    // aCourseEditMuteCitySceneTex (BG 1) or asset injection cannot distinguish the two.
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu11Tex, aCourseEditSilenceSceneTex, NULL, NULL, 16, 16, NULL, NULL },
+#endif
 };
 
 MenuWidget gVenueWidget = { 10,  INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sVenueMenuItems, 112, 48, 112,
@@ -1412,6 +1422,17 @@ void func_xk1_80028250(void) {
             gCourseEditMenuOptions[2] = sCoursePartTypeOptions[gPartsStyleOption];
             break;
         case CREATE_OPTION_BACKGROUND:
+#ifdef PORT
+            {
+                extern int CVarGetInteger(const char* name, int defaultValue);
+                s32 endingVenue = CVarGetInteger("gEnhancements.Gameplay.CourseEditEndingVenue", 1);
+
+                gVenueWidget.numItems = endingVenue ? 11 : 10;
+                // With 11 items the list scrolls, so the cursor range must reach the 11th entry.
+                // Stock 10-item layout fits without scrolling; keep its original bounds when off.
+                gVenueWidget.cursorMaxPosY = endingVenue ? 208 : 192;
+            }
+#endif
             gCourseEditMenuItems[1].contentsTex = aCourseEditSceneTex;
             gCourseEditMenuItems[1].widget = &gVenueWidget;
             gCourseEditMenuOptions[1] = &gVenueOption;
@@ -1722,6 +1743,12 @@ void func_xk1_80028EF0(void) {
     if (gVenueWidget.openIndex != INVALID_OPTION) {
         func_xk1_80027C80(&gCourseEditWidget);
         COURSE_CONTEXT()->courseData.venue = gVenueOption;
+        // The ending ceremony venue always uses a night sky; mirror that in the editor so the
+        // preview and test run match the ceremony instead of inheriting the previous skybox.
+        if (gVenueOption == VENUE_ENDING) {
+            gSkyboxOption = SKYBOX_NIGHT;
+            COURSE_CONTEXT()->courseData.skybox = SKYBOX_NIGHT;
+        }
         func_800747EC(gVenueOption);
         func_80077AD8(gVenueOption);
         D_xk2_800F7040 = 3;

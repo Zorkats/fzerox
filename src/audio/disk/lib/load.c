@@ -5,6 +5,67 @@
    through the port shims instead. */
 extern void* gdx_host_calloc(unsigned long long count, unsigned long long size);
 extern void gdx_host_free(void* ptr);
+/* Audio modding stage 2 (port/gdx_audio_seq_packs.cpp): mounted-pack sequence overrides. */
+extern int gdx_seq_packs_enabled(void);
+extern int GdxSeqPackResolve(s32 seqId, void* dst, size_t dstCapacity);
+extern int GdxSeqPackGetFont(s32 seqId);
+/* Audio modding stage 3 (port/gdx_audio_sample_packs.cpp): mounted-pack per-sample overrides. */
+extern void GdxSamplePackApply(s32 fontId, s32 bankId, u32 bankOffset, u32 stockSize, void* sample);
+/* Audio modding stage 4 (port/gdx_audio_soundfont_packs.cpp): mounted-pack whole-font overlays. */
+extern int gdx_soundfont_packs_enabled(void);
+extern void GdxSoundfontPackApply(s32 fontId, void* soundFont);
+extern void GdxSoundfontPackTick(void);
+
+/* Optional sequence-pack font sidecar. A cross-bank sequence swap can request its original
+   font by shipping "audio/seq/<name>.font" in the pack. We patch the in-RAM font table so the
+   loader and FONT-command remapper see the override for this seqId, and restore the stock
+   mapping when the sidecar disappears or sequence packs are disabled. */
+static s8 sGdxSeqPackFontOverride[SEQ_MAX];
+static s8 sGdxSeqPackOriginalFont[SEQ_MAX];
+
+static void GdxSeqPack_InitFontOverride(void) {
+    static bool init = false;
+    if (!init) {
+        s32 i;
+        for (i = 0; i < SEQ_MAX; i++) {
+            sGdxSeqPackFontOverride[i] = -1;
+            sGdxSeqPackOriginalFont[i] = -1;
+        }
+        init = true;
+    }
+}
+
+static void GdxSeqPack_ApplyFontOverride(s32 seqId, s32 fontId) {
+    u8* table = gAudioCtx.sequenceFontTable;
+    s32 index;
+
+    GdxSeqPack_InitFontOverride();
+    if (seqId < 0 || seqId >= SEQ_MAX || fontId < 0 || fontId >= FONT_MAX || table == NULL) {
+        return;
+    }
+    index = AUDIO_SEQ_FONT_TABLE_U16(table, seqId);
+    if (table[index] == 0) {
+        return;
+    }
+    if (sGdxSeqPackFontOverride[seqId] < 0) {
+        sGdxSeqPackOriginalFont[seqId] = (s8) table[index + 1];
+    }
+    table[index + 1] = (u8) fontId;
+    sGdxSeqPackFontOverride[seqId] = (s8) fontId;
+}
+
+static void GdxSeqPack_ClearFontOverride(s32 seqId) {
+    u8* table = gAudioCtx.sequenceFontTable;
+    s32 index;
+
+    GdxSeqPack_InitFontOverride();
+    if (seqId < 0 || seqId >= SEQ_MAX || table == NULL || sGdxSeqPackFontOverride[seqId] < 0) {
+        return;
+    }
+    index = AUDIO_SEQ_FONT_TABLE_U16(table, seqId);
+    table[index + 1] = (u8) sGdxSeqPackOriginalFont[seqId];
+    sGdxSeqPackFontOverride[seqId] = -1;
+}
 #endif
 
 s32 D_807C1890;
@@ -593,6 +654,22 @@ s32 AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
 
     AudioSeq_SequencePlayerDisable(seqPlayer);
 
+#ifdef PORT
+    /* Sequence-pack font sidecar: if the pack declares a different font for this seqId, make the
+       loader (and later FONT-command remapping) use it. Otherwise ensure any stale override is
+       cleared so stock mappings are restored after a "Reload packs". */
+    if (gdx_seq_packs_enabled()) {
+        s32 packFontId = GdxSeqPackGetFont(seqId);
+        if (packFontId >= 0) {
+            GdxSeqPack_ApplyFontOverride(seqId, packFontId);
+        } else {
+            GdxSeqPack_ClearFontOverride(seqId);
+        }
+    } else {
+        GdxSeqPack_ClearFontOverride(seqId);
+    }
+#endif
+
     fontId = 0xFF;
     index = AUDIO_SEQ_FONT_TABLE_U16(gAudioCtx.sequenceFontTable, seqId);
     numFonts = gAudioCtx.sequenceFontTable[index++];
@@ -794,6 +871,12 @@ void* AudioLoad_SyncLoad(u32 tableType, u32 id, bool* didAllocate) {
         }
 
         *didAllocate = true;
+#ifdef PORT
+        if (tableType == SEQUENCE_TABLE && gdx_seq_packs_enabled() &&
+            GdxSeqPackResolve(id, ramAddr, size) > 0) {
+            /* Pack bytes already at ramAddr; skip the disk/cart DMA. */
+        } else
+#endif
         if (medium == MEDIUM_LBA) {
             AudioLoad_SyncDiskDrive(romAddr, ramAddr, size, (s16) table->header.diskLba);
         } else {
@@ -1158,6 +1241,28 @@ static Sample* gdx_fontconv_sample(GdxFontConv* conv, u32 offset) {
         gAudioCtx.usedSamples[gAudioCtx.numUsedSamples++] = sample;
     }
 
+#ifdef PORT
+    /* Audio modding stage 3: give mounted packs a chance to rewrite this sample. bankId mirrors
+       the medium switch above — bank1 pairs with origMedium MEDIUM_RAM, bank2 with MEDIUM_LBA
+       (SampleBankRelocInfo's medium1/2 <-> sampleBankId1/2 pairing); device-addressed samples
+       have no bank and are not overridable. stockSize must be read before any rewrite. */
+    {
+        s32 bankId;
+        switch (origMedium) {
+            case MEDIUM_RAM:
+                bankId = conv->reloc->sampleBankId1;
+                break;
+            case MEDIUM_LBA:
+                bankId = conv->reloc->sampleBankId2;
+                break;
+            default:
+                bankId = -1;
+                break;
+        }
+        GdxSamplePackApply(conv->fontId, bankId, rawAddr, sample->size, sample);
+    }
+#endif
+
     gdx_fontconv_remember(conv->samples, &conv->numSamples, offset, sample);
     return sample;
 }
@@ -1248,6 +1353,9 @@ static void gdx_audio_convert_font(s32 fontId, const u8* fontData, SampleBankRel
     gAudioCtx.soundFontList[fontId].drums = drumPtrs;
     gAudioCtx.soundFontList[fontId].soundEffects = sfxArr;
     gAudioCtx.soundFontList[fontId].instruments = instPtrs;
+
+    /* Stage-4 soundfont packs: swap in the mounted-pack overlay graph when present. */
+    GdxSoundfontPackApply(fontId, &gAudioCtx.soundFontList[fontId]);
 }
 #endif /* PORT */
 
@@ -1551,14 +1659,32 @@ void* AudioLoad_AsyncLoadInner(s32 tableType, s32 id, s32 nChunks, s32 retData, 
                 break;
         }
 
-        if (medium == MEDIUM_LBA) {
-            AudioLoad_StartAsyncLoadDiskDrive(table->header.diskLba, devAddr, ramAddr, size, medium, nChunks, retQueue,
-                                              (retData << 0x18) | (tableType << 0x10) | (id << 8) | loadStatus);
-        } else {
-            AudioLoad_StartAsyncLoad(devAddr, ramAddr, size, medium, nChunks, retQueue,
-                                     (retData << 0x18) | (tableType << 0x10) | (realId << 8) | loadStatus);
+#ifdef PORT
+        if (tableType == SEQUENCE_TABLE && gdx_seq_packs_enabled() &&
+            GdxSeqPackResolve(id, ramAddr, size) > 0) {
+            /* Pack bytes already at ramAddr: complete the load exactly as
+               AudioLoad_FinishAsyncLoad would after the final DMA chunk -- same retMsg word
+               layout (retData<<24 | tableType<<16 | id<<8 | loadStatus, LBA side encoding `id`
+               like its DMA branch) sent straight to retQueue -- and skip the DMA kickoff. The
+               status switch below then applies loadStatus (COMPLETE/PERMANENTLY_LOADED) itself,
+               matching FinishAsyncLoad's ASYNC_LOAD_STATUS handling. */
+            osSendMesg(retQueue,
+                       (OSMesg) ((retData << 0x18) | (tableType << 0x10) |
+                                 (((medium == MEDIUM_LBA) ? id : realId) << 8) | loadStatus),
+                       OS_MESG_NOBLOCK);
+        } else
+#endif
+        {
+            if (medium == MEDIUM_LBA) {
+                AudioLoad_StartAsyncLoadDiskDrive(table->header.diskLba, devAddr, ramAddr, size, medium, nChunks,
+                                                  retQueue,
+                                                  (retData << 0x18) | (tableType << 0x10) | (id << 8) | loadStatus);
+            } else {
+                AudioLoad_StartAsyncLoad(devAddr, ramAddr, size, medium, nChunks, retQueue,
+                                         (retData << 0x18) | (tableType << 0x10) | (realId << 8) | loadStatus);
+            }
+            loadStatus = LOAD_STATUS_IN_PROGRESS;
         }
-        loadStatus = LOAD_STATUS_IN_PROGRESS;
     }
 
     switch (tableType) {
@@ -1582,6 +1708,11 @@ void* AudioLoad_AsyncLoadInner(s32 tableType, s32 id, s32 nChunks, s32 retData, 
 }
 
 void AudioLoad_ProcessLoads(s32 resetStatus) {
+#ifdef PORT
+    /* Stage-4 soundfont packs: service "Reload packs" epoch changes at this audio-thread safe
+       point (runs before AudioSynth_Update, under the same thread as the font conversions). */
+    GdxSoundfontPackTick();
+#endif
     AudioLoad_ProcessSlowLoads(resetStatus);
     AudioLoad_ProcessSamplePreloads(resetStatus);
     AudioLoad_ProcessAsyncLoads(resetStatus);

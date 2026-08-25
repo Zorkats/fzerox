@@ -14,6 +14,39 @@
 #include ASSET_HEADER(machine_global_gfx.h)
 #include ASSET_HEADER(machine_models.h)
 
+#ifdef PORT
+extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+
+// Emits the menu's packed 0xRRGGBB effect-color override when set (>= 0), else stock.
+#define GDX_ENV_COLOR_OVERRIDE(cVar, stockR, stockG, stockB, stockA)                                       \
+    do {                                                                                                   \
+        s32 packedEnvColor = CVarGetInteger(cVar, -1);                                                     \
+        if (packedEnvColor >= 0) {                                                                         \
+            gDPSetEnvColor(gfx++, (packedEnvColor >> 16) & 0xFF, (packedEnvColor >> 8) & 0xFF,             \
+                           packedEnvColor & 0xFF, stockA);                                                 \
+        } else {                                                                                           \
+            gDPSetEnvColor(gfx++, stockR, stockG, stockB, stockA);                                         \
+        }                                                                                                  \
+    } while (0)
+
+// Overrides the shadow base color from the same packed 0xRRGGBB CVar when set (>= 0), else stock.
+// The under-machine glow quad uses shadowBaseR/G/B (set when boost begins) and fades via
+// shadowColorStrength, so the override must happen at the trigger site to preserve the fade.
+#define GDX_SHADOW_COLOR_OVERRIDE(cVar, stockR, stockG, stockB)                                            \
+    do {                                                                                                   \
+        s32 packedShadowColor = CVarGetInteger(cVar, -1);                                                  \
+        if (packedShadowColor >= 0) {                                                                      \
+            racer->shadowBaseR = (packedShadowColor >> 16) & 0xFF;                                         \
+            racer->shadowBaseG = (packedShadowColor >> 8) & 0xFF;                                          \
+            racer->shadowBaseB = packedShadowColor & 0xFF;                                                 \
+        } else {                                                                                           \
+            racer->shadowBaseR = stockR;                                                                   \
+            racer->shadowBaseG = stockG;                                                                   \
+            racer->shadowBaseB = stockB;                                                                   \
+        }                                                                                                  \
+    } while (0)
+#endif
+
 s32 gTotalRacers;
 Racer* sLastRacer;
 Racer* sRivalRacer;
@@ -878,6 +911,14 @@ void func_80089800(void) {
     s16 j;
     s32 index0;
     s32 index1;
+#ifdef PORT
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    extern s32 GdxCustomGrid_GetRoster(s32* characters, s32* skins); // port/gdx_custom_grid.h
+    s32 randomOpponentColors = CVarGetInteger("gEnhancements.Gameplay.RandomOpponentColors", 0);
+    s32 customGridCharacters[30];
+    s32 customGridSkins[30];
+    s32 customGridActive = GdxCustomGrid_GetRoster(customGridCharacters, customGridSkins);
+#endif
 
     j = 0;
 
@@ -886,8 +927,31 @@ void func_80089800(void) {
             j++;
         }
         gRacers[i].character = j++;
-        gRacers[i].machineSkinIndex = 0;
+#ifdef PORT
+        // Stock pins every opponent to the default color; VS mode already randomizes
+        // skins (func_80089934), so this extends the same variety to GP/Practice/Death Race.
+        if (randomOpponentColors) {
+            gRacers[i].machineSkinIndex = (Math_Rand1() & 0x1FFFF) % 4;
+        } else
+#endif
+        {
+            gRacers[i].machineSkinIndex = 0;
+        }
     }
+
+#ifdef PORT
+    // Community request F3: a configured custom grid pins slots 1..29 outright, so the stock
+    // shuffle below is bypassed -- it would scatter the handpicked grid order.
+    if (customGridActive) {
+        for (i = 1; i < 30; i++) {
+            gRacers[i].character =
+                (customGridCharacters[i] >= 0) ? customGridCharacters[i] : (Math_Rand1() & 0x1FFFF) % 30;
+            gRacers[i].machineSkinIndex =
+                (customGridSkins[i] >= 0) ? customGridSkins[i] : (Math_Rand2() & 0x1FFFF) % 4;
+        }
+        return;
+    }
+#endif
 
     for (i = 0; i < 28; i++) {
         index0 = (Math_Rand1() & 0x1FFFF) % 29 + 1;
@@ -2039,6 +2103,13 @@ void func_8008D33C(void) {
             gMachines[i] = sDefaultMachines[i];
         }
     }
+#ifdef PORT
+    /* F2 palette editor: rewrites stock-colored slots from the user's override table.
+     * Runs after the fill so custom machines (colored above) are already marked
+     * customType != CUSTOM_MACHINE_DEFAULT and are left alone by the port side. */
+    extern void GdxPalette_ApplyToMachines(void);
+    GdxPalette_ApplyToMachines();
+#endif
 }
 #else
 void func_8008D33C(void);
@@ -2056,6 +2127,11 @@ void func_8008D3C4(s32 character, s32 arg1) {
                                              sCustomMachineInfo[character].decal);
         gSPEndDisplayList(gfx);
 
+#ifdef PORT
+        /* F4a: restore stock LOD buffers for custom machines; model packs are stock-only
+           and any leftover trampoline must not be used as a write buffer. */
+        { extern void GdxModelPacks_BeginMachineDraw(s32 slot); GdxModelPacks_BeginMachineDraw(arg1); }
+#endif
         for (i = 4; i >= 0; i--) {
             gfx = Machine_DrawCustom(D_800CDDB0[arg1 * 6 + i], i, sCustomMachineInfo[character].frontType,
                                      sCustomMachineInfo[character].rearType, sCustomMachineInfo[character].wingType,
@@ -2078,10 +2154,21 @@ void func_8008D3C4(s32 character, s32 arg1) {
     gfx = sMachineLoadTexturesFuncs[character](D_800CDD38[arg1]);
     gSPEndDisplayList(gfx);
 
+#ifdef PORT
+    /* F4a: keep the stock LOD buffers live while the machine-draw functions write
+       into them; the override below will repoint at the pack trampoline afterwards. */
+    { extern void GdxModelPacks_BeginMachineDraw(s32 slot); GdxModelPacks_BeginMachineDraw(arg1); }
+#endif
     for (i = 4; i >= 0; i--) {
         gfx = sMachineDrawFuncs[character][i](D_800CDDB0[arg1 * 6 + i]);
         gSPEndDisplayList(gfx);
     }
+#ifdef PORT
+    /* F4a: repoint stock LOD lists at workshop pack models when enabled; declared inline
+       rather than #include'd: decomp/ compiles without port/ include paths. character is
+       the post-remap effective index (super machines resolved). No-op when off. */
+    { extern void GdxModelPacks_OverrideMachineLodLists(s32 character, s32 slot); GdxModelPacks_OverrideMachineLodLists(character, arg1); }
+#endif
 }
 
 void func_8008D5F4(MachineInfo* machineInfo, s32 arg1) {
@@ -2095,6 +2182,11 @@ void func_8008D5F4(MachineInfo* machineInfo, s32 arg1) {
                                              machineInfo->decal);
         gSPEndDisplayList(gfx);
 
+#ifdef PORT
+        /* F4a: restore stock LOD buffers for custom machines; model packs are stock-only
+           and any leftover trampoline must not be used as a write buffer. */
+        { extern void GdxModelPacks_BeginMachineDraw(s32 slot); GdxModelPacks_BeginMachineDraw(arg1); }
+#endif
         for (i = 4; i >= 0; i--) {
             gfx =
                 Machine_DrawCustom(D_800CDDB0[arg1 * 6 + i], i, machineInfo->frontType, machineInfo->rearType,
@@ -2115,10 +2207,19 @@ void func_8008D5F4(MachineInfo* machineInfo, s32 arg1) {
     gfx = sMachineLoadTexturesFuncs[var_v1](D_800CDD38[arg1]);
     gSPEndDisplayList(gfx);
 
+#ifdef PORT
+    /* F4a: keep the stock LOD buffers live while the machine-draw functions write
+       into them; the override below will repoint at the pack trampoline afterwards. */
+    { extern void GdxModelPacks_BeginMachineDraw(s32 slot); GdxModelPacks_BeginMachineDraw(arg1); }
+#endif
     for (i = 4; i >= 0; i--) {
         gfx = sMachineDrawFuncs[var_v1][i](D_800CDDB0[arg1 * 6 + i]);
         gSPEndDisplayList(gfx);
     }
+#ifdef PORT
+    /* F4a hook, see func_8008D3C4. */
+    { extern void GdxModelPacks_OverrideMachineLodLists(s32 character, s32 slot); GdxModelPacks_OverrideMachineLodLists(var_v1, arg1); }
+#endif
 }
 
 void func_8008D7E8(void) {
@@ -2177,10 +2278,20 @@ void func_8008D97C(void) {
         index = i;
         gfx = sMachineLoadTexturesFuncs[index](D_800CDD38[i]);
         gSPEndDisplayList(gfx);
+
+#ifdef PORT
+        /* F4a: keep the stock LOD buffers live while the machine-draw functions write
+           into them; the override below will repoint at the pack trampoline afterwards. */
+        { extern void GdxModelPacks_BeginMachineDraw(s32 slot); GdxModelPacks_BeginMachineDraw(i); }
+#endif
         for (j = 4; j >= 0; j--) {
             gfx = sMachineDrawFuncs[index][j](D_800CDDB0[i * 6 + j]);
             gSPEndDisplayList(gfx);
         }
+#ifdef PORT
+        /* F4a hook, see func_8008D3C4. */
+        { extern void GdxModelPacks_OverrideMachineLodLists(s32 character, s32 slot); GdxModelPacks_OverrideMachineLodLists(index, i); }
+#endif
     }
 }
 
@@ -3612,8 +3723,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
     if ((buttonPressed & BTN_B) && (racer->boostTimer == 0) && (racer->energy != 0.0) &&
         (racer->stateFlags & RACER_STATE_CAN_BOOST)) {
         racer->shadowColorStrength = 1.3f;
+#ifdef PORT
+        GDX_SHADOW_COLOR_OVERRIDE("gEnhancements.Gameplay.BoostColor", 91.0f, 255.0f, 91.0f);
+#else
         racer->shadowBaseR = racer->shadowBaseB = 91.0f;
         racer->shadowBaseG = 255.0f;
+#endif
         racer->boostTimer = sInitialBoostTimer;
 #ifdef PORT
         /* Fired after the stock assignment so a listener (e.g. Tuning.BoostDuration) receives
@@ -3636,9 +3751,13 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
 #endif
             buttonCurrent |= BTN_A;
             racer->shadowColorStrength = 1.3f;
+#ifdef PORT
+            GDX_SHADOW_COLOR_OVERRIDE("gEnhancements.Gameplay.DashPadColor", 255.0f, 223.0f, 0.0f);
+#else
             racer->shadowBaseR = 255.0f;
             racer->shadowBaseG = 223.0f;
             racer->shadowBaseB = 0.0f;
+#endif
             racer->stateFlags |= RACER_STATE_DASH_PAD_BOOST;
             racer->boostTimer = sInitialBoostTimer;
             if (!(racer->soundEffectFlags & RACER_SE_FLAGS_BOOST)) {
@@ -4334,6 +4453,13 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                             (s32) ((50.0f * racer->lapDistance) / (3.0f * (gCurrentCourseInfo->length - sp128)));
                         racer->lapTimes[racer->lap - 2] = (s32) (i - racer->completedLapsTime);
                         racer->completedLapsTime = i;
+#ifdef PORT
+                        /* Announces the completed lap with the post-increment lap counter, so a
+                           listener sees the same value the game just committed. Declared inline:
+                           gdiffuser_game compiles decomp/ without port/ include paths. No-op with
+                           no listeners attached. */
+                        { extern void GameEvents_FireOnLapCompleted(s32 racerId, s32 lap); GameEvents_FireOnLapCompleted(racer->id, racer->lap); }
+#endif
                         racer->startNewPracticeLap = true;
 #ifndef EXPANSION_KIT
                         if ((gGameMode == GAMEMODE_PRACTICE) || (gGameMode == GAMEMODE_DEATH_RACE)) {
@@ -4354,6 +4480,13 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                         } else if (racer->lap == (gTotalLapCount + 1)) {
                             racer->raceTime = i;
                             racer->stateFlags |= RACER_STATE_FINISHED | RACER_STATE_CPU_CONTROLLED;
+#ifdef PORT
+                            /* Position is gRacersFinished + 1: the game increments its finished
+                               counter a few lines below. Declared inline: gdiffuser_game compiles
+                               decomp/ without port/ include paths. No-op with no listeners
+                               attached. */
+                            { extern void GameEvents_FireOnRaceFinish(s32 racerId, s32 raceTime, s32 position); GameEvents_FireOnRaceFinish(racer->id, racer->raceTime, gRacersFinished + 1); }
+#endif
                             racer->energy = racer->maxEnergy;
 
                             if (racer->id < gNumPlayers) {
@@ -4786,9 +4919,25 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
             racer->attackHighlightB = 0;
         } else if (racer->attackState == ATTACK_STATE_SIDE) {
             racer->attackHighlightScale = 1.075f;
+#ifdef PORT
+            {
+                s32 packedSideAttack = CVarGetInteger("gEnhancements.Gameplay.SideAttackColor", -1);
+
+                if (packedSideAttack >= 0) {
+                    racer->attackHighlightR = (packedSideAttack >> 16) & 0xFF;
+                    racer->attackHighlightG = (packedSideAttack >> 8) & 0xFF;
+                    racer->attackHighlightB = packedSideAttack & 0xFF;
+                } else {
+                    racer->attackHighlightR = 255;
+                    racer->attackHighlightG = 0;
+                    racer->attackHighlightB = 0;
+                }
+            }
+#else
             racer->attackHighlightR = 255;
             racer->attackHighlightG = 0;
             racer->attackHighlightB = 0;
+#endif
         } else {
             racer->attackHighlightScale = 0.0f;
         }
@@ -4835,9 +4984,13 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
     } else if ((D_800F80A4 == racer->unk_17C) && (controller->buttonCurrent != 0) && (gRaceIntroTimer < 250)) {
         racer->stateFlags &= ~RACER_STATE_FLAGS_8000;
         racer->shadowColorStrength = 1.3f;
+#ifdef PORT
+        GDX_SHADOW_COLOR_OVERRIDE("gEnhancements.Gameplay.BoostIdleColor", 0.0f, 205.0f, 255.0f);
+#else
         racer->shadowBaseR = 0.0f;
         racer->shadowBaseG = 205.0f;
         racer->shadowBaseB = 255.0f;
+#endif
         if (racer->id < gNumPlayers) {
 #ifdef EXPANSION_KIT
             func_800BAE5C(racer->id);
@@ -5026,6 +5179,13 @@ void Racer_Update(void) {
                     for (racer = sLastRacer; racer >= gRacers; racer--) {
                         racer->stateFlags |= RACER_STATE_FLAGS_400000;
                     }
+#ifdef PORT
+                    /* Fires exactly once at GO, after every racer is armed. Under EXPANSION_KIT
+                       this block only runs on the pass where the disk-retry above let the
+                       countdown continue. Declared inline: gdiffuser_game compiles decomp/
+                       without port/ include paths. No-op with no listeners attached. */
+                    { extern void GameEvents_FireOnRaceStart(void); GameEvents_FireOnRaceStart(); }
+#endif
 #ifdef EXPANSION_KIT
                 }
 #endif
@@ -6105,12 +6265,24 @@ block_115:
         if (temp_fs0 != 0) {
             sp574 += (7.5f * sqrtf(temp_fs0));
             if (racer->stateFlags & RACER_STATE_DASH_PAD_BOOST) {
+#ifdef PORT
+                GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.DashPadColor", 255, 223, 0, 255);
+#else
                 gDPSetEnvColor(gfx++, 255, 223, 0, 255);
+#endif
             } else {
+#ifdef PORT
+                GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.BoostColor", 91, 255, 91, 255);
+#else
                 gDPSetEnvColor(gfx++, 91, 255, 91, 255);
+#endif
             }
         } else {
+#ifdef PORT
+            GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.BoostIdleColor", 0, 255, 255, 255);
+#else
             gDPSetEnvColor(gfx++, 0, 255, 255, 255);
+#endif
         }
 
         sp570 = (racer->unk_17C - D_800F80A4) / (13.0f - D_800F80A4);
@@ -6215,7 +6387,11 @@ block_115:
     }
     if (gGameMode == GAMEMODE_TIME_ATTACK) {
         gDPPipeSync(gfx++);
+#ifdef PORT
+        GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.GhostBoostColor", 255, 0, 255, 160);
+#else
         gDPSetEnvColor(gfx++, 255, 0, 255, 160);
+#endif
 
         for (sp4F8 = &gGhostRacers[2]; sp4F8 >= gGhostRacers; sp4F8--) {
             if (!sp4F8->exists) {

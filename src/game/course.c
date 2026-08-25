@@ -2660,6 +2660,11 @@ extern s32 gRandSeed1;
 extern s32 gRandMask1;
 extern s32 gRandSeed2;
 extern s32 gRandMask2;
+#ifdef PORT
+/* port/gdx_xcup_seed.c — M3 shareable X Cup seed codes. */
+extern int gdx_xcup_consume_pending_seed(s32* seed1, s32* mask1, s32* seed2, s32* mask2);
+extern void gdx_xcup_note_seed_captured(void);
+#endif
 extern s8 gTitleDemoState;
 extern s32 gGameMode;
 
@@ -2698,10 +2703,28 @@ void Course_GenerateRandomCourse(void) {
         Math_Rand2Init(sRandomCourseInitSeed2, sRandomCourseInitMask2);
     }
     gLastRandomCourseIndex = gCourseIndex;
+#ifdef PORT
+    /* M3 X Cup seed codes: a queued share-code seed wins over both the fresh RNG state and the
+       re-do restore above; the capture block below then saves IT, so re-doing the course
+       reproduces the coded track. One-shot — consumed by the call. */
+    {
+        s32 pendingSeed1;
+        s32 pendingMask1;
+        s32 pendingSeed2;
+        s32 pendingMask2;
+        if (gdx_xcup_consume_pending_seed(&pendingSeed1, &pendingMask1, &pendingSeed2, &pendingMask2)) {
+            Math_Rand1Init(pendingSeed1, pendingMask1);
+            Math_Rand2Init(pendingSeed2, pendingMask2);
+        }
+    }
+#endif
     sRandomCourseInitSeed1 = gRandSeed1;
     sRandomCourseInitMask1 = gRandMask1;
     sRandomCourseInitSeed2 = gRandSeed2;
     sRandomCourseInitMask2 = gRandMask2;
+#ifdef PORT
+    gdx_xcup_note_seed_captured();
+#endif
     do {
     loop_start:
         do {

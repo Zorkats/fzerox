@@ -1159,6 +1159,12 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
     f32 temp3;
     Racer* sp44;
     Racer* sp40;
+#ifdef PORT
+    // Community request F5: AiAggression (percent) scales the combat probabilities below;
+    // past 100% it also drops the EXPERT-only gates. 100 is bit-identical to stock.
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    f32 aiAggressionScale = CVarGetInteger("gEnhancements.Gameplay.AiAggression", 100) / 100.0f;
+#endif
 
     if ((racer->id & 3) != (gGameFrameCount % 4) && (gGameMode != GAMEMODE_GP_END_CS)) {
         controller->buttonReleased = 0;
@@ -1290,8 +1296,13 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                 spB4 = ((f32) (Math_Rand1() % 32768) / 32767.0f) + 0.00001f;
 
                 if (func_i3_fabsf(gRacers[racer->unk_352].unk_33C - racer->unk_33C) < 92.0f) {
+#ifdef PORT
+                    if (((racer->unk_352 != 0) && (spB4 < 0.15f * aiAggressionScale) && (racer->awarenessFlags & 0x200)) ||
+                        (spB4 < racer->unk_360 * aiAggressionScale)) {
+#else
                     if (((racer->unk_352 != 0) && (spB4 < 0.15f) && (racer->awarenessFlags & 0x200)) ||
                         (spB4 < racer->unk_360)) {
+#endif
                         if (racer->driftingCounter == 0) {
                             if (racer->unk_33C < gRacers[racer->unk_352].unk_33C) {
                                 racer->driftingCounter = 5;
@@ -1299,10 +1310,19 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                                 racer->driftingCounter = -5;
                             }
                         }
+#ifdef PORT
+                    } else if ((((racer->unk_352 != 0) && (spB4 < 0.2f * aiAggressionScale) &&
+                                 (racer->awarenessFlags & 0x200)) ||
+                                (spB4 < racer->unk_364 * aiAggressionScale)) &&
+                               ((((gDifficulty >= EXPERT) || (aiAggressionScale > 1.0f)) &&
+                                 (sPlayerRacer->raceDistance < racer->raceDistance)) ||
+                                ((sPlayerRacer->raceDistance + 138.0f) < racer->raceDistance))) {
+#else
                     } else if ((((racer->unk_352 != 0) && (spB4 < 0.2f) && (racer->awarenessFlags & 0x200)) ||
                                 (spB4 < racer->unk_364)) &&
                                (((gDifficulty >= EXPERT) && (sPlayerRacer->raceDistance < racer->raceDistance)) ||
                                 ((sPlayerRacer->raceDistance + 138.0f) < racer->raceDistance))) {
+#endif
                         if (Math_Rand2() % 2) {
                             controller->buttonPressed |= BTN_R_Z_COMBO;
                         } else {
@@ -1572,12 +1592,22 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
         controller->stickX = (var_a3 * 5) / 8;
         controller->stickY = var_a1;
         if (gNumPlayers == 1) {
+#ifdef PORT
+            if (sp70 && (racer->raceTime > 1000) && ((gDifficulty >= EXPERT) || (aiAggressionScale > 1.0f)) &&
+                (racer->id != 0) && (gTotalRacers != 1) && (racer->awarenessFlags & 0x200)) {
+                if ((racer->distanceFromRacerBehind < 23.0f) &&
+                    ((((gDifficulty >= EXPERT) || (aiAggressionScale > 1.0f)) &&
+                      (sPlayerRacer->raceDistance < racer->raceDistance)) ||
+                     ((sPlayerRacer->raceDistance + 138.0f) < racer->raceDistance)) &&
+                    ((Math_Rand2() % 32768) < (s32) (16 * aiAggressionScale))) {
+#else
             if (sp70 && (racer->raceTime > 1000) && (gDifficulty >= EXPERT) && (racer->id != 0) &&
                 (gTotalRacers != 1) && (racer->awarenessFlags & 0x200)) {
                 if ((racer->distanceFromRacerBehind < 23.0f) &&
                     (((gDifficulty >= EXPERT) && (sPlayerRacer->raceDistance < racer->raceDistance)) ||
                      ((sPlayerRacer->raceDistance + 138.0f) < racer->raceDistance)) &&
                     ((Math_Rand2() % 32768) < 16)) {
+#endif
                     if (Math_Rand2() % 2) {
                         controller->buttonPressed |= BTN_R_Z_COMBO;
                     } else {

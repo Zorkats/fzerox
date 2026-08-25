@@ -1,6 +1,11 @@
 #include "global.h"
 #include "audio.h"
 #include "fzx_thread.h"
+#ifdef PORT
+/* Audio modding stage 2 (port/gdx_audio_seq_packs.cpp): mounted-pack sequence overrides. */
+extern int gdx_seq_packs_enabled(void);
+extern int GdxSeqPackResolve(s32 seqId, void* dst, size_t dstCapacity);
+#endif
 
 AudioSlowLoadBuffer gSlowLoads;
 UNUSED s32 D_800F8AB4;
@@ -595,6 +600,12 @@ void* AudioLoad_SyncLoad(u32 tableType, u32 id, bool* didAllocate) {
         }
 
         *didAllocate = true;
+#ifdef PORT
+        if (tableType == SEQUENCE_TABLE && gdx_seq_packs_enabled() &&
+            GdxSeqPackResolve(id, ramAddr, size) > 0) {
+            /* Pack bytes already at ramAddr; skip the disk/cart DMA. */
+        } else
+#endif
         if (medium == MEDIUM_LBA) {
             AudioLoad_SyncDiskDrive(romAddr, ramAddr, size, table->header.diskLba);
         } else {
@@ -842,9 +853,24 @@ void* AudioLoad_AsyncLoadInner(s32 tableType, s32 id, s32 nChunks, s32 retData, 
                 }
                 break;
         }
-        AudioLoad_StartAsyncLoad(romAddr, ramAddr, size, medium, nChunks, retQueue,
-                                 (retData << 0x18) | (tableType << 0x10) | (id << 8) | loadStatus);
-        loadStatus = LOAD_STATUS_IN_PROGRESS;
+#ifdef PORT
+        if (tableType == SEQUENCE_TABLE && gdx_seq_packs_enabled() &&
+            GdxSeqPackResolve(id, ramAddr, size) > 0) {
+            /* Pack bytes already at ramAddr: complete the load exactly as
+               AudioLoad_FinishAsyncLoad would after the final DMA chunk -- same retMsg word
+               layout (retData<<24 | tableType<<16 | id<<8 | loadStatus) sent straight to
+               retQueue -- and skip the DMA kickoff. The status switch below then applies
+               loadStatus (COMPLETE/PERMANENTLY_LOADED) itself, matching FinishAsyncLoad's
+               ASYNC_LOAD_STATUS handling. */
+            osSendMesg(retQueue, (OSMesg) ((retData << 0x18) | (tableType << 0x10) | (id << 8) | loadStatus),
+                       OS_MESG_NOBLOCK);
+        } else
+#endif
+        {
+            AudioLoad_StartAsyncLoad(romAddr, ramAddr, size, medium, nChunks, retQueue,
+                                     (retData << 0x18) | (tableType << 0x10) | (id << 8) | loadStatus);
+            loadStatus = LOAD_STATUS_IN_PROGRESS;
+        }
     }
     switch (tableType) {
         case SEQUENCE_TABLE:

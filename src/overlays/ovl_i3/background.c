@@ -472,6 +472,13 @@ void Background_Init(void) {
     D_800CD510 = false;
     sBackgroundCtx.venueFloor = sCourseVenueFloors[gVenueType];
     sBackgroundCtx.skybox = sCourseSkyboxes[gSkyboxType];
+#ifdef PORT
+    // VENUE_ENDING is the GP ending ceremony venue: force its night sky so Course Edit tracks
+    // using BG 11 render the ceremony's actual appearance rather than the editor's skybox choice.
+    if (gVenueType == VENUE_ENDING) {
+        sBackgroundCtx.skybox = &sSkyboxNight;
+    }
+#endif
     sSkyboxFlags = sBackgroundCtx.skybox->flags;
 
     i = Math_Rand1() % 11;
@@ -1072,6 +1079,25 @@ Gfx* Background_Draw(Gfx* gfx, s32 cameraIndex, s32 scissorBoxType) {
 
     skybox = sBackgroundCtx.skybox;
 
+    // [bg-draw] Trace background DL source address changes. Flicker from a moving source
+    // (arena reuse, segment rebind, or double-buffer flip) shows up here immediately.
+    {
+        extern void gdx_cki(const char* s, int v);
+        static TexturePtr sPrevSkyboxTex = NULL;
+        static TexturePtr sPrevFloorTex = NULL;
+        static s32 sPrevSpriteCount = -1;
+
+        if (sSkyboxTexture != sPrevSkyboxTex || sVenueFloorTexture != sPrevFloorTex ||
+            sBackgroundSpriteCount != sPrevSpriteCount) {
+            gdx_cki("[bg-draw] source change skybox low32", (s32)(uintptr_t)sSkyboxTexture);
+            gdx_cki("[bg-draw] source change floor low32", (s32)(uintptr_t)sVenueFloorTexture);
+            gdx_cki("[bg-draw] source change sprite count", sBackgroundSpriteCount);
+            sPrevSkyboxTex = sSkyboxTexture;
+            sPrevFloorTex = sVenueFloorTexture;
+            sPrevSpriteCount = sBackgroundSpriteCount;
+        }
+    }
+
     gSPPerspNormalize(gfx++, camera->perspectiveScale);
 
     gSPMatrix(gfx++, &D_1000000.unk_20208[cameraIndex], G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
@@ -1166,7 +1192,7 @@ void Background_InitBackgroundSprites(void) {
     }
 
 #ifdef EXPANSION_KIT
-    if (gInCourseEditTestRun) {
+    if (gInCourseEditTestRun && (gVenueType != VENUE_ENDING)) {
         return;
     }
 #endif
@@ -1195,16 +1221,16 @@ void Background_InitBackgroundSprites(void) {
         bgSpriteInitData->spriteId = BG_SPRITE_END;
         bgSpriteInitData->angle = 0.0f;
         bgSpriteInitData = spriteInitDataBuffer;
-    } else if (gCourseIndex != COURSE_ENDING) {
-        return;
-    } else { // COURSE_ENDING
-        // FAKE
-        if (1) {
-            bgSpriteInitData = sBackgroundSpriteInitEnding;
-        }
+    } else if (gCourseIndex == COURSE_ENDING) {
+        bgSpriteInitData = sBackgroundSpriteInitEnding;
         if (gPlayer1OverallPosition >= 4) {
             return;
         }
+    } else if (gVenueType == VENUE_ENDING) {
+        // Course Edit custom tracks using the ending venue get the ceremony skyline.
+        bgSpriteInitData = sBackgroundSpriteInitEnding;
+    } else {
+        return;
     }
 
     backgroundSprite = sBackgroundSprites;

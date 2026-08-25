@@ -126,6 +126,12 @@ extern Camera gCameras[];
 extern s32 gSelectedMode;
 extern s32 gCupType;
 extern char gEditCupTrackNames[][9];
+extern s8 sCourseSelectTrackNo;
+extern s32 sCourseSelectCup;
+extern s32 gCourseIndex;
+extern u32 gGameFrameCount;
+extern void gdx_cki(const char* s, int v);
+extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
 
 // Track 3D Models
 Gfx* func_i5_80115E64(Gfx* gfx) {
@@ -169,10 +175,41 @@ Gfx* func_i5_80115E64(Gfx* gfx) {
     gSPMatrix(gfx++, K0_TO_PHYS(gGfxPool->unk_20308), G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
 
     if (D_i5_801190B4 < 6) {
+#ifdef PORT
+        if (sCourseSelectTrackNo == 5) {
+            gdx_cki("[GDX cupsel preview] trackNo", sCourseSelectTrackNo);
+            gdx_cki("[GDX cupsel preview] cupType", sCourseSelectCup);
+            gdx_cki("[GDX cupsel preview] courseIndex", gCourseIndex);
+            gdx_cki("[GDX cupsel preview] cupCourseNo", gCourseModelCupCourseNo);
+            gdx_cki("[GDX cupsel preview] loadTimer", D_i5_801190B4);
+        }
+#endif
         for (i = 0; i < gCourseModelCupCourseNo; i++) {
 #ifdef EXPANSION_KIT
             if ((gCupType == EDIT_CUP) && (gSelectedMode == MODE_TIME_ATTACK) && (gEditCupTrackNames[i][0] == '\0')) {
                 continue;
+            }
+#endif
+#ifdef PORT
+            if (sCourseSelectTrackNo == 5) {
+                gdx_cki("[GDX cupsel preview] viewport i", i);
+                gdx_cki("[GDX cupsel preview] viewport vtrans0", D_i5_80118FF0[D_800DCCFC][i].vp.vtrans[0]);
+                gdx_cki("[GDX cupsel preview] viewport vscale0", D_i5_80118FF0[D_800DCCFC][i].vp.vscale[0]);
+                gdx_cki("[GDX cupsel preview] course idx", gCourseModelCupType * 6 + i);
+                gdx_cki("[GDX cupsel preview] vtx count", D_801197B0[i]);
+            }
+            {
+                // The N64 clips viewports that land fully outside the 320px screen; the PC
+                // backend does not, so at course 6 the cup's first-course preview (vtrans
+                // ~ -5760) leaks in as a stray overlay. Skip viewports that can produce zero
+                // on-screen pixels. Disable if widescreen carousel previews pop at the edges.
+                s32 vtrans = D_i5_80118FF0[D_800DCCFC][i].vp.vtrans[0];
+                s32 vscale = D_i5_80118FF0[D_800DCCFC][i].vp.vscale[0];
+
+                if (CVarGetInteger("gEnhancements.Graphics.CourseSelectClipOffscreen", 1) &&
+                    ((vtrans + vscale) <= 0 || (vtrans - vscale) >= 1280)) {
+                    continue;
+                }
             }
 #endif
             gSPViewport(gfx++, &D_i5_80118FF0[D_800DCCFC][i]);
@@ -216,6 +253,11 @@ void func_i5_801161D8(void) {
 void func_i5_801164A8(s32 left) {
     s32 i;
 
+#ifdef PORT
+    if (sCourseSelectTrackNo == 5) {
+        gdx_cki("[GDX cupsel preview] model left", left);
+    }
+#endif
     for (i = 0; i < 6; i++) {
         Vp* vp = &D_i5_80118FF0[D_800DCCFC][i];
 

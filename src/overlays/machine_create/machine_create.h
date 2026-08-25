@@ -62,4 +62,9 @@ typedef enum MachineStatValue {
 
 extern s32 gWorksMachineMode;
 
+#ifdef PORT
+extern s32 gMachineCreateCursorX;
+extern s32 gMachineCreateCursorY;
+#endif // PORT
+
 #endif // MACHINE_CREATE_H

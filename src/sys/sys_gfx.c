@@ -823,6 +823,13 @@ void Game_ThreadEntry(void* entry) {
                 func_80067E98();
                 break;
         }
+#ifdef PORT
+        /* Announces one game-thread frame to the port's event bus. Declared inline rather than
+           #include'd: gdiffuser_game compiles decomp/ with only the decomp include paths, so no
+           port/ header is reachable here (same idiom as racer.c's OnBoostStart site). No-op with
+           no listeners attached. */
+        { extern void GameEvents_FireOnFrame(void); GameEvents_FireOnFrame(); }
+#endif
         gGameFrameCount++;
     }
 }

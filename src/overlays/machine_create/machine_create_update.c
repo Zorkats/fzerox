@@ -7,6 +7,10 @@
 
 s32 D_xk3_80140E50;
 s32 D_xk3_80140E54;
+#ifdef PORT
+s32 gMachineCreateCursorX = 160;
+s32 gMachineCreateCursorY = 120;
+#endif
 f32 D_xk3_80140E58;
 
 unk_80140E60 D_xk3_80140E60;
@@ -33,6 +37,205 @@ u8 D_xk3_80136548 = false;
 u8 D_xk3_8013654C = false;
 s32 D_xk3_80136550 = 0;
 s32 D_xk3_80136554 = 0;
+
+#ifdef PORT
+// Absolute mouse drive (port/gdx_course_edit_mouse.cpp): shared CVar with Course Edit, returns 1
+// with the cursor in 320x240 game space when mouse control is active.
+extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+extern int gdx_course_edit_mouse_wheel(void);
+
+extern s32 D_xk1_80032BE8;
+extern s32 D_xk1_80032BEC;
+extern s32 D_xk1_80032BDC;
+extern s32 D_xk1_8003A5D0;
+
+static s32 MachineCreate_ApplyMouseDrive(void) {
+    s32 mouseX;
+    s32 mouseY;
+    s32 index;
+
+    if (!gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+        return 0;
+    }
+
+    gMachineCreateCursorX = mouseX;
+    gMachineCreateCursorY = mouseY;
+
+    switch (gWorksMachineMode) {
+        case MACHINE_MODE_0: {
+            index = (mouseX - 24) / 48;
+            if (index < 0) {
+                index = 0;
+            } else if (index > 5) {
+                index = 5;
+            }
+            D_xk3_80136550 = index;
+            D_xk3_80140E50 = mouseX;
+            D_xk3_80140E54 = 0x1C;
+            break;
+        }
+        case MACHINE_MODE_MENU: {
+            index = (mouseY - 0x24) / 16;
+            if (index < 0) {
+                index = 0;
+            } else if (index > 2) {
+                index = 2;
+            }
+            D_xk3_80136554 = index;
+            D_xk3_80140E50 = mouseX;
+            D_xk3_80140E54 = 0x24 + (index * 16);
+            break;
+        }
+        case MACHINE_MODE_MENU_COLOR:
+        case MACHINE_MODE_SELECT_LINE:
+        case MACHINE_MODE_SELECT_MARK: {
+            index = (mouseY - 0x34) / 16;
+            if (index < 0) {
+                index = 0;
+            } else if (index > 7) {
+                index = 7;
+            }
+            D_xk3_80136554 = index;
+            D_xk3_80140E50 = mouseX;
+            D_xk3_80140E54 = 0x34 + (index * 16);
+            break;
+        }
+        case MACHINE_MODE_PARTS: {
+            s32 col = (mouseX - 23) / 39;
+            s32 row = (mouseY - 40) / 37;
+
+            if (col < 0) {
+                col = 0;
+            } else if (col > 6) {
+                col = 6;
+            }
+            if (mouseX >= 264 && mouseX <= 296 && mouseY >= 155 && mouseY <= 171) {
+                D_xk3_80140E60.unk_00 = 0;
+                D_xk3_80140E60.unk_04 = 3;
+                break;
+            }
+            if (row < 0) {
+                row = 0;
+            } else if (row > 2) {
+                row = 2;
+            }
+            D_xk3_80140E60.unk_00 = col;
+            D_xk3_80140E60.unk_04 = row;
+            break;
+        }
+        case MACHINE_MODE_SETTING: {
+            s32 col = (mouseX - 163) / 26;
+            s32 row = (mouseY - 41) / 19;
+
+            if (col < 0) {
+                col = 0;
+            } else if (col > 4) {
+                col = 4;
+            }
+            if (mouseX >= 259 && mouseX <= 291 && mouseY >= 98 && mouseY <= 114) {
+                D_xk3_80140E70.unk_00 = 0;
+                D_xk3_80140E70.unk_04 = 3;
+                break;
+            }
+            if (row < 0) {
+                row = 0;
+            } else if (row > 2) {
+                row = 2;
+            }
+            D_xk3_80140E70.unk_00 = col;
+            D_xk3_80140E70.unk_04 = row;
+            break;
+        }
+        case MACHINE_MODE_BODY_COLOR:
+        case MACHINE_MODE_LINE_COLOR:
+        case MACHINE_MODE_NUMBER_COLOR:
+        case MACHINE_MODE_COCKPIT_COLOR: {
+            s32 col = (mouseX - 168) / 15;
+            s32 row = (mouseY - 44) / 15;
+
+            if (col < 0) {
+                col = 0;
+            } else if (col > 7) {
+                col = 7;
+            }
+            if (mouseX >= 257 && mouseX <= 289 && mouseY >= 165 && mouseY <= 181) {
+                D_xk3_80140E68.unk_00 = 0;
+                D_xk3_80140E68.unk_04 = 8;
+                break;
+            }
+            if (row < 0) {
+                row = 0;
+            } else if (row > 7) {
+                row = 7;
+            }
+            D_xk3_80140E68.unk_00 = col;
+            D_xk3_80140E68.unk_04 = row;
+            break;
+        }
+        case MACHINE_MODE_LOAD_SELECT_FILE:
+        case MACHINE_MODE_LOAD_SELECT_SUPER:
+        case MACHINE_MODE_DELETE_SELECT_FILE:
+        case MACHINE_MODE_ENTRY_SELECT_FILE:
+        case MACHINE_MODE_ENTRY_SELECT_SUPER:
+        case MACHINE_MODE_ENTRY_CLEAR_SELECT_FILE:
+        case MACHINE_MODE_ENTRY_CLEAR_SELECT_SUPER: {
+            s32 top = D_xk1_80032BE8;
+            s32 fileIndex = (mouseY - top + D_xk1_80032BEC) / 8;
+            s32 count = D_xk1_8003A5D0;
+
+            if (count <= 0) {
+                break;
+            }
+            if (fileIndex < 0) {
+                fileIndex = 0;
+            } else if (fileIndex >= count) {
+                fileIndex = count - 1;
+            }
+            D_xk1_80032BDC = fileIndex;
+            if (count > 13) {
+                s32 firstVisible = D_xk1_80032BEC / 8;
+
+                if (fileIndex >= firstVisible + 13) {
+                    D_xk1_80032BEC = (fileIndex - 12) * 8;
+                } else if (fileIndex < firstVisible) {
+                    D_xk1_80032BEC = fileIndex * 8;
+                }
+            }
+            {
+                s32 wheel = gdx_course_edit_mouse_wheel();
+
+                if (wheel != 0) {
+                    s32 newIndex = D_xk1_80032BDC + wheel;
+
+                    if (newIndex < 0) {
+                        newIndex = 0;
+                    } else if (newIndex >= count) {
+                        newIndex = count - 1;
+                    }
+                    if (newIndex != D_xk1_80032BDC) {
+                        D_xk1_80032BDC = newIndex;
+                        if (count > 13) {
+                            s32 firstVisible = D_xk1_80032BEC / 8;
+
+                            if (newIndex >= firstVisible + 13) {
+                                D_xk1_80032BEC = (newIndex - 12) * 8;
+                            } else if (newIndex < firstVisible) {
+                                D_xk1_80032BEC = newIndex * 8;
+                            }
+                        }
+                    }
+                }
+            }
+            D_xk3_80140E50 = mouseX;
+            D_xk3_80140E54 = mouseY;
+            break;
+        }
+        default:
+            return 0;
+    }
+    return 1;
+}
+#endif
 
 void func_xk3_8012B950(void) {
     D_xk3_80140E54 = 0x57;
@@ -137,6 +340,11 @@ extern s32 D_xk3_80140E50;
 extern s32 D_xk3_80140E54;
 
 void func_xk3_8012BD84(void) {
+#ifdef PORT
+    s32 mouseDriven = MachineCreate_ApplyMouseDrive();
+#else
+    s32 mouseDriven = 0;
+#endif
 
     switch (gWorksMachineMode) {
         case MACHINE_MODE_BODY_COLOR:
@@ -147,10 +355,12 @@ void func_xk3_8012BD84(void) {
             s32 sp30 = D_xk3_80140E68.unk_04;
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            if (D_xk3_80140E68.unk_04 != 8) {
-                func_xk1_8002DAE0(&D_xk3_80140E68, 7, 1);
+            if (!mouseDriven) {
+                if (D_xk3_80140E68.unk_04 != 8) {
+                    func_xk1_8002DAE0(&D_xk3_80140E68, 7, 1);
+                }
+                func_xk1_8002DBD4(&D_xk3_80140E68.unk_04, 8, 0);
             }
-            func_xk1_8002DBD4(&D_xk3_80140E68.unk_04, 8, 0);
             if ((sp34 != D_xk3_80140E68.unk_00) || (sp30 != D_xk3_80140E68.unk_04)) {
                 Audio_TriggerSystemSE(NA_SE_30);
             }
@@ -161,10 +371,12 @@ void func_xk3_8012BD84(void) {
             s32 sp28 = D_xk3_80140E60.unk_04;
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            if (D_xk3_80140E60.unk_04 != 3) {
-                func_xk1_8002DAE0(&D_xk3_80140E60, 6, 1);
+            if (!mouseDriven) {
+                if (D_xk3_80140E60.unk_04 != 3) {
+                    func_xk1_8002DAE0(&D_xk3_80140E60, 6, 1);
+                }
+                func_xk1_8002DBD4(&D_xk3_80140E60.unk_04, 3, 0);
             }
-            func_xk1_8002DBD4(&D_xk3_80140E60.unk_04, 3, 0);
             if ((sp2C != D_xk3_80140E60.unk_00) || (sp28 != D_xk3_80140E60.unk_04)) {
                 Audio_TriggerSystemSE(NA_SE_30);
             }
@@ -175,10 +387,12 @@ void func_xk3_8012BD84(void) {
             s32 sp20 = D_xk3_80140E70.unk_04;
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            if (D_xk3_80140E70.unk_04 != 3) {
-                func_xk1_8002DAE0(&D_xk3_80140E70, 4, 1);
+            if (!mouseDriven) {
+                if (D_xk3_80140E70.unk_04 != 3) {
+                    func_xk1_8002DAE0(&D_xk3_80140E70, 4, 1);
+                }
+                func_xk1_8002DBD4(&D_xk3_80140E70.unk_04, 3, 0);
             }
-            func_xk1_8002DBD4(&D_xk3_80140E70.unk_04, 3, 0);
             if ((sp24 != D_xk3_80140E70.unk_00) || (sp20 != D_xk3_80140E70.unk_04)) {
                 Audio_TriggerSystemSE(NA_SE_30);
             }
@@ -193,13 +407,17 @@ void func_xk3_8012BD84(void) {
         case MACHINE_MODE_ENTRY_CLEAR_SELECT_SUPER:
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            func_xk1_8002BBA4();
+            if (!mouseDriven) {
+                func_xk1_8002BBA4();
+            }
             break;
         case MACHINE_MODE_MENU:
             D_xk3_80136554 = (s32) (D_xk3_80140E54 - 0x24) / 16;
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            func_xk1_8002DBD4(&D_xk3_80136554, 2, 0);
+            if (!mouseDriven) {
+                func_xk1_8002DBD4(&D_xk3_80136554, 2, 0);
+            }
             D_xk3_80140E54 = (D_xk3_80136554 * 0x10) + 0x24;
             func_xk1_800269F4(&gMachineCreateWidget, &D_xk3_80140E50, &D_xk3_80140E54);
             func_xk1_80027CFC(&gMachineCreateWidget, &D_xk3_80140E50, &D_xk3_80140E54);
@@ -210,7 +428,9 @@ void func_xk3_8012BD84(void) {
             D_xk3_80136554 = (s32) (D_xk3_80140E54 - 0x34) / 16;
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            func_xk1_8002DBD4(&D_xk3_80136554, 7, 0);
+            if (!mouseDriven) {
+                func_xk1_8002DBD4(&D_xk3_80136554, 7, 0);
+            }
             D_xk3_80140E54 = (D_xk3_80136554 * 0x10) + 0x34;
             func_xk1_800269F4(&gMachineCreateWidget, &D_xk3_80140E50, &D_xk3_80140E54);
             func_xk1_80027CFC(&gMachineCreateWidget, &D_xk3_80140E50, &D_xk3_80140E54);
@@ -219,9 +439,11 @@ void func_xk3_8012BD84(void) {
             s32 sp1C = D_xk3_80136550;
             func_xk1_8002D86C(0x1B, 6);
             func_xk1_8002D880(0x28);
-            func_xk1_8002DAE0(&D_xk3_80136550, 5, 1);
-            D_xk3_80140E50 = (D_xk3_80136550 * 0x30) + 0x30;
-            D_xk3_80140E54 = 0x1C;
+            if (!mouseDriven) {
+                func_xk1_8002DAE0(&D_xk3_80136550, 5, 1);
+                D_xk3_80140E50 = (D_xk3_80136550 * 0x30) + 0x30;
+                D_xk3_80140E54 = 0x1C;
+            }
             if (sp1C != D_xk3_80136550) {
                 Audio_TriggerSystemSE(NA_SE_35);
             }
@@ -553,11 +775,43 @@ void func_xk3_8012CC10(void) {
                 gWorksMachineMode = MACHINE_MODE_0;
                 break;
             case MACHINE_MODE_LOAD_CONFIRM:
-            case MACHINE_MODE_OVERWRITE_CONFIRM:
+#ifdef PORT
+                D_807C6EA8.unk_08 = 0;
+                PRINTF("WORKS MACHINE MODE : LOAD_SELECT_FILE\n");
+                gWorksMachineMode = MACHINE_MODE_LOAD_SELECT_FILE;
+                func_xk1_80027B74(&gMachineCreateWidget);
+                break;
+#endif
+                // fallthrough for non-PORT builds
             case MACHINE_MODE_DELETE_CONFIRM:
-            case MACHINE_MODE_ENTRY_ALLCLEAR_CONFIRM:
+#ifdef PORT
+                D_807C6EA8.unk_08 = 0;
+                PRINTF("WORKS MACHINE MODE : DELETE_SELECT_FILE\n");
+                gWorksMachineMode = MACHINE_MODE_DELETE_SELECT_FILE;
+                func_xk1_80027B74(&gMachineCreateWidget);
+                break;
+#endif
+                // fallthrough for non-PORT builds
             case MACHINE_MODE_ENTRY_CLEAR_CONFIRM:
+#ifdef PORT
+                D_807C6EA8.unk_08 = 0;
+                PRINTF("WORKS MACHINE MODE : ENTRY_CLEAR_SELECT_FILE\n");
+                gWorksMachineMode = MACHINE_MODE_ENTRY_CLEAR_SELECT_FILE;
+                func_xk1_80027B74(&gMachineCreateWidget);
+                break;
+#endif
+                // fallthrough for non-PORT builds
             case MACHINE_MODE_ENTRY_CLEAR_SUPER_CONFIRM:
+#ifdef PORT
+                D_807C6EA8.unk_08 = 0;
+                PRINTF("WORKS MACHINE MODE : ENTRY_CLEAR_SELECT_SUPER\n");
+                gWorksMachineMode = MACHINE_MODE_ENTRY_CLEAR_SELECT_SUPER;
+                func_xk1_80027B74(&gMachineCreateWidget);
+                break;
+#endif
+                // fallthrough for non-PORT builds
+            case MACHINE_MODE_OVERWRITE_CONFIRM:
+            case MACHINE_MODE_ENTRY_ALLCLEAR_CONFIRM:
             case MACHINE_MODE_CHECKSUM_ERROR:
                 Audio_TriggerSystemSE(NA_SE_37);
                 D_807C6EA8.unk_08 = 0;
@@ -565,12 +819,25 @@ void func_xk3_8012CC10(void) {
                 gWorksMachineMode = MACHINE_MODE_0;
                 break;
             case MACHINE_MODE_LOAD_SELECT_FILE:
-            case MACHINE_MODE_LOAD_SELECT_SUPER:
             case MACHINE_MODE_DELETE_SELECT_FILE:
             case MACHINE_MODE_ENTRY_SELECT_FILE:
             case MACHINE_MODE_ENTRY_SELECT_SUPER:
             case MACHINE_MODE_ENTRY_CLEAR_SELECT_FILE:
             case MACHINE_MODE_ENTRY_CLEAR_SELECT_SUPER:
+                Audio_TriggerSystemSE(NA_SE_37);
+                PRINTF("WORKS MACHINE MODE : 0\n");
+                gWorksMachineMode = MACHINE_MODE_0;
+                func_xk1_8002BD34();
+                break;
+            case MACHINE_MODE_LOAD_SELECT_SUPER:
+#ifdef PORT
+                D_807C6EA8.unk_08 = 0;
+                PRINTF("WORKS MACHINE MODE : LOAD_SELECT_FILE\n");
+                gWorksMachineMode = MACHINE_MODE_LOAD_SELECT_FILE;
+                func_xk1_80027B74(&gMachineCreateWidget);
+                break;
+#endif
+                // fallthrough for non-PORT builds
                 Audio_TriggerSystemSE(NA_SE_37);
                 PRINTF("WORKS MACHINE MODE : 0\n");
                 gWorksMachineMode = MACHINE_MODE_0;
@@ -597,6 +864,14 @@ void func_xk3_8012CE44(void) {
         if (D_xk1_80032C20 == 0) {
             switch (gWorksMachineMode) {
                 case MACHINE_MODE_LOAD_CONFIRM:
+#ifdef PORT
+                    D_807C6EA8.unk_08 = 0;
+                    PRINTF("WORKS MACHINE MODE : LOAD_SELECT_FILE\n");
+                    gWorksMachineMode = MACHINE_MODE_LOAD_SELECT_FILE;
+                    func_xk1_80027B74(&gMachineCreateWidget);
+                    return;
+#endif
+                    // fallthrough for non-PORT builds
                 case MACHINE_MODE_OVERWRITE_CONFIRM:
                 case MACHINE_MODE_DELETE_CONFIRM:
                 case MACHINE_MODE_ENTRY_ALLCLEAR_CONFIRM:
