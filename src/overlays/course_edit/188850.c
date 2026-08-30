@@ -6,6 +6,14 @@
 #include "fzx_expansion_kit.h"
 #include ASSET_HEADER_EK(course_edit_textures.h)
 
+#ifdef PORT
+// Course Edit's y floor of 0 disagrees with the game's own save validator, which accepts down to
+// -250 (Course_CalculateChecksum, src/game/course.c). Sector Beta ships a control point at -201,
+// so the stock editor cannot round-trip a retail course. See port/gdx_course_bounds.c.
+extern float gdx_course_edit_min_y(void);
+extern float gdx_course_edit_max_y(void);
+#endif
+
 Controller* D_80119720;
 UNUSED s32 D_xk2_80119724;
 u16 D_xk2_80119728;
@@ -2138,11 +2146,19 @@ void func_xk2_800DC67C(void) {
         D_xk2_800F704C = D_xk2_800F703C;
         if ((gCreateOption == CREATE_OPTION_COURSE) && (D_xk2_80104CA0[1] == 0) && (D_xk2_80104CA0[10] == 0)) {
             spC0 = D_800D6CA0.unk_28;
+#ifdef PORT
+            if ((spC0.pos.x < -15000.0f) || (spC0.pos.x > 15000.0f) || (spC0.pos.y < gdx_course_edit_min_y()) ||
+                (spC0.pos.y > gdx_course_edit_max_y()) || (spC0.pos.z < -15000.0f) || (spC0.pos.z > 15000.0f)) {
+                Audio_TriggerSystemSE(NA_SE_32);
+                return;
+            }
+#else
             if ((spC0.pos.x < -15000.0f) || (spC0.pos.x > 15000.0f) || (spC0.pos.y < 0.0f) || (spC0.pos.y > 5000.0f) ||
                 (spC0.pos.z < -15000.0f) || (spC0.pos.z > 15000.0f)) {
                 Audio_TriggerSystemSE(NA_SE_32);
                 return;
             }
+#endif
             if (D_8076C968 != 0) {
                 sp16C = Math_Round(spC0.pos.x);
                 sp168 = Math_Round(spC0.pos.y);
@@ -2935,9 +2951,16 @@ void func_xk2_800DE210(Vec3f* arg0, Vec3f arg1, Vec3f arg2, Vec3f arg3) {
         sp94.y = (sp6C[i].y * var_fs1 * 500.0f) + arg2.y;
         temp_fs0 = Math_VectorGetDistance(sp94, arg1);
         temp_fv0 = Math_VectorGetDistance(sp94, arg3);
+#ifdef PORT
+        if ((temp_fs0 > 498.0f) && (temp_fv0 > 498.0f) && (sp94.y >= gdx_course_edit_min_y()) &&
+            (sp94.y <= gdx_course_edit_max_y())) {
+            break;
+        }
+#else
         if ((temp_fs0 > 498.0f) && (temp_fv0 > 498.0f) && (sp94.y >= 0.0f) && (sp94.y <= 5000.0f)) {
             break;
         }
+#endif
 
         if (++i == 2) {
             i = 0;

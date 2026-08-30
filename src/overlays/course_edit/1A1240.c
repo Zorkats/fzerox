@@ -2,6 +2,14 @@
 #include "fzx_expansion_kit.h"
 #include "fzx_course.h"
 
+#ifdef PORT
+// Course Edit's y floor of 0 disagrees with the game's own save validator, which accepts down to
+// -250 (Course_CalculateChecksum, src/game/course.c). Sector Beta ships a control point at -201,
+// so the stock editor cannot round-trip a retail course. See port/gdx_course_bounds.c.
+extern float gdx_course_edit_min_y(void);
+extern float gdx_course_edit_max_y(void);
+#endif
+
 f32 D_xk2_80128CB0;
 f32 D_xk2_80128CB4;
 Vec3f D_xk2_80128CB8[5];
@@ -231,9 +239,16 @@ s32 func_xk2_800EFFF0(void) {
         if ((D_xk2_80128CB8[i].z < -15000.0f) || (D_xk2_80128CB8[i].z > 15000.0f)) {
             return -1;
         }
+#ifdef PORT
+        if ((D_xk2_80128CB8[i].y < gdx_course_edit_min_y()) ||
+            (D_xk2_80128CB8[i].y > gdx_course_edit_max_y())) {
+            return -1;
+        }
+#else
         if ((D_xk2_80128CB8[i].y < 0.0f) || (D_xk2_80128CB8[i].y > 5000.0f)) {
             return -1;
         }
+#endif
     }
     return 0;
 }

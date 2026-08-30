@@ -192,6 +192,13 @@ void Game_Init(void) {
     Arena_EndInit();
     GI_CK(pre_D9D0);
     func_8007D9D0();
+#ifdef PORT
+    /* func_8007D9D0 has just filled gTrackNames[] from the compiled-in sTrackNames. If the
+     * mounted archives carry a course-strings entry -- which a ROM hack archive does and the
+     * retail one matches -- this replaces the first 24 names, subtitles and BGM ids with the
+     * ones the ROM actually shipped. See port/gdx_course_strings.h. */
+    { extern void gdx_course_strings_apply(void); gdx_course_strings_apply(); }
+#endif
 #ifdef EXPANSION_KIT
     DDSave_LoadBaseCourses();
 #endif

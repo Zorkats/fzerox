@@ -1,0 +1,44 @@
+# course_strings.yaml -- per-course track names, subtitles and BGM assignment (US rev0).
+#
+# These three tables are the only course-identity data the game keeps as ordinary compiled C
+# rather than as an addressable asset, so until this recipe existed no archive could carry them
+# and a ROM hack's own track names, subtitles and music assignment were unreachable: the port
+# rendered the vanilla text and played the vanilla song no matter which hack was mounted.
+#
+# The factory (torch/src/factories/fzerox/CourseStringsFactory.cpp) resolves the two pointer
+# tables and the raw BGM byte table into one binary resource, which the port applies over its
+# compiled-in tables at boot (port/gdx_course_strings.c). Vanilla extraction produces the vanilla
+# text, so mounting order alone decides the outcome: a hack archive is mounted last and wins.
+#
+# WHERE THESE OFFSETS COME FROM. Every value below was recovered by locating the vanilla strings
+# in the ROM, deriving the RAM->ROM bias from the pointer that reaches them, and confirming the
+# resulting table decodes to exactly the arrays the decomp declares by hand:
+#
+#   names      decomp/src/game/common.c sTrackNames[32], followed immediately by gMachineNames
+#   subtitles  decomp/src/overlays/course_select/course_select.c sTrackSubtitles[31]
+#   bgm        decomp/src/game/racer.c D_800CF4D8[24], read at race start by racer.c
+#
+# `bias` converts a stored RAM address back to a ROM offset (romOffset = ramAddress - bias). The
+# two string tables live in different segments, so they do not share one.
+#
+# NOTE ON bgm. There is a SECOND, byte-identical 24-entry BGM table at ROM 0xA2864
+# (D_i2_80106F14, decomp/src/overlays/ovl_i2/race.c), read only on the Expansion Kit path. It is
+# NOT extracted: both F-Zero X Climax and F-Zero X Legends edit 0x694D8 and leave 0xA2864 at its
+# retail values, which makes 0x694D8 the table hacks actually author. The port writes the decoded
+# ids into both arrays so the Expansion Kit ready/start pair cannot disagree.
+
+gCourseStrings:
+  type: FZX:COURSE_STRINGS
+  offset: 0x673D0
+  symbol: gCourseStrings
+  names:
+    offset: 0x673D0   # sTrackNames pointer table
+    count: 32
+    bias: 0x80066000
+  subtitles:
+    offset: 0xDFC28   # sTrackSubtitles pointer table
+    count: 31
+    bias: 0x800398A0
+  bgm:
+    offset: 0x694D8   # D_800CF4D8
+    count: 24

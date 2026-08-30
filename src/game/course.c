@@ -4932,6 +4932,14 @@ bool func_i2_800BE9D4(f32* regValue) {
 s32 Course_CalculateChecksum(void) {
     s32 i;
     u32 checksum = COURSE_CONTEXT()->courseData.controlPointCount;
+#if defined(PORT) && defined(EXPANSION_KIT)
+    // gEnhancements.CourseEdit.ExtendedHeight resolves to a fixed ceiling for the whole call, so
+    // read it once here rather than once per control point. Same reason the DrawDistance cull
+    // loop caches its CVar (see Course_Draw above): the bridge has no business in a
+    // per-point validation loop. Only the Expansion Kit branch below consults it.
+    extern float gdx_course_edit_max_y(void);
+    f32 gdxMaxY = gdx_course_edit_max_y();
+#endif
 
     for (i = 0; i < COURSE_CONTEXT()->courseData.controlPointCount; i++) {
 #ifndef EXPANSION_KIT
@@ -4972,9 +4980,15 @@ s32 Course_CalculateChecksum(void) {
         if (controlPoint->pos.y < -250.0f) {
             return -1;
         }
+#ifdef PORT
+        if (controlPoint->pos.y > gdxMaxY) {
+            return -1;
+        }
+#else
         if (controlPoint->pos.y > 5000.0f) {
             return -1;
         }
+#endif
 
         if (func_i2_800BE9D4(&controlPoint->pos.z)) {
             return -1;
