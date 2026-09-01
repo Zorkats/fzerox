@@ -1,4 +1,4 @@
-#include "global.h"
+﻿#include "global.h"
 #include "audio.h"
 #include "fzx_camera.h"
 #include "fzx_racer.h"
@@ -1760,12 +1760,17 @@ void Racer_Init(void) {
     GhostRacer* ghostRacer;
     MachineInfo machineInfo;
     OSMesg sp68;
-
 #ifdef PORT
+    s32 gdxFancyLighting;
+
     /* Interpolation cut: a race (re)start re-places every machine, invalidating the previous
        keyframe. Also covers GP course-to-course, where the mode-load hook never fires but the
        grid is still re-placed. Render-only. */
     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+    /* gEnhancements.Graphics.FancyLighting, reducing stock ambient lighting
+       so new light sources can shine. */
+    { extern int CVarGetInteger(const char* name, int defaultValue);
+      gdxFancyLighting = CVarGetInteger("gEnhancements.Graphics.FancyLighting", 0); }
 #endif
 
     sPipeFogColors = &sVenuePipeFogColors[COURSE_CONTEXT()->courseData.venue * PIPE_MAX];
@@ -1890,7 +1895,17 @@ void Racer_Init(void) {
 
     for (i = 0; i < 2; i++) {
         for (j = 0; j < 4; j++) {
+#ifdef PORT
+            // Reduce ambient light so the point light can bring out the texture reflections
+            if (gdxFancyLighting) {
+                Lights_SetSource(&D_8024DCE0[i].unk_21A88[j], 50, 50, 50, 255, 255, 255, 40, 100, 40);
+            }
+            else {
+                Lights_SetSource(&D_8024DCE0[i].unk_21A88[j], 100, 100, 100, 255, 255, 255, 69, 69, 69);
+            }
+#else
             Lights_SetSource(&D_8024DCE0[i].unk_21A88[j], 100, 100, 100, 255, 255, 255, 69, 69, 69);
+#endif
         }
     }
 
@@ -5747,6 +5762,18 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     // distance-tiering loops below never enter the CVar bridge. Default 0 leaves every branch
     // on its original path, stock 1:1.
     s32 gdxForceMaxMachineLod;
+    // gEnhancements.Graphics.MachineLODDistMod, adjusts the model quality used for LOD
+    // by a constant amount, accounting for distance.
+    s32 gdxMachineLodDistMod;
+    // gEnhancements.Graphics.ForceDrawMachineShad, ignores distance cutoff for rendering
+    // machine shadows.
+    s32 gdxForceDrawMachineShad;
+    // gEnhancements.Graphics.MachineBoostLODDistMod, adjusts the boost-light quality used for LOD
+    // by a constant amount, acounting for distance.
+    s32 gdxMachineBoostLodDistMod;
+    // gEnhancements.Graphics.FancyLighting, dims the light tiers used on each machine
+    // so the point light and custom lights read better against segment lighting.
+    s32 gdxFancyLighting;
     f32 gdxCullX;
 #endif
 
@@ -5787,6 +5814,10 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
         extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
         extern float gdx_get_ultrawide_cull_xscale(void);
         gdxForceMaxMachineLod = CVarGetInteger("gEnhancements.Graphics.ForceMaxMachineLOD", 0);
+        gdxMachineLodDistMod = CVarGetInteger("gEnhancements.Graphics.MachineLODDistMod", 0);
+        gdxForceDrawMachineShad = CVarGetInteger("gEnhancements.Graphics.ForceDrawMachineShad", 0);
+        gdxMachineBoostLodDistMod = CVarGetInteger("gEnhancements.Graphics.MachineBoostLODDistMod", 0);
+        gdxFancyLighting = CVarGetInteger("gEnhancements.Graphics.FancyLighting", 0);
         /* Ultrawide: widen the NDC-x visibility test the same way course.c widens the chunk
            cull — machines between the 4:3 band and the true frame edge vanished at 21:9.
            Exactly 1.0f (IEEE-exact no-op comparison) unless UltrawideMode is on. */
@@ -5858,6 +5889,16 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                     racer->machineLod = 6;
                 }
 
+#ifdef PORT
+                racer->machineLod -= gdxMachineLodDistMod;
+                if (racer->machineLod < 1) {
+                    racer->machineLod = 1;
+                }
+
+                if (gdxForceDrawMachineShad) {
+                    racer->unk_2B2 = 1;
+                } else
+#endif
                 if (temp_fa0 < 800.0f) {
                     racer->unk_2B2 = 1;
                 }
@@ -5866,6 +5907,12 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                 } else if (temp_fa0 < 900.0f) {
                     racer->unk_2B3 = 1;
                 }
+#ifdef PORT
+                racer->unk_2B3 += gdxMachineBoostLodDistMod;
+                if (racer->unk_2B3 > 2) {
+                    racer->unk_2B3 = 2;
+                }
+#endif
             }
         }
 #ifndef EXPANSION_KIT
@@ -5947,6 +5994,11 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                     racer->machineLod = 6;
                 }
 
+#ifdef PORT
+                if (gdxForceDrawMachineShad) {
+                    racer->unk_2B2 = 1;
+                } else
+#endif
                 if (temp_fa0 < 800.0f) {
                     racer->unk_2B2 = 1;
                 }
@@ -5955,6 +6007,12 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                 } else if (temp_fa0 < 900.0f) {
                     racer->unk_2B3 = 1;
                 }
+#ifdef PORT
+                racer->unk_2B3 += gdxMachineBoostLodDistMod;
+                if (racer->unk_2B3 > 2) {
+                    racer->unk_2B3 = 2;
+                }
+#endif
             }
         }
     }
@@ -6066,18 +6124,46 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
             temp_fs0 = playerRacer->segmentPositionInfo.segmentLengthProportion /
                        playerRacer->segmentPositionInfo.courseSegment->joinScale;
         } else {
+#ifdef PORT
+            if (gdxFancyLighting) {
+                var_s3 = 25;
+                var_s4 = 25;
+                sp5C4 = 25;
+            } else
+#endif
+            {
+                var_s3 = 50;
+                var_s4 = 50;
+                sp5C4 = 50;
+            }
+            goto block_115;
+        }
+
+#ifdef PORT
+        if (gdxFancyLighting) {
+            var_s3 = Math_Round(temp_fs0 * -25.0f) + 50;
+            var_s4 = Math_Round(temp_fs0 * -25.0f) + 50;
+            sp5C4 = Math_Round(temp_fs0 * -25.0f) + 50;
+        } else
+#endif
+        {
+            var_s3 = Math_Round(temp_fs0 * -50.0f) + 100;
+            var_s4 = Math_Round(temp_fs0 * -50.0f) + 100;
+            sp5C4 = Math_Round(temp_fs0 * -50.0f) + 100;
+        }
+    } else {
+#ifdef PORT
+        if (gdxFancyLighting) {
             var_s3 = 50;
             var_s4 = 50;
             sp5C4 = 50;
-            goto block_115;
+        } else
+#endif
+        {
+            var_s3 = 100;
+            var_s4 = 100;
+            sp5C4 = 100;
         }
-        var_s3 = Math_Round(temp_fs0 * -50.0f) + 100;
-        var_s4 = Math_Round(temp_fs0 * -50.0f) + 100;
-        sp5C4 = Math_Round(temp_fs0 * -50.0f) + 100;
-    } else {
-        var_s3 = 100;
-        var_s4 = 100;
-        sp5C4 = 100;
     }
 block_115:
     temp_v0_7 = &gGfxPool->unk_21A88[playerIndex];
