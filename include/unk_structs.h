@@ -233,6 +233,9 @@ typedef struct Racer {
     s32 spinOutTimer;
     s32 bodyWhiteTimer;
     f32 pitForceFieldSize;
+#ifdef EXPANSION_KIT
+    s8 forceFieldType;
+#endif
     f32 energy;
     f32 maxEnergy;
     f32 energyRegain;

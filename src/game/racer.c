@@ -836,6 +836,12 @@ void Racer_StopRacerSfx(Racer* racer) {
             racer->soundEffectFlags &= ~RACER_SE_FLAGS_PIT;
             Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_4);
         }
+#ifdef EXPANSION_KIT
+        if (racer->soundEffectFlags & RACER_SE_FLAGS_LAVA) {
+            racer->soundEffectFlags &= ~RACER_SE_FLAGS_LAVA;
+            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_LAVA);
+        }
+#endif
         if (racer->soundEffectFlags & RACER_SE_FLAGS_DIRT) {
             racer->soundEffectFlags &= ~RACER_SE_FLAGS_DIRT;
             Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_5);
@@ -866,9 +872,17 @@ void Racer_StopRacerSfx(Racer* racer) {
         }
         Audio_PlayerEngineStop(racer->id);
     } else {
+#ifdef EXPANSION_KIT
+        racer->soundEffectFlags &=
+            ~(RACER_SE_FLAGS_PIT | RACER_SE_FLAGS_LAVA | RACER_SE_FLAGS_DIRT | RACER_SE_FLAGS_ICE |
+              RACER_SE_FLAGS_200 | RACER_SE_FLAGS_DRIFT_SLIDE | RACER_SE_FLAGS_AIRBORNE |
+              RACER_SE_FLAGS_ENGINE_ECHO | RACER_SE_FLAGS_BRAKE);
+#else
         racer->soundEffectFlags &=
             ~(RACER_SE_FLAGS_PIT | RACER_SE_FLAGS_DIRT | RACER_SE_FLAGS_ICE | RACER_SE_FLAGS_200 |
-              RACER_SE_FLAGS_DRIFT_SLIDE | RACER_SE_FLAGS_AIRBORNE | RACER_SE_FLAGS_ENGINE_ECHO | RACER_SE_FLAGS_BRAKE);
+              RACER_SE_FLAGS_DRIFT_SLIDE | RACER_SE_FLAGS_AIRBORNE | RACER_SE_FLAGS_ENGINE_ECHO |
+              RACER_SE_FLAGS_BRAKE);
+#endif
     }
 }
 
@@ -1694,6 +1708,9 @@ void Racer_InitRacer(Racer* racer) {
         racer->bodyWhiteTimer = racer->spinOutTimer = racer->completedLapsTime = racer->raceTime = racer->lap =
             racer->unk_204 = racer->unk_208 = racer->unk_20C = racer->boostTimer = racer->unk_214 =
                 racer->vibrationStrength = 0;
+#ifdef EXPANSION_KIT
+    racer->forceFieldType = COURSE_EFFECT_NONE;
+#endif
     var_fs0 = racer->attackHighlightScale = racer->unk_1E8 = racer->recoilTilt.x = racer->recoilTilt.y =
         racer->recoilTilt.z = racer->pitForceFieldSize = racer->jumpBoost = racer->tiltUpInput = racer->unk_238 =
             racer->unk_200 = racer->heightAboveGround = racer->accelerationForce = racer->driftAttackForce =
@@ -2109,6 +2126,13 @@ void func_8008D33C(void) {
      * customType != CUSTOM_MACHINE_DEFAULT and are left alone by the port side. */
     extern void GdxPalette_ApplyToMachines(void);
     GdxPalette_ApplyToMachines();
+
+    /* F2b machine stat editor: applies body/boost/grip/weight overrides over whatever
+     * the fill produced, including custom machines and super machines copied into
+     * roster slots. Stats feed physics, so ghosts/records made under overrides desync
+     * vs stock (same caveat class as BoostDuration). */
+    extern void GdxMachineStats_ApplyToMachines(void);
+    GdxMachineStats_ApplyToMachines();
 #endif
 }
 #else
@@ -4643,16 +4667,58 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                 }
             }
         }
+#ifdef EXPANSION_KIT
+        racer->forceFieldType = COURSE_EFFECT_PIT;
+    } else if ((racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_AIRBORNE | RACER_STATE_SPINNING_OUT |
+                                     COURSE_EFFECT_MASK)) == COURSE_EFFECT_LAVA) {
+        if (racer->pitForceFieldSize < 1.0f) {
+            racer->pitForceFieldSize += 0.1f;
+            if (racer->pitForceFieldSize >= 1.0f) {
+                racer->pitForceFieldSize = 1.0f;
+            } else if ((racer->id < gNumPlayers) && (racer->pitForceFieldSize == 0.1f)) {
+                racer->soundEffectFlags |= RACER_SE_FLAGS_LAVA;
+                if (gEnableRaceSfx) {
+                    Audio_PlayerLevelSEStart(racer->id, NA_LEVEL_SE_LAVA);
+                }
+            }
+        }
+        racer->forceFieldType = COURSE_EFFECT_LAVA;
+        // Editor test runs (D_800CE780 == 0) drain without killing so course authors can verify
+        // strips under the EK's test-run invulnerability; the CVar opts races out of the kill too.
+        // 0.1f floor matches the energy floor convention in Racer_ReceiveDamage.
+#ifdef PORT
+        if ((D_800CE780 != 0) && !CVarGetInteger("gEnhancements.Gameplay.LavaNoKill", 0)) {
+#else
+        if (D_800CE780 != 0) {
+#endif
+            Racer_ReceiveDamage(racer, racer->energyIncrease);
+        } else {
+            racer->energy -= racer->energyIncrease;
+            if (racer->energy < 0.1f) {
+                racer->energy = 0.1f;
+            }
+        }
+#endif
     } else {
         if (racer->pitForceFieldSize > 0.0f) {
             racer->pitForceFieldSize -= 0.1f;
             if (racer->pitForceFieldSize <= 0.0f) {
                 racer->pitForceFieldSize = 0.0f;
                 if (racer->id < gNumPlayers) {
-                    racer->soundEffectFlags &= ~RACER_SE_FLAGS_PIT;
-                    if (gEnableRaceSfx) {
-                        Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_4);
+                    if (racer->soundEffectFlags & RACER_SE_FLAGS_PIT) {
+                        racer->soundEffectFlags &= ~RACER_SE_FLAGS_PIT;
+                        if (gEnableRaceSfx) {
+                            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_4);
+                        }
                     }
+#ifdef EXPANSION_KIT
+                    if (racer->soundEffectFlags & RACER_SE_FLAGS_LAVA) {
+                        racer->soundEffectFlags &= ~RACER_SE_FLAGS_LAVA;
+                        if (gEnableRaceSfx) {
+                            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_LAVA);
+                        }
+                    }
+#endif
                 }
             }
         }
@@ -5749,6 +5815,9 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     s32 gdxForceMaxMachineLod;
     f32 gdxCullX;
 #endif
+#ifdef EXPANSION_KIT
+    s32 prevForceFieldLava;
+#endif
 
     camera = &gCameras[playerIndex];
 
@@ -6745,10 +6814,31 @@ block_115:
         var_s3 = 0;
     }
 
+#ifdef EXPANSION_KIT
+    prevForceFieldLava = false;
+#endif
     for (racer = sLastRacer; (racer >= gRacers) && (gEffectsVtxPtr <= (gEffectsVtxEndPtr - 3)); racer--) {
         if ((racer->pitForceFieldSize == 0.0f) || (racer->unk_2B3 == 0)) {
             continue;
         }
+#ifdef EXPANSION_KIT
+        if (racer->forceFieldType == COURSE_EFFECT_LAVA) {
+            if (!prevForceFieldLava) {
+                gDPSetCombineMode(gfx++, G_CC_MODULATERGBA_PRIM, G_CC_MODULATERGBA_PRIM);
+                gDPSetPrimColor(gfx++, 0, 0, 255, 60, 0, 255);
+            }
+            prevForceFieldLava = true;
+        } else {
+            if (prevForceFieldLava) {
+                gSPDisplayList(gfx++, aSetupPitForceFieldDL);
+                // aSetupPitForceFieldDL only resets prim/env/tile; restore the combine mode that
+                // aSetupBoosterDL left active for the force-field draw (PRIM/ENV blend, TEXEL0 modulate).
+                gDPSetCombineLERP(gfx++, PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, TEXEL0, 0, ENVIRONMENT, 0,
+                                  PRIMITIVE, ENVIRONMENT, TEXEL0, ENVIRONMENT, TEXEL0, 0, ENVIRONMENT, 0);
+            }
+            prevForceFieldLava = false;
+        }
+#endif
         temp_fs0 = 3.0f - ((1.0f - racer->pitForceFieldSize) * 19.0f);
         temp_fs4 = racer->segmentPositionInfo.pos.x + (temp_fs0 * racer->trueBasis.y.x);
         temp_fs5 = racer->segmentPositionInfo.pos.y + (temp_fs0 * racer->trueBasis.y.y);
@@ -6782,7 +6872,6 @@ block_115:
         gSP2Triangles(gfx++, 0, 1, 3, 0, 1, 2, 3, 0);
         gEffectsVtxPtr += 4;
     }
-
     gSPDisplayList(gfx++, aSetupFallExplosionDL);
 
     for (var_s3 = gFallExplosionsCount, var_s7 = (gFallExplosionsIndex - 1) & 0x1F;

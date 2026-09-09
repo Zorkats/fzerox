@@ -90,6 +90,9 @@ typedef enum LevelSfxId {
     /*  9 */ NA_LEVEL_SE_9,
     /* 10 */ NA_LEVEL_SE_10,
     /* 11 */ NA_LEVEL_SE_11,
+#ifdef EXPANSION_KIT
+    /* 12 */ NA_LEVEL_SE_LAVA, // reuses the NA_LEVEL_SE_4 sample; distinct freqScale gives it a different voice
+#endif
 } LevelSfxId;
 
 typedef enum BgmId {

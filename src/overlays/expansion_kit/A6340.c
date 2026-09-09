@@ -363,11 +363,145 @@ void ExpansionKit_NameEntryHandleStickInput(void) {
     }
 }
 
+#ifdef PORT
+#define GDX_NAME_KEY_ESC -1
+#define GDX_NAME_KEY_ENTER -2
+#define GDX_NAME_KEY_BACKSPACE -3
+
+#define GDX_NAME_QUEUE_SIZE 16
+static s32 sNameKeyQueue[GDX_NAME_QUEUE_SIZE];
+static s32 sNameKeyQueueHead = 0;
+static s32 sNameKeyQueueTail = 0;
+
+extern unk_800D6CA0 D_800D6CA0;
+extern s32 gCourseEditCursorXPos;
+extern s32 gCourseEditCursorYPos;
+extern s32 gGameMode;
+
+s32 gdx_name_entry_is_active(void) {
+    if (gGameMode == GAMEMODE_COURSE_EDIT && D_800D6CA0.unk_08 == 2) {
+        return 1;
+    }
+    return 0;
+}
+
+void gdx_name_entry_queue_push(s32 key) {
+    s32 next = (sNameKeyQueueHead + 1) % GDX_NAME_QUEUE_SIZE;
+    if (next != sNameKeyQueueTail) {
+        sNameKeyQueue[sNameKeyQueueHead] = key;
+        sNameKeyQueueHead = next;
+    }
+}
+
+void gdx_name_entry_queue_clear(void) {
+    sNameKeyQueueHead = 0;
+    sNameKeyQueueTail = 0;
+}
+
+static void gdx_name_entry_handle_event(s32 event) {
+    char letter;
+
+    if (event == GDX_NAME_KEY_ESC) {
+        gExpansionKitNameEntryStrLength = 0;
+        gExpansionKitNameEntryStr[0] = '\0';
+        Audio_TriggerSystemSE(NA_SE_37);
+        if (sNameEntryCallbackFunc != NULL) {
+            sNameEntryCallbackFunc();
+        }
+        gCourseEditFileOption = -1;
+        return;
+    }
+
+    if (event == GDX_NAME_KEY_ENTER) {
+        if (gExpansionKitNameEntryStrLength == 0) {
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        while (gExpansionKitNameEntryStrLength > 0 &&
+               gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength - 1] == ' ') {
+            gExpansionKitNameEntryStrLength--;
+            gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength] = '\0';
+        }
+        if (gExpansionKitNameEntryStrLength == 0) {
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        sNameEntryCursorXPos = 9;
+        sNameEntryCursorYPos = 4;
+        Audio_TriggerSystemSE(NA_SE_33);
+        func_xk1_8002961C();
+        return;
+    }
+
+    if (event == GDX_NAME_KEY_BACKSPACE) {
+        if (gExpansionKitNameEntryStrLength > 0) {
+            gExpansionKitNameEntryStrLength--;
+            gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength] = '\0';
+            Audio_TriggerSystemSE(NA_SE_37);
+            if (gExpansionKitNameEntryStrLength > 0) {
+                letter = gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength - 1];
+                ExpansionKit_GetCharacterKeyboardPosition(letter, &sNameEntryCursorXPos, &sNameEntryCursorYPos);
+            } else {
+                sNameEntryCursorXPos = 0;
+                sNameEntryCursorYPos = 0;
+            }
+        } else {
+            Audio_TriggerSystemSE(NA_SE_32);
+        }
+        return;
+    }
+
+    if (event > 0 && event < 128) {
+        letter = (char) event;
+        if ((gExpansionKitNameEntryStrLength == 0) && (letter == ' ')) {
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        if (gExpansionKitNameEntryStrLength >= 8) {
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength] = letter;
+        gExpansionKitNameEntryStrLength++;
+        gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength] = '\0';
+        Audio_TriggerSystemSE(NA_SE_39);
+        ExpansionKit_GetCharacterKeyboardPosition(letter, &sNameEntryCursorXPos, &sNameEntryCursorYPos);
+        if (gExpansionKitNameEntryStrLength >= 8) {
+            sNameEntryCursorXPos = 9;
+            sNameEntryCursorYPos = 4;
+        }
+    }
+}
+
+void gdx_name_entry_process_queued_keys(void) {
+    while (sNameKeyQueueTail != sNameKeyQueueHead) {
+        s32 event = sNameKeyQueue[sNameKeyQueueTail];
+        sNameKeyQueueTail = (sNameKeyQueueTail + 1) % GDX_NAME_QUEUE_SIZE;
+        gdx_name_entry_handle_event(event);
+    }
+}
+#endif
+
 void ExpansionKit_NameEntryUpdate(s32* arg0, s32* arg1) {
     if (D_xk1_80032AC8) {
         D_xk1_80032AC8 = false;
         return;
     }
+#ifdef PORT
+    gdx_name_entry_process_queued_keys();
+    if (D_800D6CA0.unk_08 != 2) {
+        return;
+    }
+    if (gCourseEditCursorXPos >= 80 && gCourseEditCursorXPos < 240 &&
+        gCourseEditCursorYPos >= 80 && gCourseEditCursorYPos < 160) {
+        s32 mx = (gCourseEditCursorXPos - 80) / 16;
+        s32 my = (gCourseEditCursorYPos - 80) / 16;
+        if (my < 4 || mx >= 6) {
+            sNameEntryCursorXPos = mx;
+            sNameEntryCursorYPos = my;
+        }
+    }
+#endif
     ExpansionKit_NameEntryHandleStartPress();
     ExpansionKit_NameEntryHandleStickInput();
     if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) {

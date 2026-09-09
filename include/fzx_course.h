@@ -163,8 +163,12 @@ typedef enum PitZone {
     /*  2 */ PIT_RIGHT,
 #ifdef EXPANSION_KIT
     /*  3 */ PIT_MIDDLE,
+    /*  4 */ PIT_LAVA_BOTH,
+    /*  5 */ PIT_LAVA_LEFT,
+    /*  6 */ PIT_LAVA_RIGHT,
+    /*  7 */ PIT_LAVA_MIDDLE,
 #endif
-    /*  4 */ PIT_MAX,
+    PIT_MAX,
 } PitZone;
 
 typedef enum DashZone {

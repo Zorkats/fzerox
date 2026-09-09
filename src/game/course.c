@@ -105,6 +105,14 @@ unk_800CF528 D_800CF528[] = {
     { D_A004000, 14.0f, 64, 4, 5, 1023, 32, 0xAE0, 0xF20, 0xF60, 0xFC0 }, // ROAD_4
     { D_A005000, 14.0f, 64, 4, 5, 1023, 32, 0xAE0, 0xF20, 0xF60, 0xFC0 }, // ROAD_5
     { D_A006000, 14.0f, 64, 4, 5, 1023, 32, 0xAE0, 0xF20, 0xF60, 0xFC0 }, // ROAD_6
+#ifdef PORT
+    /* ROM hacks place road types past ROAD_MAX; on console those rows alias the WALLED_ROAD
+     * table that follows in ROM. Host struct padding breaks that adjacency, so spell the
+     * aliased rows out (indices 7-9). Anything further is clamped at the consumers. */
+    { D_A007000, 7.0f, 128, 0, 1, 511, 32, 0x1320, 0x1EA0, 0x1F60, 0x1FC0 }, // == WALLED_ROAD_0
+    { D_8000008, 7.0f, 128, 0, 1, 511, 32, 0x1320, 0x1EA0, 0x1F60, 0x1FC0 }, // == WALLED_ROAD_1
+    { D_8001008, 7.0f, 128, 0, 1, 511, 32, 0x1320, 0x1EA0, 0x1F60, 0x1FC0 }, // == WALLED_ROAD_2
+#endif
 };
 
 // TRACK_SHAPE_WALLED_ROAD
@@ -163,6 +171,36 @@ unk_800CF528* D_800CF8C8[] = {
     NULL,       // TRACK_SHAPE_AIR
     D_800CF868, // TRACK_SHAPE_BORDERLESS_ROAD
 };
+
+#ifdef PORT
+/* Rows per D_800CF8C8 table. Course data authors the type index (TRACK_TYPE_MASK is 0x3F),
+ * so a hack can index past a table; on console that aliases whatever follows in ROM, on the
+ * host it reads linker padding. Clamp to the last row instead. ROAD counts the three
+ * appended WALLED_ROAD alias rows, which reproduces the console layout exactly. */
+static const s32 sTrackShapeRowCounts[] = {
+    ROAD_MAX + WALLED_ROAD_MAX, // TRACK_SHAPE_ROAD
+    WALLED_ROAD_MAX,            // TRACK_SHAPE_WALLED_ROAD
+    PIPE_MAX,                   // TRACK_SHAPE_PIPE
+    CYLINDER_MAX,               // TRACK_SHAPE_CYLINDER
+    HALF_PIPE_MAX,              // TRACK_SHAPE_HALF_PIPE
+    TUNNEL_MAX,                 // TRACK_SHAPE_TUNNEL
+    0,                          // TRACK_SHAPE_AIR (NULL table, never has a type)
+    BORDERLESS_ROAD_MAX,        // TRACK_SHAPE_BORDERLESS_ROAD
+};
+
+static unk_800CF528* Course_GetTrackTypeRow(s32 trackShape, s32 trackType) {
+    s32 rowCount = sTrackShapeRowCounts[trackShape];
+
+    if (rowCount != 0 && trackType >= rowCount) {
+        trackType = rowCount - 1;
+    }
+    return &D_800CF8C8[trackShape][trackType];
+}
+
+#define TRACK_TYPE_ROW(shape, type) Course_GetTrackTypeRow(shape, type)
+#else
+#define TRACK_TYPE_ROW(shape, type) (&D_800CF8C8[shape][type])
+#endif
 
 f32 gTrackJoinUpperLength[] = {
     0.0f,    // TRACK_SHAPE_ROAD
@@ -2048,9 +2086,9 @@ f32 Course_ChunkPositionDistance(Vec3f* vec1, Vec3f* vec2) {
 s32 func_800A18FC(s32 trackSegmentInfo, f32 distance) {
 
     if ((trackSegmentInfo & TRACK_TYPE_MASK) != TRACK_TYPE_NONE) {
-        return (s32) (D_800CF8C8[TRACK_SHAPE_INDEX(trackSegmentInfo & TRACK_SHAPE_MASK)]
-                                [trackSegmentInfo & TRACK_TYPE_MASK]
-                                    .textureScale *
+        return (s32) (TRACK_TYPE_ROW(TRACK_SHAPE_INDEX(trackSegmentInfo & TRACK_SHAPE_MASK),
+                                     trackSegmentInfo & TRACK_TYPE_MASK)
+                                        ->textureScale *
                       distance) -
                0x8000;
     }
@@ -2374,8 +2412,8 @@ s32 func_800A1954(CourseInfo* courseInfo) {
             } else {
                 segmentChunk->trackSegmentInfo =
                     (segmentChunk->trackSegmentInfo & ~TRACK_FLAG_CONTINUOUS) | TRACK_FLAG_80000000;
-                temp_a3 = &D_800CF8C8[TRACK_SHAPE_INDEX((u32) trackSegmentInfo & TRACK_SHAPE_MASK)]
-                                     [trackSegmentInfo & TRACK_TYPE_MASK];
+                temp_a3 = TRACK_TYPE_ROW(TRACK_SHAPE_INDEX((u32) trackSegmentInfo & TRACK_SHAPE_MASK),
+                                         trackSegmentInfo & TRACK_TYPE_MASK);
 
                 var_v1 = temp_a3->textureCoordinateMask;
                 temp_fv0_5 = temp_a3->textureScale;
@@ -2517,8 +2555,8 @@ s32 func_800A1954(CourseInfo* courseInfo) {
     } else {
         segmentChunk->trackSegmentInfo =
             (segmentChunk->trackSegmentInfo & ~TRACK_FLAG_CONTINUOUS) | TRACK_FLAG_80000000;
-        temp_a3 = &D_800CF8C8[TRACK_SHAPE_INDEX((u32) trackSegmentInfo & TRACK_SHAPE_MASK)]
-                             [trackSegmentInfo & TRACK_TYPE_MASK];
+        temp_a3 = TRACK_TYPE_ROW(TRACK_SHAPE_INDEX((u32) trackSegmentInfo & TRACK_SHAPE_MASK),
+                                 trackSegmentInfo & TRACK_TYPE_MASK);
         var_v1 = temp_a3->textureCoordinateMask;
 
         segmentChunk->leftTextureCorrection = (segmentChunk->leftTextureCoord & var_v1) - 0x8000;
@@ -4330,7 +4368,7 @@ void Course_DrawBackwardChunkGroup(SegmentChunkGroup* chunkGroup) {
         trackShape = TRACK_SHAPE_INDEX((u32) sWorkingSegmentChunk->trackSegmentInfo & TRACK_SHAPE_MASK);
         trackType = sWorkingSegmentChunk->trackSegmentInfo & TRACK_TYPE_MASK;
         if (trackType != TRACK_TYPE_NONE) {
-            temp_a1 = &D_800CF8C8[trackShape][trackType];
+            temp_a1 = TRACK_TYPE_ROW(trackShape, trackType);
             D_800F89D4 = temp_a1->unk_10;
 
             if (D_800F892C != D_800F89D4) {
@@ -4414,7 +4452,7 @@ void Course_DrawForwardChunkGroup(SegmentChunkGroup* chunkGroup) {
         trackShape = TRACK_SHAPE_INDEX((u32) sWorkingSegmentChunk->trackSegmentInfo & TRACK_SHAPE_MASK);
         trackType = sWorkingSegmentChunk->trackSegmentInfo & TRACK_TYPE_MASK;
         if (trackType != TRACK_TYPE_NONE) {
-            temp_a2 = &D_800CF8C8[trackShape][trackType];
+            temp_a2 = TRACK_TYPE_ROW(trackShape, trackType);
             D_800F89D4 = temp_a2->unk_10;
 
             if (D_800F892C != D_800F89D4) {
@@ -4522,7 +4560,7 @@ Gfx* func_800A95B4(Gfx* gfx) {
         trackShape = TRACK_SHAPE_INDEX((u32) sWorkingSegmentChunk->trackSegmentInfo & TRACK_SHAPE_MASK);
         trackType = sWorkingSegmentChunk->trackSegmentInfo & TRACK_TYPE_MASK;
         if (trackType != TRACK_TYPE_NONE) {
-            temp_a1 = &D_800CF8C8[trackShape][trackType];
+            temp_a1 = TRACK_TYPE_ROW(trackShape, trackType);
             D_800F89D4 = temp_a1->unk_10;
             if (D_800F892C != D_800F89D4) {
                 gSPTexture(sCourseDisp++, 0, 0, 0, D_800F892C, G_OFF);

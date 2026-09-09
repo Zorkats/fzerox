@@ -404,7 +404,19 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                                      Z_CMP | CVG_DST_FULL | ZMODE_OPA | ALPHA_CVG_SEL |
                                          GBL_c2(G_BL_CLR_IN, G_BL_A_IN, G_BL_CLR_MEM, G_BL_A_MEM));
                 }
-                gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, effectDrawData->effectType, G_ON);
+                if (effectDrawData->effectType == COURSE_EFFECT_LAVA) {
+                    // Lava tint wins even on the cursor-highlighted segment; sp1D4 = -1 makes the
+                    // next effect re-assert highlight/normal state.
+                    gDPSetCombineMode(gfx++, G_CC_MODULATERGBA_PRIM, G_CC_MODULATERGBA_PRIM);
+                    gDPSetPrimColor(gfx++, 0, 0, 255, 200, 0, 255);
+                    gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, COURSE_EFFECT_PIT, G_ON);
+                    sp1D4 = -1;
+                } else {
+                    if (sp1D4 != 1) {
+                        gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
+                    }
+                    gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, effectDrawData->effectType, G_ON);
+                }
                 if (effectDrawData->effectType == COURSE_EFFECT_DASH) {
                     gSPVertex(gfx++, dashVtx, 6, 0);
                     gSP2Triangles(gfx++, 0, 4, 1, 0, 0, 3, 4, 0);
@@ -472,7 +484,14 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
 #else
             effectDrawDataEnd = gEffectsDrawData[0] + effectsInfo->count;
             for (effectDrawData = gEffectsDrawData[0]; effectDrawData < effectDrawDataEnd; effectDrawData++) {
-                gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, effectDrawData->effectType, G_ON);
+                if (effectDrawData->effectType == COURSE_EFFECT_LAVA) {
+                    gDPSetCombineMode(gfx++, G_CC_MODULATERGBA_PRIM, G_CC_MODULATERGBA_PRIM);
+                    gDPSetPrimColor(gfx++, 0, 0, 255, 200, 0, 255);
+                    gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, COURSE_EFFECT_PIT, G_ON);
+                } else {
+                    gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
+                    gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, effectDrawData->effectType, G_ON);
+                }
 #endif
                 if (effectDrawData->effectType == COURSE_EFFECT_DASH) {
                     gSPVertex(gfx++, dashVtx, 6, 0);
@@ -537,6 +556,9 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 }
             }
         }
+        // Lava strips leave the orange tint prim active; restore white so later prim-modulated
+        // geometry (road, decorations) is not tinted.
+        gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     gSPSetGeometryMode(gfx++, G_CULL_BACK);
     gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
@@ -2094,6 +2116,50 @@ void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
         case PIT_MIDDLE:
             effect->segmentIndex = segmentIndex; \
             effect->effectType = COURSE_EFFECT_PIT;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = -1.0f * effectDistanceFromCenter; \
+            effect->leftEdgeDistance = effectDistanceFromCenter;
+            effectCount++;
+            break;
+        case PIT_LAVA_LEFT:
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_LAVA;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = effectDistanceFromCenter; \
+            effect->leftEdgeDistance = 5000.0f;
+            effectCount++;
+            break;
+        case PIT_LAVA_RIGHT:
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_LAVA;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = -5000.0f; \
+            effect->leftEdgeDistance = -1.0f * effectDistanceFromCenter;
+            effectCount++;
+            break;
+        case PIT_LAVA_BOTH:
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_LAVA;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = effectDistanceFromCenter; \
+            effect->leftEdgeDistance = 5000.0f;
+            effect++;
+            effectCount++;
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_LAVA;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = -5000.0f; \
+            effect->leftEdgeDistance = -1.0f * effectDistanceFromCenter;
+            effectCount++;
+            break;
+        case PIT_LAVA_MIDDLE:
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_LAVA;
             effect->segmentTValueStart = 0.0f;
             effect->segmentTValueEnd = 1.0f;
             effect->rightEdgeDistance = -1.0f * effectDistanceFromCenter; \

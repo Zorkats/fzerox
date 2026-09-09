@@ -12,6 +12,20 @@
 // so the stock editor cannot round-trip a retail course. See port/gdx_course_bounds.c.
 extern float gdx_course_edit_min_y(void);
 extern float gdx_course_edit_max_y(void);
+#include "../../../../port/gdx_course_edit_input.h"
+#include "../../../../port/gdx_course_edit_menu.h"
+
+static bool sGdxCourseEditMouseOwner;
+static s32 sGdxCourseEditMouseTool;
+static bool sGdxCourseEditMouseMovePending;
+static s32 sGdxCourseEditMouseMoveOption;
+static f32 sGdxCourseEditMouseMoveOffsetX;
+static f32 sGdxCourseEditMouseMoveOffsetY;
+static f32 sGdxCourseEditMouseMoveOffsetZ;
+
+static void gdx_course_edit_set_scalar_target(s32 moveOption, s32 targetOffset);
+static void gdx_course_edit_restore_mouse_drag(void);
+
 #endif
 
 Controller* D_80119720;
@@ -66,13 +80,15 @@ s32 D_xk2_800F684C = 0;
 
 s32 D_xk2_800F6850[] = { 0, 1, 2, 4 };
 
-s32 D_xk2_800F6860[] = { 0, 6, 2, 4, 1 };
+// Pit/lava side masks: bit 1 = middle, bit 2 = left, bit 4 = right, bit 8 = lava.
+s32 D_xk2_800F6860[] = { 0, 6, 2, 4, 1, 0x0E, 0x0A, 0x0C, 0x09 };
 
 s32 D_xk2_800F6874[] = { 0, 6, 2, 4, 1 };
 
 s32 D_xk2_800F6888[] = { 0, 6, 2, 4, 1 };
 
-s32 D_xk2_800F689C[] = { -1, 3, 1, -1, 2, -1, 0 };
+// Reverse of D_xk2_800F6860: masks without bit 8 are heal, masks with bit 8 are lava.
+s32 D_xk2_800F689C[] = { -1, 3, 1, -1, 2, -1, 0, -1, -1, 7, 5, -1, 6, -1, 4 };
 
 s32 D_xk2_800F68B8[] = { -1, 0, 1, -1, 2, -1, -1 };
 
@@ -130,6 +146,18 @@ extern s32 D_xk2_80104CB8;
 extern s32 D_xk2_80104CBC;
 extern s32 D_xk2_80104CC0;
 
+#ifdef PORT
+// Absolute mouse drive and Slice 1 camera gestures (port/gdx_course_edit_mouse.cpp). Declared here
+// so the camera-control consumers below see them before first use.
+extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+extern int gdx_course_edit_mouse_camera_gesture_active(void);
+extern int gdx_course_edit_mouse_orbit_delta(s32* dx, s32* dy);
+extern int gdx_course_edit_mouse_pan_delta(s32* dx, s32* dy);
+extern int gdx_course_edit_mouse_wheel(void);
+#endif
+
+extern unk_800D6CA0 D_800D6CA0;
+
 void func_xk2_800D7058(void) {
 
     if ((gControllers[gPlayerControlPorts[0]].buttonCurrent & BTN_L) ||
@@ -147,6 +175,18 @@ void func_xk2_800D7058(void) {
             D_xk2_80104CC0 = D_xk2_80104CC0 + (camera->basis.x.z * 300.0f);
         }
     }
+
+#ifdef PORT
+    // Slice 1: wheel dolly. Only when no sub-menu, dialog, or help overlay is open so file lists
+    // and long dropdowns keep scrolling with the wheel exactly as today. Positive detent (wheel
+    // toward the user) zooms out, negative detent zooms in.
+    if ((D_800D6CA0.unk_08 == 0) && (D_xk2_80119918 == 0)) {
+        s32 wheel = gdx_course_edit_mouse_wheel();
+        if (wheel != 0) {
+            D_xk2_80104CB4 += wheel * 300;
+        }
+    }
+#endif
 
     if (D_xk2_80104CBC < 0) {
         D_xk2_80104CBC = 0;
@@ -222,6 +262,27 @@ void func_xk2_800D71E8(void) {
             break;
     }
 
+#ifdef PORT
+    // Slice 1: Shift+MMB drag pans the look-at point along the same camera-local basis the
+    // C-button path uses. Sensitivity is 1% of the C-button step size per OS pixel, so the mouse
+    // covers roughly the same speed range as holding a C-button but with fine sub-pixel control.
+    {
+        s32 dx;
+        s32 dy;
+        if (gdx_course_edit_mouse_pan_delta(&dx, &dy)) {
+            f32 panScale = temp_fv0 * 0.01f;
+            // Horizontal drag: strafe along the camera's right vector (sin/cos of yaw).
+            D_xk2_80104CB8 += dx * panScale * D_xk2_80128D44;
+            D_xk2_80104CC0 += dx * panScale * D_xk2_80128D40;
+            // Vertical drag: pan up/down along the camera's up vector.
+            // Negative dy (drag up) moves the look-at point up.
+            D_xk2_80104CB8 += -dy * panScale * gCameras[0].basis.y.x;
+            D_xk2_80104CBC += -dy * panScale * gCameras[0].basis.y.y;
+            D_xk2_80104CC0 += -dy * panScale * gCameras[0].basis.y.z;
+        }
+    }
+#endif
+
     if (D_xk2_80104CB8 < -8000) {
         D_xk2_80104CB8 = -8000;
     }
@@ -285,6 +346,25 @@ void func_xk2_800D78A0(void) {
         default:
             break;
     }
+
+#ifdef PORT
+    // Slice 1: MMB drag orbits the camera. Positive horizontal drag (right) matches BTN_RIGHT
+    // (yaw decrease); negative vertical drag (up) matches BTN_UP (pitch increase). Sensitivity is
+    // 0.5 degrees per OS pixel, about 3x the D-pad per-frame rate at typical mouse drag speeds.
+    {
+        s32 dx;
+        s32 dy;
+        if (gdx_course_edit_mouse_orbit_delta(&dx, &dy)) {
+            s32 yawDelta = (s32)(dx * 0.5f);
+            s32 pitchDelta = (s32)(-dy * 0.5f);
+            D_800D6CA0.unk_14 = ((D_800D6CA0.unk_14 - yawDelta) % 360);
+            if (D_800D6CA0.unk_14 < 0) {
+                D_800D6CA0.unk_14 += 360;
+            }
+            D_xk2_80104CB0 += pitchDelta;
+        }
+    }
+#endif
 
     if (D_xk2_80104CB0 < -90) {
         D_xk2_80104CB0 = -90;
@@ -992,13 +1072,6 @@ void func_xk2_800D8F04(void) {
 
 extern s32 D_800D11C8[];
 
-#ifdef PORT
-// Absolute mouse drive (port/gdx_course_edit_mouse.cpp): returns 1 with the cursor position in
-// 320x240 game space when mouse control is active. The drivers below keep their own stock clamp
-// blocks, so the shim deliberately does not know the per-driver ranges.
-extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
-#endif
-
 f32 D_xk2_800F692C[] = { 0.5f, 0.6f, 0.7f, 0.8f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f };
 
 void func_xk2_800D934C(void) {
@@ -1027,17 +1100,24 @@ void func_xk2_800D934C(void) {
     temp_fv0 = D_xk2_800F692C[var_v0] * D_xk2_800F6834;
     temp = gCourseEditCursorYPos;
 #ifdef PORT
-    // Mouse assigns absolutely instead of accumulating from the stick. The Y<36 audio cue and
-    // the clamps below stay shared with the stock path so mouse-driven movement behaves
-    // identically at the edges.
-    if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
-        gCourseEditCursorXPos = mouseX;
-        gCourseEditCursorYPos = mouseY;
-    } else
+    // Suppress all cursor movement while a camera gesture is active so orbit/pan do not fight the
+    // in-game cursor.
+    if (!gdx_course_edit_mouse_camera_gesture_active())
 #endif
     {
-        gCourseEditCursorXPos += (temp_fv0 * temp_a1) / 2;
-        gCourseEditCursorYPos -= (temp_fv0 * temp_a2) / 2;
+#ifdef PORT
+        // Mouse assigns absolutely instead of accumulating from the stick. The Y<36 audio cue and
+        // the clamps below stay shared with the stock path so mouse-driven movement behaves
+        // identically at the edges.
+        if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+            gCourseEditCursorXPos = mouseX;
+            gCourseEditCursorYPos = mouseY;
+        } else
+#endif
+        {
+            gCourseEditCursorXPos += (temp_fv0 * temp_a1) / 2;
+            gCourseEditCursorYPos -= (temp_fv0 * temp_a2) / 2;
+        }
     }
     if ((temp >= 36) && (gCourseEditCursorYPos < 36)) {
         Audio_TriggerSystemSE(NA_SE_35);
@@ -1070,30 +1150,36 @@ void func_xk2_800D950C(void) {
     var_a0 = D_80119720->stickY;
 
 #ifdef PORT
-    // Same absolute mouse drive as func_xk2_800D934C. Must precede the deadzone early-return:
-    // while the mouse drives the cursor the stick is usually centred.
-    if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
-        gCourseEditCursorXPos = mouseX;
-        gCourseEditCursorYPos = mouseY;
-    } else
+    // Suppress all cursor movement while a camera gesture is active.
+    if (!gdx_course_edit_mouse_camera_gesture_active())
 #endif
     {
-        if ((SQ(var_v0) + SQ(var_a0)) < 100) {
-            return;
+#ifdef PORT
+        // Same absolute mouse drive as func_xk2_800D934C. Must precede the deadzone early-return:
+        // while the mouse drives the cursor the stick is usually centred.
+        if (gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+            gCourseEditCursorXPos = mouseX;
+            gCourseEditCursorYPos = mouseY;
+        } else
+#endif
+        {
+            if ((SQ(var_v0) + SQ(var_a0)) < 100) {
+                return;
+            }
+            if (var_v0 < 0) {
+                var_v0 = -var_v0 * var_v0;
+            } else {
+                var_v0 = var_v0 * var_v0;
+            }
+            if (var_a0 < 0) {
+                var_a0 = -var_a0 * var_a0;
+            } else {
+                var_a0 = var_a0 * var_a0;
+            }
+            temp_fv0 = D_xk2_800F692C[D_800D11C8[4]] * D_xk2_800F6834;
+            gCourseEditCursorXPos += (temp_fv0 * var_v0) / 128;
+            gCourseEditCursorYPos -= (temp_fv0 * var_a0) / 128;
         }
-        if (var_v0 < 0) {
-            var_v0 = -var_v0 * var_v0;
-        } else {
-            var_v0 = var_v0 * var_v0;
-        }
-        if (var_a0 < 0) {
-            var_a0 = -var_a0 * var_a0;
-        } else {
-            var_a0 = var_a0 * var_a0;
-        }
-        temp_fv0 = D_xk2_800F692C[D_800D11C8[4]] * D_xk2_800F6834;
-        gCourseEditCursorXPos += (temp_fv0 * var_v0) / 128;
-        gCourseEditCursorYPos -= (temp_fv0 * var_a0) / 128;
     }
     if (gCourseEditCursorXPos < 24) {
         gCourseEditCursorXPos = 24;
@@ -1134,6 +1220,23 @@ void func_xk2_800D9670(void) {
     f32 sp5C;
     s32 i;
 
+#ifdef PORT
+    if (sGdxCourseEditMouseMovePending && (sGdxCourseEditMouseMoveOption == MOVE_OPTION_MOVE_XZ)) {
+        if (gCurrentCourseInfo->length > 300000.0f) {
+            sGdxCourseEditMouseMovePending = false;
+            func_xk2_800EE664(0x1D);
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        sp64 = D_xk2_80119730;
+        sp60 = D_xk2_80119738;
+        D_xk2_80119730 = sGdxCourseEditMouseMoveOffsetX;
+        D_xk2_80119738 = sGdxCourseEditMouseMoveOffsetZ;
+        D_xk2_80119730 = (Math_Round(D_xk2_80119730) / 10) * 10;
+        D_xk2_80119738 = (Math_Round(D_xk2_80119738) / 10) * 10;
+        sGdxCourseEditMouseMovePending = false;
+    } else {
+#endif
     temp_s0 = D_80119720->stickX;
     temp_s1 = D_80119720->stickY;
     var_s2 = 0;
@@ -1206,6 +1309,9 @@ void func_xk2_800D9670(void) {
     }
     D_xk2_80119730 = (Math_Round(D_xk2_80119730) / 10) * 10;
     D_xk2_80119738 = (Math_Round(D_xk2_80119738) / 10) * 10;
+#ifdef PORT
+    }
+#endif
 
     for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
         if (D_80128690[i].unk_08 == 0) {
@@ -1347,6 +1453,20 @@ void func_xk2_800DA288(void) {
     f32 sp54;
     f32 sp50;
 
+#ifdef PORT
+    if (sGdxCourseEditMouseMovePending && (sGdxCourseEditMouseMoveOption == MOVE_OPTION_MOVE_Y)) {
+        if (gCurrentCourseInfo->length > 300000.0f) {
+            sGdxCourseEditMouseMovePending = false;
+            func_xk2_800EE664(0x1D);
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        sp54 = D_xk2_80119734;
+        D_xk2_80119734 = sGdxCourseEditMouseMoveOffsetY;
+        D_xk2_80119734 = (Math_Round(D_xk2_80119734) / 10) * 10;
+        sGdxCourseEditMouseMovePending = false;
+    } else {
+#endif
     temp_v0 = D_80119720->stickX;
     temp_s0 = D_80119720->stickY;
 
@@ -1382,6 +1502,9 @@ void func_xk2_800DA288(void) {
     }
 
     D_xk2_80119734 = (Math_Round(D_xk2_80119734) / 10) * 10;
+#ifdef PORT
+    }
+#endif
 
     for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
         if (D_80128690[i].unk_08 == 0) {
@@ -1760,11 +1883,41 @@ extern s32* gCourseEditMenuOptions[];
 void func_xk2_800DB924(void) {
     s32 i;
     s32 j;
+#ifdef PORT
+    bool deleteRequested = false;
+    u64 selection = 0;
+    extern int gdx_course_edit_controller_a_pressed(int port);
+#endif
 
-    if ((gCreateOption != CREATE_OPTION_POINT) || (gMoveOption != MOVE_OPTION_CLEAR) ||
-        !(D_80119720->buttonPressed & BTN_A)) {
+#ifdef PORT
+    for (i = 0; i < gdx_course_edit_native_point_count(); i++) {
+        if (D_80128690[i].unk_08 != 0) {
+            selection |= (u64)1 << i;
+        }
+    }
+    deleteRequested = gdx_course_edit_input_take_delete(selection, D_802CB6D0.controlPointCount) != 0;
+    if (sGdxCourseEditMouseOwner) {
         return;
     }
+    if (D_800D6CA0.unk_00 != 0 || D_800D6CA0.unk_08 != 0 || D_xk2_80119918 != 0 || gInCourseEditTestRun) {
+        deleteRequested = false;
+    }
+    if (deleteRequested && gCreateOption == CREATE_OPTION_POINT) {
+        gMoveOption = MOVE_OPTION_CLEAR;
+    }
+#endif
+    if ((gCreateOption != CREATE_OPTION_POINT) || (gMoveOption != MOVE_OPTION_CLEAR)) {
+        return;
+    }
+#ifdef PORT
+    if (!deleteRequested && !gdx_course_edit_controller_a_pressed(gPlayerControlPorts[0])) {
+        return;
+    }
+#else
+    if (!(D_80119720->buttonPressed & BTN_A)) {
+        return;
+    }
+#endif
 
     j = 0;
     for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
@@ -1904,6 +2057,25 @@ void func_xk2_800DBEE4(void) {
     if (gInCourseEditTestRun || (D_800D6CA0.unk_08 != 0)) {
         return;
     }
+
+#ifdef PORT
+    if (sGdxCourseEditMouseOwner) {
+        if (sGdxCourseEditMouseMovePending) {
+            switch (sGdxCourseEditMouseMoveOption) {
+                case MOVE_OPTION_MOVE_XZ:
+                    func_xk2_800D9670();
+                    break;
+                case MOVE_OPTION_MOVE_Y:
+                    func_xk2_800DA288();
+                    break;
+                default:
+                    sGdxCourseEditMouseMovePending = false;
+                    break;
+            }
+        }
+        return;
+    }
+#endif
 
     switch (gCreateOption) {
         case CREATE_OPTION_COURSE:
@@ -2071,6 +2243,15 @@ void func_xk2_800DC428(void) {
         return;
     }
 
+#ifdef PORT
+    if (sGdxCourseEditMouseOwner) {
+        if (gdx_course_edit_input_take_drag_cancel()) {
+            gdx_course_edit_restore_mouse_drag();
+        }
+        return;
+    }
+#endif
+
     if (D_80119720->buttonPressed & BTN_B) {
         D_802CB6D0 = D_807B6528;
         D_xk2_801197EC = D_802CB6D0.unk_0000;
@@ -2080,6 +2261,333 @@ void func_xk2_800DC428(void) {
         D_800D6CA0.unk_00 = 0;
     }
 }
+
+#ifdef PORT
+extern CourseData D_8010CF50;
+
+// Select or toggle a control point without starting a drag or entering grab mode.
+void gdx_course_edit_select_point(s32 pointIndex, s32 toggle) {
+    if (sGdxCourseEditMouseOwner || (pointIndex < 0) ||
+        (pointIndex >= gdx_course_edit_native_point_count())) {
+        return;
+    }
+    if (toggle) {
+        D_80128690[pointIndex].unk_08 = (D_80128690[pointIndex].unk_08 != 0) ? 0 : 1;
+    } else {
+        func_xk2_800DC3F8();
+        D_80128690[pointIndex].unk_08 = 1;
+    }
+    D_800D6CA0.unk_0C = pointIndex;
+    D_xk2_800F7040 = 3;
+    Audio_TriggerSystemSE(NA_SE_30);
+}
+
+// Deselect all control points.
+void gdx_course_edit_deselect_all(void) {
+    if (sGdxCourseEditMouseOwner) {
+        return;
+    }
+    func_xk2_800DC3F8();
+    D_xk2_800F7040 = 3;
+}
+
+// Enter point-grab mode on the chosen control point, mirroring the single-click
+// path of func_xk2_800DC2D0. If the point is already part of an active selection,
+// retain the selected group so they move together; otherwise select only target point.
+// The backup copy in D_807B6528 is refreshed first so the drag delta is validated
+// against the original positions.
+void gdx_course_edit_drag_start(s32 pointIndex) {
+    gdx_course_edit_input_request_drag_start(pointIndex);
+}
+
+// Cancel an active drag transaction and restore the pre-drag snapshot cleanly.
+void gdx_course_edit_drag_cancel(void) {
+    gdx_course_edit_input_request_drag_cancel();
+}
+
+// Direct manipulation for scalar tools (width, bank, center offset).
+// Applies target offset derived from drag displacement through stock bounds and snapping.
+static void gdx_course_edit_set_scalar_target(s32 moveOption, s32 targetOffset) {
+    s32 i;
+    f32 temp_fv1;
+    f32 temp_fa0;
+    f32 temp_fa1;
+    f32 temp_fa0_4;
+    s32 sp5C = 0x2710;
+    s32 var_s0 = -0x2710;
+    s32 var_s3 = -0x2710;
+    CourseSegment* temp_s0;
+    CourseSegment* temp_v1_2;
+    s32 temp_ft2;
+
+    if (!sGdxCourseEditMouseOwner || (D_800D6CA0.unk_00 != 1)) {
+        return;
+    }
+
+    targetOffset = moveOption == MOVE_OPTION_BANK ? (targetOffset / 3) * 3 : (targetOffset / 10) * 10;
+    if (targetOffset == 0) {
+        // Imported values need not be grid-aligned; returning to the drag origin preserves them.
+        for (i = 0; i < gdx_course_edit_native_point_count(); i++) {
+            if (D_80128690[i].unk_08 == 0) {
+                continue;
+            }
+            if (moveOption == MOVE_OPTION_BANK) {
+                COURSE_CONTEXT()->courseData.bankAngle[i] = D_8010CF50.bankAngle[i];
+            } else {
+                D_802CB6D0.unk_0000[i].radiusLeft = D_807B6528.unk_0000[i].radiusLeft;
+                D_802CB6D0.unk_0000[i].radiusRight = D_807B6528.unk_0000[i].radiusRight;
+            }
+        }
+        D_xk2_8011973C = 0;
+        D_xk2_80119740 = 0;
+        if (moveOption == MOVE_OPTION_BANK) {
+            func_80074CE4(gCurrentCourseInfo);
+        }
+        D_xk2_800F7040 = 3;
+        return;
+    }
+
+    if (moveOption == 2 /* MOVE_OPTION_WIDTH */) {
+        D_xk2_8011973C = (targetOffset / 10) * 10;
+        for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+            if (D_80128690[i].unk_08 == 0) {
+                continue;
+            }
+            temp_fv1 = D_807B6528.unk_0000[i].radiusRight;
+            temp_fa0 = D_807B6528.unk_0000[i].radiusLeft;
+            temp_fa1 = 1000.0f - ((temp_fv1 + temp_fa0) * 0.5f);
+            if (sp5C > temp_fa1) {
+                sp5C = temp_fa1;
+            }
+            if (var_s0 < 50.0f - temp_fa0) {
+                var_s0 = 50.0f - temp_fa0;
+            }
+            if (var_s0 < 50.0f - temp_fv1) {
+                var_s0 = 50.0f - temp_fv1;
+            }
+        }
+        if (D_xk2_8011973C > sp5C) {
+            D_xk2_8011973C = sp5C;
+        }
+        if (D_xk2_8011973C < var_s0) {
+            D_xk2_8011973C = var_s0;
+        }
+        for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+            if (D_80128690[i].unk_08 == 0) {
+                continue;
+            }
+            D_802CB6D0.unk_0000[i].radiusLeft = D_807B6528.unk_0000[i].radiusLeft + D_xk2_8011973C;
+            D_802CB6D0.unk_0000[i].radiusRight = D_807B6528.unk_0000[i].radiusRight + D_xk2_8011973C;
+            D_802CB6D0.unk_0000[i].radiusLeft = (Math_Round(D_802CB6D0.unk_0000[i].radiusLeft) / 10) * 10;
+            D_802CB6D0.unk_0000[i].radiusRight = (Math_Round(D_802CB6D0.unk_0000[i].radiusRight) / 10) * 10;
+            if (D_802CB6D0.unk_0000[i].radiusLeft < 50.0f) {
+                D_802CB6D0.unk_0000[i].radiusLeft = 50.0f;
+            }
+            if (D_802CB6D0.unk_0000[i].radiusRight < 50.0f) {
+                D_802CB6D0.unk_0000[i].radiusRight = 50.0f;
+            }
+            temp_fa0_4 = D_802CB6D0.unk_0000[i].radiusRight + D_802CB6D0.unk_0000[i].radiusLeft;
+            if (temp_fa0_4 > 2000.0f) {
+                D_802CB6D0.unk_0000[i].radiusLeft = D_802CB6D0.unk_0000[i].radiusLeft - ((temp_fa0_4 * 0.5f) - 1000.0f);
+                D_802CB6D0.unk_0000[i].radiusRight = 2000.0f - D_802CB6D0.unk_0000[i].radiusLeft;
+            }
+        }
+        D_xk2_800F7040 = 3;
+    } else if (moveOption == 4 /* MOVE_OPTION_CENTER */) {
+        var_s0 = 0x2710;
+        var_s3 = -0x2710;
+        D_xk2_80119740 = (targetOffset / 10) * 10;
+        for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+            if (D_80128690[i].unk_08 == 0) {
+                continue;
+            }
+            temp_v1_2 = &D_807B6528.unk_0000[i];
+            temp_fa0 = temp_v1_2->radiusRight - 50.0f;
+            if (var_s0 > temp_fa0) {
+                var_s0 = temp_fa0;
+            }
+            temp_fa0 = (temp_v1_2->radiusLeft - 50.0f) * -1.0f;
+            if (var_s3 < temp_fa0) {
+                var_s3 = temp_fa0;
+            }
+        }
+        if (D_xk2_80119740 > var_s0) {
+            D_xk2_80119740 = var_s0;
+        }
+        if (D_xk2_80119740 < var_s3) {
+            D_xk2_80119740 = var_s3;
+        }
+        for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+            if (D_80128690[i].unk_08 == 0) {
+                continue;
+            }
+            temp_s0 = &D_802CB6D0.unk_0000[i];
+            temp_v1_2 = &D_807B6528.unk_0000[i];
+            temp_ft2 = temp_s0->radiusLeft + temp_s0->radiusRight;
+            temp_s0->radiusLeft = temp_v1_2->radiusLeft + D_xk2_80119740;
+            temp_s0->radiusRight = temp_v1_2->radiusRight - D_xk2_80119740;
+            temp_s0->radiusLeft = (Math_Round(temp_s0->radiusLeft) / 10) * 10;
+            temp_s0->radiusRight = (Math_Round(temp_s0->radiusRight) / 10) * 10;
+            if (temp_s0->radiusLeft < 50.0f) {
+                temp_s0->radiusLeft = 50.0f;
+                temp_s0->radiusRight = temp_ft2 - 50;
+            }
+            if (temp_s0->radiusRight < 50.0f) {
+                temp_s0->radiusRight = 50.0f;
+                temp_s0->radiusLeft = temp_ft2 - 50;
+            }
+        }
+        D_xk2_800F7040 = 3;
+    } else if (moveOption == 3 /* MOVE_OPTION_BANK */) {
+        s32 deltaAngle = (targetOffset / 3) * 3;
+        for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+            if (D_80128690[i].unk_08 == 0) {
+                continue;
+            }
+            COURSE_CONTEXT()->courseData.bankAngle[i] =
+                (D_8010CF50.bankAngle[i] + deltaAngle + 3600) % 360;
+            COURSE_CONTEXT()->courseData.bankAngle[i] =
+                (COURSE_CONTEXT()->courseData.bankAngle[i] / 3) * 3;
+        }
+        func_80074CE4(gCurrentCourseInfo);
+        D_xk2_800F7040 = 3;
+    }
+}
+
+s32 gdx_course_edit_native_mouse_owned(void) {
+    return sGdxCourseEditMouseOwner ? 1 : 0;
+}
+
+const void* gdx_course_edit_native_menu_id(void) {
+    if (D_800D6CA0.unk_08 == 3) {
+        return &D_800D6CA0;
+    }
+    if (D_800D6CA0.unk_08 == 1 && gCourseEditWidget.openIndex != INVALID_OPTION) {
+        return func_xk1_80026914(&gCourseEditWidget);
+    }
+    return NULL;
+}
+
+static void gdx_course_edit_restore_mouse_drag(void) {
+    s32 i;
+
+    if (!sGdxCourseEditMouseOwner) {
+        return;
+    }
+    D_802CB6D0 = D_807B6528;
+    COURSE_CONTEXT()->courseData = D_8010CF50;
+    for (i = 0; i < 64; i++) {
+        D_80128690[i] = D_xk2_80128990[i];
+    }
+    D_xk2_801197EC = D_802CB6D0.unk_0000;
+    D_xk2_800F704C = -1;
+    D_xk2_80119730 = 0.0f;
+    D_xk2_80119734 = 0.0f;
+    D_xk2_80119738 = 0.0f;
+    D_xk2_8011973C = 0;
+    D_xk2_80119740 = 0;
+    func_xk2_800F5C50();
+    func_80074CE4(gCurrentCourseInfo);
+    D_800D6CA0.unk_0C = D_xk2_80119800;
+    D_800D6CA0.unk_00 = 0;
+    D_xk2_800F7040 = 3;
+    Audio_TriggerSystemSE(NA_SE_32);
+    sGdxCourseEditMouseOwner = false;
+    sGdxCourseEditMouseMovePending = false;
+    gdx_course_edit_input_clear();
+}
+
+static void gdx_course_edit_begin_mouse_drag(s32 pointIndex) {
+    if (sGdxCourseEditMouseOwner || (D_800D6CA0.unk_00 != 0) ||
+        (gCreateOption != CREATE_OPTION_POINT) || (D_800D6CA0.unk_08 != 0) ||
+        gInCourseEditTestRun || D_802CB6D0.controlPointCount > 64 || (pointIndex < 0) ||
+        (pointIndex >= gdx_course_edit_native_point_count())) {
+        return;
+    }
+
+    // The native snapshot includes geometry, effects, and selection, so it must precede the
+    // selection adjustment that starts a drag.
+    func_xk2_800EF78C();
+    if (D_80128690[pointIndex].unk_08 == 0) {
+        func_xk2_800DC3F8();
+        D_80128690[pointIndex].unk_08 = 1;
+    }
+    D_800D6CA0.unk_0C = pointIndex;
+    D_xk2_800F704C = -1;
+    D_xk2_80119730 = 0.0f;
+    D_xk2_80119734 = 0.0f;
+    D_xk2_80119738 = 0.0f;
+    D_xk2_8011973C = 0;
+    D_xk2_80119740 = 0;
+    D_800D6CA0.unk_00 = 1;
+    D_xk2_800F7040 = 3;
+    sGdxCourseEditMouseOwner = true;
+    sGdxCourseEditMouseTool = gMoveOption;
+}
+
+void gdx_course_edit_native_update(void) {
+    s32 pointIndex;
+    s32 moveOption;
+    s32 targetOffset;
+    GdxCourseEditVec3 target;
+
+    if (sGdxCourseEditMouseOwner) {
+        if ((gCreateOption != CREATE_OPTION_POINT) || (D_800D6CA0.unk_08 != 0) || gInCourseEditTestRun ||
+            (D_800D6CA0.unk_00 != 1) || D_xk2_80119918 != 0 || gMoveOption != sGdxCourseEditMouseTool ||
+            gdx_course_edit_input_take_drag_cancel()) {
+            gdx_course_edit_input_clear();
+            gdx_course_edit_restore_mouse_drag();
+            return;
+        }
+        if (gdx_course_edit_input_take_move_target(&moveOption, &target)) {
+            pointIndex = D_800D6CA0.unk_0C;
+            if (moveOption == sGdxCourseEditMouseTool &&
+                ((moveOption == MOVE_OPTION_MOVE_XZ) || (moveOption == MOVE_OPTION_MOVE_Y)) &&
+                (pointIndex >= 0) && (pointIndex < gdx_course_edit_native_point_count())) {
+                sGdxCourseEditMouseMoveOption = moveOption;
+                sGdxCourseEditMouseMoveOffsetX = target.x - D_807B6528.unk_0000[pointIndex].pos.x;
+                sGdxCourseEditMouseMoveOffsetY = target.y - D_807B6528.unk_0000[pointIndex].pos.y;
+                sGdxCourseEditMouseMoveOffsetZ = target.z - D_807B6528.unk_0000[pointIndex].pos.z;
+                sGdxCourseEditMouseMovePending = true;
+            }
+        }
+        if (gdx_course_edit_input_take_scalar_target(&moveOption, &targetOffset)) {
+            if (moveOption == sGdxCourseEditMouseTool && ((moveOption == MOVE_OPTION_WIDTH) ||
+                (moveOption == MOVE_OPTION_BANK) || (moveOption == MOVE_OPTION_CENTER))) {
+                gdx_course_edit_set_scalar_target(moveOption, targetOffset);
+            }
+        }
+        return;
+    }
+
+    if ((gCreateOption != CREATE_OPTION_POINT) || (D_800D6CA0.unk_08 != 0) || gInCourseEditTestRun ||
+        D_xk2_80119918 != 0 || D_800D6CA0.unk_00 != 0) {
+        gdx_course_edit_input_clear();
+        return;
+    }
+    if (gdx_course_edit_input_take_drag_cancel()) {
+        gdx_course_edit_input_clear();
+        return;
+    }
+    if (gdx_course_edit_input_take_drag_start(&pointIndex)) {
+        gdx_course_edit_begin_mouse_drag(pointIndex);
+        return;
+    }
+    if (gdx_course_edit_input_take_selection(&pointIndex, &moveOption)) {
+        if (pointIndex == -1) {
+            gdx_course_edit_deselect_all();
+        } else {
+            gdx_course_edit_select_point(pointIndex, moveOption);
+        }
+    }
+
+    // Movement and drag edges are meaningful only after the native owner accepts a begin.
+    gdx_course_edit_input_take_move_target(NULL, NULL);
+    gdx_course_edit_input_take_scalar_target(NULL, NULL);
+    gdx_course_edit_input_take_drag_commit();
+    gdx_course_edit_input_take_drag_cancel();
+}
+#endif
 
 void func_xk2_800DC4E4(void) {
     if ((D_80119720->buttonPressed & BTN_A) && (D_800D6CA0.unk_08 == 0) && (gPointOption == POINT_OPTION_START) &&
@@ -2221,11 +2729,23 @@ void func_xk2_800DC67C(void) {
 void func_xk2_800DCCD8(void) {
     CourseSegment* temp_at = &D_800D6CA0.unk_28;
     CourseSegment* temp_v0_2;
+#ifdef PORT
+    bool commitRequested;
+#endif
 
     if ((gCreateOption != CREATE_OPTION_POINT) || (D_800D6CA0.unk_00 != 1)) {
         return;
     }
+#ifdef PORT
+    if (sGdxCourseEditMouseOwner) {
+        commitRequested = gdx_course_edit_input_take_drag_commit() != 0;
+    } else {
+        commitRequested = (D_80119720->buttonPressed & BTN_A) != 0;
+    }
+    if ((gMoveOption != MOVE_OPTION_CLEAR) && commitRequested) {
+#else
     if ((gMoveOption != MOVE_OPTION_CLEAR) && (D_80119720->buttonPressed & BTN_A)) {
+#endif
         D_xk2_800F7040 = 3;
         if (D_8076C968 != 0) {
             func_xk2_800DE4F8();
@@ -2234,11 +2754,26 @@ void func_xk2_800DCCD8(void) {
             Audio_TriggerSystemSE(NA_SE_39);
         }
         func_xk2_800DC3F8();
+#ifdef PORT
+        // Mouse transactions do not use the controller's highlighted-point sentinel.
+        {
+            s32 index = sGdxCourseEditMouseOwner ? D_800D6CA0.unk_0C : D_xk2_800F704C;
+            if (index >= 0 && index < gdx_course_edit_native_point_count()) {
+                temp_v0_2 = &D_802CB6D0.unk_0000[index];
+                temp_at->radiusLeft = temp_v0_2->radiusLeft;
+                temp_at->radiusRight = temp_v0_2->radiusRight;
+            }
+        }
+#else
         temp_v0_2 = &D_802CB6D0.unk_0000[D_xk2_800F704C];
         temp_at->radiusLeft = temp_v0_2->radiusLeft;
         temp_at->radiusRight = temp_v0_2->radiusRight;
+#endif
         D_xk2_800F704C = -1;
         D_800D6CA0.unk_00 = 0;
+#ifdef PORT
+        sGdxCourseEditMouseOwner = false;
+#endif
     }
 }
 
@@ -3086,19 +3621,10 @@ void func_xk2_800DE758(void) {
     // single X column; keep raw mouse movement and use the wheel to scroll long vertical lists.
     if (mouseDriven && (gCourseEditWidget.openIndex != INVALID_OPTION)) {
         MenuWidget* active = func_xk1_80026914(&gCourseEditWidget);
-        s32 wheel = gdx_course_edit_mouse_wheel();
-
-        if ((wheel != 0) && (active->itemYOffset != 0) && (active->numItems > 10)) {
-            s32 maxOffset = (active->numItems - 10) * active->itemYOffset;
-            s32 newOffset = sMenuPageYOffset + (wheel * active->itemYOffset);
-
-            if (newOffset < 0) {
-                newOffset = 0;
-            } else if (newOffset > maxOffset) {
-                newOffset = maxOffset;
-            }
-            sMenuPageYOffset = newOffset;
-        }
+        extern int gdx_course_edit_mouse_menu_wheel(void);
+        s32 wheel = gdx_course_edit_mouse_menu_wheel();
+        sMenuPageYOffset = gdx_course_edit_menu_scroll(sMenuPageYOffset, active->numItems,
+                                                      active->itemYOffset, wheel);
     } else
 #endif
     {

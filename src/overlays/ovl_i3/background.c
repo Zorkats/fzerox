@@ -4,9 +4,53 @@
 #include "fzx_course.h"
 #include "fzx_camera.h"
 #include "background.h"
+
+#ifndef GDX_BACKGROUND_SKYLINE_TEST
 #include ASSET_HEADER(common_assets_compressed.h)
 #include ASSET_HEADER(machine_custom_gfx.h)
+#endif
 
+typedef enum BackgroundSpriteSelection {
+    BACKGROUND_SPRITE_SELECTION_NONE,
+    BACKGROUND_SPRITE_SELECTION_COURSE,
+    BACKGROUND_SPRITE_SELECTION_RANDOM,
+    BACKGROUND_SPRITE_SELECTION_ENDING,
+} BackgroundSpriteSelection;
+
+static BackgroundSpriteSelection Background_SelectSpriteSelection(s32 courseIndex, s32 venueType,
+                                                                  bool inCourseEditTestRun,
+                                                                  s32 overallPosition) {
+#ifdef EXPANSION_KIT
+    if (inCourseEditTestRun && (venueType != VENUE_ENDING)) {
+        return BACKGROUND_SPRITE_SELECTION_NONE;
+    }
+#ifdef PORT
+    // Course Edit starts test runs at index 0; the ending venue must win only in that context.
+    if (inCourseEditTestRun && (venueType == VENUE_ENDING)) {
+        return BACKGROUND_SPRITE_SELECTION_ENDING;
+    }
+#endif
+#endif
+
+    if (courseIndex < COURSE_EDIT_1) {
+        return BACKGROUND_SPRITE_SELECTION_COURSE;
+    }
+    if ((courseIndex >= COURSE_X_1) && (courseIndex <= COURSE_X_6)) {
+        return BACKGROUND_SPRITE_SELECTION_RANDOM;
+    }
+    if (courseIndex == COURSE_ENDING) {
+        if (overallPosition >= 4) {
+            return BACKGROUND_SPRITE_SELECTION_NONE;
+        }
+        return BACKGROUND_SPRITE_SELECTION_ENDING;
+    }
+    if (venueType == VENUE_ENDING) {
+        return BACKGROUND_SPRITE_SELECTION_ENDING;
+    }
+    return BACKGROUND_SPRITE_SELECTION_NONE;
+}
+
+#ifndef GDX_BACKGROUND_SKYLINE_TEST
 Background sBackgrounds[4];
 s32 sBackgroundCount;
 s16 sIsEndingCutscene;
@@ -1185,6 +1229,7 @@ void Background_InitBackgroundSprites(void) {
     s32 replacementIndex;
     void** texturePalettePair;
     BackgroundSpriteInitData spriteInitDataBuffer[8];
+    bool inCourseEditTestRun;
 
     sBackgroundSpriteCount = 0;
     if (gNumPlayers != 1) {
@@ -1192,45 +1237,45 @@ void Background_InitBackgroundSprites(void) {
     }
 
 #ifdef EXPANSION_KIT
-    if (gInCourseEditTestRun && (gVenueType != VENUE_ENDING)) {
-        return;
-    }
+    inCourseEditTestRun = gInCourseEditTestRun;
+#else
+    inCourseEditTestRun = false;
 #endif
 
-    if (gCourseIndex < COURSE_EDIT_1) {
-        bgSpriteInitData = sBackgroundSpriteCourseInitData[gCourseIndex];
-    } else if ((gCourseIndex >= COURSE_X_1) && (gCourseIndex <= COURSE_X_6)) {
-        j = Math_Rand1() % 7;
-        bgSpriteInitData = spriteInitDataBuffer;
-        if (j > 0) {
-            rotationIncrement = 360.0f / j;
-        }
-
-        for (i = 0; i < j; i++) {
-            if (sSkyboxFlags & SKYBOX_NIGHTTIME) {
-                bgSpriteInitData->spriteId = sNighttimeBackgroundSprites[Math_Rand1() % 12];
-            } else {
-                bgSpriteInitData->spriteId = sDaytimeBackgroundSprites[Math_Rand1() % 34];
-                if ((Math_Rand1() % 3) == 0) {
-                    bgSpriteInitData->spriteId = BG_SPRITE_MAN_STATUE_2;
-                }
+    switch (Background_SelectSpriteSelection(gCourseIndex, gVenueType, inCourseEditTestRun,
+                                             gPlayer1OverallPosition)) {
+        case BACKGROUND_SPRITE_SELECTION_COURSE:
+            bgSpriteInitData = sBackgroundSpriteCourseInitData[gCourseIndex];
+            break;
+        case BACKGROUND_SPRITE_SELECTION_RANDOM:
+            j = Math_Rand1() % 7;
+            bgSpriteInitData = spriteInitDataBuffer;
+            if (j > 0) {
+                rotationIncrement = 360.0f / j;
             }
-            bgSpriteInitData->angle = i * rotationIncrement;
-            bgSpriteInitData++;
-        }
-        bgSpriteInitData->spriteId = BG_SPRITE_END;
-        bgSpriteInitData->angle = 0.0f;
-        bgSpriteInitData = spriteInitDataBuffer;
-    } else if (gCourseIndex == COURSE_ENDING) {
-        bgSpriteInitData = sBackgroundSpriteInitEnding;
-        if (gPlayer1OverallPosition >= 4) {
+
+            for (i = 0; i < j; i++) {
+                if (sSkyboxFlags & SKYBOX_NIGHTTIME) {
+                    bgSpriteInitData->spriteId = sNighttimeBackgroundSprites[Math_Rand1() % 12];
+                } else {
+                    bgSpriteInitData->spriteId = sDaytimeBackgroundSprites[Math_Rand1() % 34];
+                    if ((Math_Rand1() % 3) == 0) {
+                        bgSpriteInitData->spriteId = BG_SPRITE_MAN_STATUE_2;
+                    }
+                }
+                bgSpriteInitData->angle = i * rotationIncrement;
+                bgSpriteInitData++;
+            }
+            bgSpriteInitData->spriteId = BG_SPRITE_END;
+            bgSpriteInitData->angle = 0.0f;
+            bgSpriteInitData = spriteInitDataBuffer;
+            break;
+        case BACKGROUND_SPRITE_SELECTION_ENDING:
+            bgSpriteInitData = sBackgroundSpriteInitEnding;
+            break;
+        case BACKGROUND_SPRITE_SELECTION_NONE:
+        default:
             return;
-        }
-    } else if (gVenueType == VENUE_ENDING) {
-        // Course Edit custom tracks using the ending venue get the ceremony skyline.
-        bgSpriteInitData = sBackgroundSpriteInitEnding;
-    } else {
-        return;
     }
 
     backgroundSprite = sBackgroundSprites;
@@ -1601,3 +1646,5 @@ Gfx* Background_DrawStars(Gfx* gfx, s32 cameraIndex) {
 
     return gfx;
 }
+
+#endif

@@ -19,6 +19,9 @@ typedef enum CourseEffects {
     COURSE_EFFECT_DIRT,
     COURSE_EFFECT_DASH,
     COURSE_EFFECT_ICE,
+#ifdef EXPANSION_KIT
+    COURSE_EFFECT_LAVA,
+#endif
 } CourseEffects;
 
 #define COURSE_EFFECT_MASK 0xF
@@ -43,6 +46,7 @@ typedef enum CourseEffects {
 #define RACER_STATE_ACTIVE (1 << 30)
 #define RACER_STATE_FLAGS_80000000 (1 << 31)
 
+#define RACER_SE_FLAGS_LAVA (1 << 4)
 #define RACER_SE_FLAGS_ICE (1 << 5)
 #define RACER_SE_FLAGS_DRIFT_SLIDE (1 << 6)
 #define RACER_SE_FLAGS_BRAKE (1 << 7)

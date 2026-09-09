@@ -1856,8 +1856,19 @@ void Audio_BgmFadeoutPause(void) {
 }
 
 void Audio_LevelSEStart(u8 playerIndex, u8 sfxId) {
+    u8 seSampleId;
 
     PRINTF("==BANDO== LEVEL SE INTERNAL CALL! player=%02x SE Number= %02x \n", playerIndex, sfxId);
+
+    seSampleId = sfxId;
+#ifdef EXPANSION_KIT
+    // Lava must share the NA_LEVEL_SE_4 instrument because the cart/disk soundfont tables are frozen
+    // (a new sample would shift ROM bank offsets / break decomp asset parity). The per-tick scaler
+    // below still gives it a lower, harsher voice than the pit-heal loop.
+    if (sfxId == NA_LEVEL_SE_LAVA) {
+        seSampleId = NA_LEVEL_SE_4;
+    }
+#endif
 
     if (sActivePlayerLevelSE[playerIndex][0] == NA_LEVEL_SE_NONE) {
         sActivePlayerLevelSE[playerIndex][0] = sfxId;
@@ -1908,7 +1919,7 @@ void Audio_LevelSEStart(u8 playerIndex, u8 sfxId) {
         case 0:
             AUDIOCMD_CHANNEL_SET_PAN(0, 6, 0x3F);
             PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex, sfxId);
-            Audio_SEStart(6, sfxId);
+            Audio_SEStart(6, seSampleId);
             break;
         case 1:
             switch (playerIndex) {
@@ -1916,13 +1927,13 @@ void Audio_LevelSEStart(u8 playerIndex, u8 sfxId) {
                     AUDIOCMD_CHANNEL_SET_PAN(0, 6, 0);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
                            LEVEL_SE_2P(sfxId));
-                    Audio_SEStart(6, LEVEL_SE_2P(sfxId));
+                    Audio_SEStart(6, LEVEL_SE_2P(seSampleId));
                     break;
                 case 1:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 7, 0x7F);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
                            LEVEL_SE_2P(sfxId));
-                    Audio_SEStart(7, LEVEL_SE_2P(sfxId));
+                    Audio_SEStart(7, LEVEL_SE_2P(seSampleId));
                     break;
             }
             break;
@@ -1931,20 +1942,20 @@ void Audio_LevelSEStart(u8 playerIndex, u8 sfxId) {
                 case 0:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 6, 0);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(6, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(6, LEVEL_SE_MP(seSampleId));
                     break;
                 case 1:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 7, 0);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(7, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(7, LEVEL_SE_MP(seSampleId));
                     break;
                 case 2:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 8, 0x7F);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(8, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(8, LEVEL_SE_MP(seSampleId));
                     break;
             }
             break;
@@ -1953,26 +1964,26 @@ void Audio_LevelSEStart(u8 playerIndex, u8 sfxId) {
                 case 0:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 6, 0);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(6, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(6, LEVEL_SE_MP(seSampleId));
                     break;
                 case 1:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 7, 0);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(7, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(7, LEVEL_SE_MP(seSampleId));
                     break;
                 case 2:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 8, 0x7F);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(8, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(8, LEVEL_SE_MP(seSampleId));
                     break;
                 case 3:
                     AUDIOCMD_CHANNEL_SET_PAN(0, 9, 0x7F);
                     PRINTF("==BANDO== LEVEL SE FINAL CALL! player=%02x SE Number= %02x \n", playerIndex,
-                           LEVEL_SE_MP(sfxId));
-                    Audio_SEStart(9, LEVEL_SE_MP(sfxId));
+                           LEVEL_SE_MP(seSampleId));
+                    Audio_SEStart(9, LEVEL_SE_MP(seSampleId));
                     break;
             }
             break;
@@ -2420,6 +2431,12 @@ void func_80744BDC(u8 playerIndex) {
             volumeScale = 1.0f;
             freqScale = 1.0f;
             break;
+        case 12:
+        case 22:
+        case 32:
+            volumeScale = 1.0f;
+            freqScale = 0.78f; // Lava: same instrument as the pit loop, pitched down for a heavier drain
+            break;
         case 5:
         case 15:
         case 25:
@@ -2530,7 +2547,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 10, 80);
                 }
-                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4)) {
+                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4) || (sActivePlayerLevelSE[0][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 80);
@@ -2558,7 +2575,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 10, 80);
                 }
-                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4)) {
+                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4) || (sActivePlayerLevelSE[0][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 80);
@@ -2576,7 +2593,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 11, 80);
                 }
-                if ((sActivePlayerLevelSE[1][0] == 3) || (sActivePlayerLevelSE[1][0] == 4)) {
+                if ((sActivePlayerLevelSE[1][0] == 3) || (sActivePlayerLevelSE[1][0] == 4) || (sActivePlayerLevelSE[1][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 7, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 7, 80);
@@ -2602,7 +2619,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 10, 80);
                 }
-                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4)) {
+                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4) || (sActivePlayerLevelSE[0][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 80);
@@ -2620,7 +2637,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 11, 80);
                 }
-                if ((sActivePlayerLevelSE[1][0] == 3) || (sActivePlayerLevelSE[1][0] == 4)) {
+                if ((sActivePlayerLevelSE[1][0] == 3) || (sActivePlayerLevelSE[1][0] == 4) || (sActivePlayerLevelSE[1][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 7, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 7, 80);
@@ -2638,7 +2655,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 12, 80);
                 }
-                if ((sActivePlayerLevelSE[2][0] == 3) || (sActivePlayerLevelSE[2][0] == 4)) {
+                if ((sActivePlayerLevelSE[2][0] == 3) || (sActivePlayerLevelSE[2][0] == 4) || (sActivePlayerLevelSE[2][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 8, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 8, 80);
@@ -2664,7 +2681,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 10, 80);
                 }
-                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4)) {
+                if ((sActivePlayerLevelSE[0][0] == 3) || (sActivePlayerLevelSE[0][0] == 4) || (sActivePlayerLevelSE[0][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 6, 80);
@@ -2682,7 +2699,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 11, 80);
                 }
-                if ((sActivePlayerLevelSE[1][0] == 3) || (sActivePlayerLevelSE[1][0] == 4)) {
+                if ((sActivePlayerLevelSE[1][0] == 3) || (sActivePlayerLevelSE[1][0] == 4) || (sActivePlayerLevelSE[1][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 7, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 7, 80);
@@ -2700,7 +2717,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 12, 80);
                 }
-                if ((sActivePlayerLevelSE[2][0] == 3) || (sActivePlayerLevelSE[2][0] == 4)) {
+                if ((sActivePlayerLevelSE[2][0] == 3) || (sActivePlayerLevelSE[2][0] == 4) || (sActivePlayerLevelSE[2][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 8, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 8, 80);
@@ -2718,7 +2735,7 @@ void Audio_UpdateReverb(u8 playerIndex) {
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 13, 80);
                 }
-                if ((sActivePlayerLevelSE[3][0] == 3) || (sActivePlayerLevelSE[3][0] == 4)) {
+                if ((sActivePlayerLevelSE[3][0] == 3) || (sActivePlayerLevelSE[3][0] == 4) || (sActivePlayerLevelSE[3][0] == 12)) {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 9, 0);
                 } else {
                     AUDIOCMD_CHANNEL_SET_REVERB_VOLUME(0, 9, 80);

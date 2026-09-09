@@ -24,13 +24,17 @@ extern s32 gCourseEditCursorXPos;
 extern s32 gCourseEditCursorYPos;
 
 #ifdef PORT
+#include "../../../../port/gdx_course_edit_input.h"
+#include "../../../../port/gdx_course_edit_menu.h"
 // Absolute mouse drive (port/gdx_course_edit_mouse.cpp): keeps the Course Edit cursor following
 // the mouse while in-game sub-menus (BGM/background/file pickers, name entry, etc.) are open.
 // The cursor drivers in func_xk2_800DBEE4 are skipped when D_800D6CA0.unk_08 != 0, which would
 // otherwise freeze the cursor in those sub-menus.
 extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
 extern int gdx_course_edit_mouse_wheel(void);
-extern void CourseEdit_ApplyMouseToFileList(void);
+extern int gdx_course_edit_mouse_menu_wheel(void);
+extern s32 CourseEdit_ApplyMouseToFileList(void);
+extern int gdx_course_edit_controller_a_pressed(int port);
 #endif
 
 void func_xk2_800EC2A0(void) {
@@ -285,6 +289,19 @@ void func_xk2_800EC91C(void) {
     D_800D6CA0.unk_0C = gRacers[0].segmentPositionInfo.courseSegment->next->segmentIndex;
 }
 
+#ifdef PORT
+static void gdx_course_edit_test_run_handle_esc(void) {
+    if (gGamePaused) {
+        func_xk2_800EC91C();
+    } else {
+        gGamePaused = true;
+        func_xk2_800F632C();
+        Audio_TriggerSystemSE(NA_SE_12);
+        Audio_PauseSet(AUDIO_PAUSE_PAUSED);
+    }
+}
+#endif
+
 extern s32 D_xk1_8003A550;
 extern s32 D_xk1_8003A554;
 extern s32 D_800D11C8[];
@@ -296,7 +313,24 @@ extern s32 func_xk1_80026958(MenuWidget*, s32, s32);
 #endif
 
 void func_xk2_800EC9BC(void) {
+#ifdef PORT
+    bool arrowConsumed = false;
+#endif
     func_xk2_800DE758();
+#ifdef PORT
+    if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) {
+        s32 x;
+        s32 y;
+        MenuWidget* active = func_xk1_80026914(&gCourseEditWidget);
+        if (gCourseEditWidget.openIndex != INVALID_OPTION && gdx_course_edit_mouse_pos(&x, &y) &&
+            gdx_course_edit_menu_arrow_hit(active->left, active->top, active->itemYOffset,
+                                          active->numItems, sMenuPageYOffset, x, y)) {
+            sMenuPageYOffset = gdx_course_edit_menu_scroll(sMenuPageYOffset, active->numItems,
+                                                          active->itemYOffset, 1);
+            arrowConsumed = true;
+        }
+    }
+#endif
     func_xk1_80027CFC(&gCourseEditWidget, &D_xk1_8003A550, &D_xk1_8003A554);
 #ifdef PORT
     // With a drop-down open, hovering a different top-menu tab should switch to that tab
@@ -347,7 +381,11 @@ void func_xk2_800EC9BC(void) {
         gLastCourseBGM = -1;
         D_800D6CA0.unk_08 = 0;
     }
-    if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) {
+    if ((gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A)
+#ifdef PORT
+        && !arrowConsumed
+#endif
+    ) {
         func_xk1_80027DC8(&gCourseEditWidget, &D_xk1_8003A550, &D_xk1_8003A554);
     }
     func_xk1_80028064();
@@ -475,6 +513,10 @@ s32 CourseEdit_Update(void) {
     func_xk1_8002D974();
 
 #ifdef PORT
+    gdx_course_edit_native_update();
+#endif
+
+#ifdef PORT
     // While an in-game Course Edit sub-menu or full overlay is open, func_xk2_800DBEE4 is not
     // reached, so the cursor drivers cannot move the cursor. Update it directly from the mouse
     // here so the BGM/background/file pickers, CREATE/POINT screens, and the help overlay stay
@@ -494,8 +536,19 @@ s32 CourseEdit_Update(void) {
 #endif
 
     if (gInCourseEditTestRun) {
+#ifdef PORT
+        if (gdx_course_edit_input_take_test_esc(1)) {
+            gdx_course_edit_test_run_handle_esc();
+            if (!gInCourseEditTestRun) {
+                return GAMEMODE_COURSE_EDIT;
+            }
+        }
+#endif
         return func_xk2_800ECBC0();
     }
+#ifdef PORT
+    gdx_course_edit_input_take_test_esc(0);
+#endif
     if ((D_xk2_80119918 == 0) && (D_800D6CA0.unk_08 != 0xFF)) {
         func_xk2_800DEE20();
     }
@@ -601,27 +654,20 @@ s32 CourseEdit_Update(void) {
             break;
         case 0x3:
 #ifdef PORT
-            CourseEdit_ApplyMouseToFileList();
-            {
-                s32 wheel = gdx_course_edit_mouse_wheel();
-                if (wheel != 0) {
-                    s32 count = D_xk1_8003A5D0;
-                    if (count > 0) {
-                        D_xk1_80032BDC += wheel;
-                        if (D_xk1_80032BDC < 0) {
-                            D_xk1_80032BDC = 0;
-                        } else if (D_xk1_80032BDC >= count) {
-                            D_xk1_80032BDC = count - 1;
-                        }
-                        func_xk1_8002BB50();
-                    }
-                }
+        {
+            s32 mouseRow = CourseEdit_ApplyMouseToFileList();
+            func_xk1_8002BBA4();
+            if ((gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) &&
+                (mouseRow || gdx_course_edit_controller_a_pressed(gPlayerControlPorts[0]))) {
+                func_xk2_800EB400();
             }
-#endif
+        }
+#else
             func_xk1_8002BBA4();
             if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) {
                 func_xk2_800EB400();
             }
+#endif
             if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_B) {
                 func_xk2_800EB3B4();
             }

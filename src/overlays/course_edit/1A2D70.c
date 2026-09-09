@@ -263,3 +263,98 @@ void func_xk2_800F1938(void) {
             (TRACK_FLAG_JOINABLE | TRACK_FLAG_8000000 | TRACK_SHAPE_ROAD | ROAD_START_LINE);
     }
 }
+
+#ifdef PORT
+// Unproject a 320x240 Course Edit screen pixel onto the world-space plane Y = planeY.
+// Uses the same camera basis/fov math as func_xk2_800F1938 but works for arbitrary Y.
+bool gdx_course_edit_unproject_to_plane(s32 screenX, s32 screenY, f32 planeY, Vec3f* outPos) {
+    Camera* camera = gCameras;
+    f32 hFov;
+    f32 xAngle;
+    f32 yAngle;
+    f32 xOff;
+    f32 yOff;
+    Vec3f farPos;
+    f32 dy;
+    f32 t;
+
+    hFov = (camera->fov * 320.0f) / 240.0f;
+    xAngle = ((screenX - 160.0f) / 320.0f) * hFov;
+    yAngle = ((screenY - 120.0f) / 240.0f) * camera->fov;
+    xAngle = (4096.0f * xAngle) / 360.0f;
+    yAngle = (4096.0f * yAngle) / 360.0f;
+    xOff = (10000.0f * SIN((s32) xAngle)) / COS((s32) xAngle);
+    yOff = (10000.0f * SIN((s32) yAngle)) / COS((s32) yAngle);
+
+    farPos.x = camera->eye.x + (camera->basis.x.x * 10000.0f) - (yOff * camera->basis.y.x) -
+               (xOff * camera->basis.z.x);
+    farPos.y = camera->eye.y + (camera->basis.x.y * 10000.0f) - (yOff * camera->basis.y.y) -
+               (xOff * camera->basis.z.y);
+    farPos.z = camera->eye.z + (camera->basis.x.z * 10000.0f) - (yOff * camera->basis.y.z) -
+               (xOff * camera->basis.z.z);
+
+    dy = farPos.y - camera->eye.y;
+    if (ABS(dy) < 1.0f) {
+        return false;
+    }
+    t = (planeY - camera->eye.y) / dy;
+    outPos->x = camera->eye.x + (t * (farPos.x - camera->eye.x));
+    outPos->y = planeY;
+    outPos->z = camera->eye.z + (t * (farPos.z - camera->eye.z));
+    return true;
+}
+
+// Intersect the cursor ray with the vertical line X = fixedX, Z = fixedZ.
+// Used for MOVE_OPTION_MOVE_Y dragging: the point stays at its X/Z while the
+// mouse drives Y along the ray through the cursor.
+bool gdx_course_edit_unproject_to_vertical_line(s32 screenX, s32 screenY, f32 fixedX, f32 fixedZ, f32* outY) {
+    Camera* camera = gCameras;
+    f32 hFov;
+    f32 xAngle;
+    f32 yAngle;
+    f32 xOff;
+    f32 yOff;
+    Vec3f farPos;
+    f32 rdx;
+    f32 rdy;
+    f32 rdz;
+    f32 t;
+
+    hFov = (camera->fov * 320.0f) / 240.0f;
+    xAngle = ((screenX - 160.0f) / 320.0f) * hFov;
+    yAngle = ((screenY - 120.0f) / 240.0f) * camera->fov;
+    xAngle = (4096.0f * xAngle) / 360.0f;
+    yAngle = (4096.0f * yAngle) / 360.0f;
+    xOff = (10000.0f * SIN((s32) xAngle)) / COS((s32) xAngle);
+    yOff = (10000.0f * SIN((s32) yAngle)) / COS((s32) yAngle);
+
+    farPos.x = camera->eye.x + (camera->basis.x.x * 10000.0f) - (yOff * camera->basis.y.x) -
+               (xOff * camera->basis.z.x);
+    farPos.y = camera->eye.y + (camera->basis.x.y * 10000.0f) - (yOff * camera->basis.y.y) -
+               (xOff * camera->basis.z.y);
+    farPos.z = camera->eye.z + (camera->basis.x.z * 10000.0f) - (yOff * camera->basis.y.z) -
+               (xOff * camera->basis.z.z);
+
+    rdx = farPos.x - camera->eye.x;
+    rdy = farPos.y - camera->eye.y;
+    rdz = farPos.z - camera->eye.z;
+
+    // Solve for the ray parameter using the better-conditioned of X/Z.
+    if (ABS(rdx) > ABS(rdz)) {
+        if (ABS(rdx) < 1.0f) {
+            return false;
+        }
+        t = (fixedX - camera->eye.x) / rdx;
+    } else {
+        if (ABS(rdz) < 1.0f) {
+            return false;
+        }
+        t = (fixedZ - camera->eye.z) / rdz;
+    }
+    if (t <= 0.0f) {
+        return false;
+    }
+    *outY = camera->eye.y + (t * rdy);
+    return true;
+}
+#endif

@@ -224,6 +224,7 @@ extern s32 gCourseEditEntryOption;
 extern s32 D_xk1_80032BF8;
 extern s32 D_xk2_800F684C;
 extern s32 D_xk1_80032BE8;
+extern s32 D_xk1_80032BE4;
 extern s32 D_xk1_80032BEC;
 extern s32 D_xk1_80032BDC;
 extern s32 D_xk1_8003A550;
@@ -231,32 +232,59 @@ extern s32 D_xk1_8003A554;
 extern s32 D_xk1_8003A5D0;
 
 #ifdef PORT
-// Absolute mouse drive (port/gdx_course_edit_mouse.cpp): maps the OS cursor to the file-list row
-// under it. The row geometry is taken directly from func_xk1_8002B17C: top D_xk1_80032BE8, scroll
-// D_xk1_80032BEC, row height 8. BTN_A injection handles the actual click selection.
+#include "../../../../port/gdx_course_edit_menu.h"
+// Bounds match the clipped thirteen-row file list and its arrows in func_xk1_8002B17C.
 extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
+extern int gdx_course_edit_mouse_menu_wheel(void);
 
-void CourseEdit_ApplyMouseToFileList(void) {
-    s32 mouseX;
-    s32 mouseY;
-    s32 fileIndex;
-    s32 count;
+s32 CourseEdit_ApplyMouseToFileList(void) {
+    static s32 lastX = -1;
+    static s32 lastY = -1;
+    s32 x;
+    s32 y;
+    s32 row;
+    s32 count = D_xk1_8003A5D0;
+    s32 wheel = gdx_course_edit_mouse_menu_wheel();
+    bool click = (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) != 0;
+    bool validRow = false;
+    bool arrow = false;
 
-    if (!gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
-        return;
+    if (!gdx_course_edit_mouse_pos(&x, &y) || count <= 0) {
+        lastX = -1;
+        lastY = -1;
+        return 0;
     }
-    count = D_xk1_8003A5D0;
-    if (count <= 0) {
-        return;
+    if (click && x >= D_xk1_80032BE4 + 24 && x < D_xk1_80032BE4 + 40) {
+        if (y >= D_xk1_80032BE8 - 16 && y < D_xk1_80032BE8 - 8 && D_xk1_80032BEC > 0) {
+            wheel = -1;
+            arrow = true;
+        } else if (y >= D_xk1_80032BE8 + 112 && y < D_xk1_80032BE8 + 120 &&
+                   count > 13 && D_xk1_80032BEC < (count - 13) * 8) {
+            wheel = 1;
+            arrow = true;
+        }
     }
-    fileIndex = (mouseY - D_xk1_80032BE8 + D_xk1_80032BEC) / 8;
-    if (fileIndex < 0) {
-        fileIndex = 0;
-    } else if (fileIndex >= count) {
-        fileIndex = count - 1;
+    if (x >= D_xk1_80032BE4 - 2 && x < D_xk1_80032BE4 + 66 &&
+        y >= D_xk1_80032BE8 && y < D_xk1_80032BE8 + 104) {
+        row = (y - D_xk1_80032BE8 + D_xk1_80032BEC) / 8;
+        validRow = row >= 0 && row < count;
+        // A stationary pointer must not undo wheel or controller navigation on the next tick.
+        if (validRow && (x != lastX || y != lastY || click)) {
+            D_xk1_80032BDC = row;
+        }
     }
-    D_xk1_80032BDC = fileIndex;
-    func_xk1_8002BB50();
+    lastX = x;
+    lastY = y;
+    if (wheel != 0) {
+        D_xk1_80032BDC += wheel;
+        if (D_xk1_80032BDC < 0) {
+            D_xk1_80032BDC = 0;
+        } else if (D_xk1_80032BDC >= count) {
+            D_xk1_80032BDC = count - 1;
+        }
+        D_xk1_80032BEC = gdx_course_edit_list_scroll(D_xk1_80032BEC, count, 8, wheel, 13);
+    }
+    return validRow && !arrow && wheel == 0;
 }
 #endif
 

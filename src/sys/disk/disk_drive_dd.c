@@ -107,6 +107,9 @@ s32 DiskDrive_LoadData(s32 startLba, void* vram, s32 diskSize, s32 bssSize) {
             if (table == GDX_DTAB_DDCOURSE && record < GDX_DDCOURSE_COUNT) {
                 phys = GDX_DDCOURSE_BASE + record * GDX_DDCOURSE_STRIDE;
                 mapped = 1;
+            } else if (table == GDX_DTAB_DDGHOST && record < GDX_DDGHOST_COUNT) {
+                phys = GDX_DDGHOST_BASE + record * GDX_DDGHOST_STRIDE;
+                mapped = 1;
             }
         }
 

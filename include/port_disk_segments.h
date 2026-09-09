@@ -22,7 +22,7 @@
 /* Table ids consumed by DiskDrive_LoadData (disk_drive_dd.c). */
 #define GDX_DTAB_UNMAPPED   0  /* overlay/texture segments: DiskDrive_LoadOverlay is a PORT no-op */
 #define GDX_DTAB_DDCOURSE   1  /* DD course records: 6 edit templates + 12 DD courses */
-#define GDX_DTAB_DDGHOST    2  /* DD staff ghosts: not yet located -> zero-filled */
+#define GDX_DTAB_DDGHOST    2  /* DD staff ghosts: one GhostSave per DD course */
 
 /* Physical layout of the DD course record table in the .ndd, located empirically
  * (JP and translated disks identical): 6 Edit-Cup templates then 12 DD default
@@ -30,6 +30,13 @@
 #define GDX_DDCOURSE_BASE   0x00EA6A00u  /* file offset of record 0 (edit slot 0) */
 #define GDX_DDCOURSE_STRIDE 0x4510u      /* bytes per record (zone block size) */
 #define GDX_DDCOURSE_COUNT  18           /* 6 edit + 12 DD (silence_3 = record 6) */
+
+/* DD staff-ghost table: 12 GhostSave records, one per DD course (silence_3..big_foot),
+ * contiguous. Verified against the stock sDDStaffGhostRecordTimes[] pacing table in
+ * ovl_i2/save.c — record raceTimes match it exactly. */
+#define GDX_DDGHOST_BASE    0x00F39620u  /* file offset of silence_3 staff ghost */
+#define GDX_DDGHOST_STRIDE  0x3FC0u      /* sizeof(GhostSave) */
+#define GDX_DDGHOST_COUNT   12           /* COURSE_SILENCE_3 .. COURSE_BIG_FOOT */
 
 #define GDX_DISK_START_silence_3             GDX_DISK_HANDLE(GDX_DTAB_DDCOURSE, 0)
 #define GDX_DISK_START_silence_3_staff_ghost GDX_DISK_HANDLE(GDX_DTAB_DDGHOST, 0)

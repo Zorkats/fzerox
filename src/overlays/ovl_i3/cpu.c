@@ -1865,23 +1865,50 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                             }
                             break;
                         case 3:
-                            if ((racer->segmentPit == PIT_BOTH) && (var_fv0 < 0.99f)) {
-                                racer->unk_33C =
-                                    ((-racer->segmentPositionInfo.segmentDisplacement.x * racer->segmentBasis.z.x) -
-                                     (racer->segmentPositionInfo.segmentDisplacement.y * racer->segmentBasis.z.y)) -
-                                    (racer->segmentPositionInfo.segmentDisplacement.z * racer->segmentBasis.z.z);
+#ifdef EXPANSION_KIT
+                            // Lava strips: steer AWAY from the hazardous side(s).
+                            if (racer->segmentPit >= PIT_LAVA_BOTH) {
+                                if (racer->segmentPit == PIT_LAVA_BOTH) {
+                                    // Center is safe.
+                                    racer->unk_33C = sp9C;
+                                    break;
+                                }
 
-                                if (func_i3_fabsf(sp9C - racer->unk_33C) < 146.0f) {
-                                    if (racer->unk_33C > sp9C) {
+                                if ((racer->segmentPit == PIT_LAVA_LEFT) && (var_fv0 < 0.99f)) {
+                                    racer->unk_33C = sp94;
+                                    if (racer->unk_33C < ((sp9C - 100.0f) + 46.0f)) {
                                         racer->unk_33C += racer->unk_354 * 10.0f;
-                                    } else {
+                                    }
+                                    break;
+                                }
+
+                                if ((racer->segmentPit == PIT_LAVA_RIGHT) &&
+                                    ((racer->lap == 1) || (var_fv0 < 0.99f))) {
+                                    racer->unk_33C = sp94;
+                                    if (racer->unk_33C > ((sp9C + 100.0f) - 46.0f)) {
                                         racer->unk_33C -= racer->unk_354 * 10.0f;
                                     }
+                                    break;
                                 }
-                                break;
-                            }
 
-                            if ((racer->segmentPit == PIT_LEFT) && (var_fv0 < 0.99f)) {
+                                if (racer->segmentPit == PIT_LAVA_MIDDLE) {
+                                    // Pick a side deterministically so all CPUs do not pile up.
+                                    if (racer->id & 1) {
+                                        racer->unk_33C = sp94;
+                                        if (racer->unk_33C < (sp9C + 100.0f + 46.0f)) {
+                                            racer->unk_33C += racer->unk_354 * 10.0f;
+                                        }
+                                    } else {
+                                        racer->unk_33C = sp94;
+                                        if (racer->unk_33C > ((sp9C - 100.0f) - 46.0f)) {
+                                            racer->unk_33C -= racer->unk_354 * 10.0f;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+#endif
+                            if ((racer->segmentPit == PIT_BOTH) && (var_fv0 < 0.99f)) {
                                 racer->unk_33C = sp94;
                                 if ((gGameMode == GAMEMODE_DEATH_RACE) && (racer->id >= gNumPlayers)) {
                                     if (racer->unk_33C < ((sp9C - 100.0f) + 46.0f)) {

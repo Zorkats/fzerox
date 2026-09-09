@@ -1,0 +1,23 @@
+# course_strings.yaml -- per-course track names, subtitles and BGM assignment (PAL rev0).
+#
+# Same layout as the US rev0 recipe; only the absolute ROM offsets move by the
+# PAL code/data-segment delta. Bias values are carried over from US rev0 as a
+# conservative estimate (real PAL hardware would confirm the RAM->ROM bias).
+# The two pointer tables and the raw BGM byte table resolve into one binary
+# resource by the FZX:COURSE_STRINGS factory.
+
+gCourseStrings:
+  type: FZX:COURSE_STRINGS
+  offset: 0x7A020  # US 0x673D0 + 0x12C50 (estimated code-segment delta)
+  symbol: gCourseStrings
+  names:
+    offset: 0x7A020  # sTrackNames pointer table
+    count: 32
+    bias: 0x80066000
+  subtitles:
+    offset: 0x92878  # sTrackSubtitles pointer table (US 0xDFC28 + 0x12C50)
+    count: 31
+    bias: 0x800398A0
+  bgm:
+    offset: 0x7C128  # D_800CF4D8 (US 0x694D8 + 0x12C50)
+    count: 24

@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef PORT
+#include "../../../../port/gdx_course_edit_menu.h"
+#endif
 #include "fzx_course.h"
 #include "fzx_expansion_kit.h"
 #include "fzx_segmentA.h"
@@ -100,6 +103,9 @@ s32* gCourseEditMenuOptions[] = {
     &gCreateOption, &gPointOption, NULL, &gCourseEditFileOption, &gCourseEditEntryOption,
 };
 
+// Lava entries reuse the pit icon geometry. Under PORT they are runtime
+// red/orange recolors stored in sLavaIconPit*Tex; otherwise they reuse the
+// original pit icon symbols as a fallback. Heal icons stay untouched.
 MenuDropItem sPitTypeMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu1Tex, aCourseEditPitBothTex, NULL, NULL, 16, 16, NULL, NULL },
@@ -109,12 +115,73 @@ MenuDropItem sPitTypeMenuItems[] = {
       aExpansionKitMenu3Tex, aCourseEditPitRightTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu4Tex, aCourseEditPitMiddleTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu5Tex, aCourseEditPitBothTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu6Tex, aCourseEditPitLeftTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu7Tex, aCourseEditPitRightTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu8Tex, aCourseEditPitMiddleTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditClearTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
 };
 
-MenuWidget sPitTypeWidget = { 5,   INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sPitTypeMenuItems, 160, 48, 160,
-                              112, &gPitTypeOption };
+// Nine items (4 heal + 4 lava + Clear); cursor range matches 16 px per row.
+MenuWidget sPitTypeWidget = { 9,   INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sPitTypeMenuItems, 160, 48, 160,
+                              176, &gPitTypeOption };
+
+#ifdef PORT
+static ALIGNED8 u16 sLavaIconPitBothTex[24 * 12];
+static ALIGNED8 u16 sLavaIconPitLeftTex[24 * 12];
+static ALIGNED8 u16 sLavaIconPitRightTex[24 * 12];
+static ALIGNED8 u16 sLavaIconPitMiddleTex[24 * 12];
+static bool sLavaIconsReady = false;
+
+static inline u16 CourseEdit_RGBA16Swap(u16 v) {
+    return (v >> 8) | (v << 8);
+}
+
+static u16 CourseEdit_RecolorPixel(u16 src) {
+    u32 a = src & 1;
+    u32 r = (src >> 11) & 0x1F;
+    u32 g = (src >> 6) & 0x1F;
+    u32 b = (src >> 1) & 0x1F;
+    u32 nr = r + (r >> 2) + (b >> 2);
+    u32 ng = (r >> 1) + (g >> 2);
+
+    if (nr > 31) {
+        nr = 31;
+    }
+    if (ng > 31) {
+        ng = 31;
+    }
+    return (u16)(a | (nr << 11) | (ng << 6));
+}
+
+static void CourseEdit_CopyRecoloredIcon(u16* dst, u16* src, s32 count) {
+    s32 i;
+
+    for (i = 0; i < count; i++) {
+        dst[i] = CourseEdit_RGBA16Swap(CourseEdit_RecolorPixel(CourseEdit_RGBA16Swap(src[i])));
+    }
+}
+
+static void CourseEdit_InitLavaIcons(void) {
+    if (sLavaIconsReady) {
+        return;
+    }
+    CourseEdit_CopyRecoloredIcon(sLavaIconPitBothTex, aCourseEditPitBothTex, 24 * 12);
+    CourseEdit_CopyRecoloredIcon(sLavaIconPitLeftTex, aCourseEditPitLeftTex, 24 * 12);
+    CourseEdit_CopyRecoloredIcon(sLavaIconPitRightTex, aCourseEditPitRightTex, 24 * 12);
+    CourseEdit_CopyRecoloredIcon(sLavaIconPitMiddleTex, aCourseEditPitMiddleTex, 24 * 12);
+    sPitTypeMenuItems[4].subContentsRGBATex = sLavaIconPitBothTex;
+    sPitTypeMenuItems[5].subContentsRGBATex = sLavaIconPitLeftTex;
+    sPitTypeMenuItems[6].subContentsRGBATex = sLavaIconPitRightTex;
+    sPitTypeMenuItems[7].subContentsRGBATex = sLavaIconPitMiddleTex;
+    sLavaIconsReady = true;
+}
+#endif
 
 MenuDropItem sDashTypeMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
@@ -821,16 +888,41 @@ MenuWidget* func_xk1_80026914(MenuWidget* rootWidget) {
     return widget;
 }
 
+#ifdef PORT
+// Number of selectable items in the currently open drop-down menu, or 0 if the
+// top bar (gCourseEditWidget) is the active leaf. Used by port-side keyboard
+// shortcuts; compiled out on non-PORT builds so the original binary stays byte-identical.
+s32 gdx_course_edit_open_menu_count(void) {
+    MenuWidget* leaf = func_xk1_80026914(&gCourseEditWidget);
+
+    if (leaf == &gCourseEditWidget) {
+        return 0;
+    }
+    return leaf->numItems;
+}
+#endif
+
 s32 func_xk1_80026958(MenuWidget* widget, s32 cursorPosX, s32 cursorPosY) {
     s32 i;
     s32 index;
+    s32 pageOffset = sMenuPageYOffset;
 
+#ifdef PORT
+    if (widget->itemYOffset == 0) {
+        pageOffset = 0;
+    }
+#endif
     index = INVALID_OPTION;
     for (i = 0; i < widget->numItems; i++) {
+#ifdef PORT
+        if (!gdx_course_edit_menu_visible_row(i, widget->numItems, widget->itemYOffset, pageOffset)) {
+            continue;
+        }
+#endif
         if ((cursorPosX >= (widget->left + widget->itemXOffset * i)) &&
             (cursorPosX < ((widget->left + widget->itemXOffset * i) + 0x30))) {
-            if (((cursorPosY + sMenuPageYOffset) >= (widget->top + (widget->itemYOffset * i))) &&
-                ((cursorPosY + sMenuPageYOffset) < ((widget->top + (widget->itemYOffset * i)) + 0x10))) {
+            if (((cursorPosY + pageOffset) >= (widget->top + (widget->itemYOffset * i))) &&
+                ((cursorPosY + pageOffset) < ((widget->top + (widget->itemYOffset * i)) + 0x10))) {
                 index = i;
             }
         }
@@ -1323,6 +1415,9 @@ void func_xk1_8002820C(void) {
 }
 
 void func_xk1_80028250(void) {
+#ifdef PORT
+    CourseEdit_InitLavaIcons();
+#endif
     MenuWidget* sCourseDesignTypeWidgets[] = {
         &gRoadTypeWidget,
         &gHRoadTypeWidget,

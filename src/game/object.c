@@ -869,6 +869,12 @@ void func_800790D4(void) {
                     break;
                 case 17:
                 case 18:
+#ifdef PORT
+                    if (GDX_TryLoadCommonAssetO2R(temp_s1->unk_04, (size_t)temp_s1->height * temp_s1->width * 2,
+                                                  var_s3->unk_04)) {
+                        break;
+                    }
+#endif
                     if (temp_s1->compressedSize != 0) {
                         size = ALIGN_2(temp_s1->compressedSize) + 2;
                     } else {
@@ -892,6 +898,16 @@ void func_800790D4(void) {
                                 bzero(var_s3->unk_04, allocSize);
                             } else {
                                 mio0Decode(header, var_s3->unk_04);
+                                {
+                                    /* This re-decode reuses the arena buffer from the initial load,
+                                     * so the bridge's registered key must follow the asset now in
+                                     * the buffer or pack overrides keep serving the first character. */
+                                    const char* o2rKey =
+                                        gdx_lookup_common_asset_o2r_key((unsigned long long)temp_s1->unk_04);
+                                    if (o2rKey != NULL) {
+                                        GDiffuser_RegisterLoadedAssetBuffer(var_s3->unk_04, allocSize, o2rKey);
+                                    }
+                                }
                             }
                         }
 #else
