@@ -18,6 +18,9 @@ typedef s32 intptr_t;
 typedef u32 uintptr_t;
 #endif
 
+/* macOS: the libc/string.h redirect pulls in the SDK's <string.h>, which already defines these
+ * limits with the same values. Skip the decomp's copies there instead of redefining them. */
+#if !(defined(PORT) && defined(__APPLE__) && defined(INT8_MIN))
 #define INT8_MIN    (-0x80)
 #define INT16_MIN   (-0x8000)
 #define INT32_MIN   (-0x80000000)
@@ -32,8 +35,11 @@ typedef u32 uintptr_t;
 #define UINT16_MAX  0xFFFF
 #define UINT32_MAX  0xFFFFFFFF
 #define UINT64_MAX  0xFFFFFFFFFFFFFFFF
+#endif
 
-#ifdef PORT
+#if defined(PORT) && defined(__APPLE__) && defined(INTPTR_MAX)
+/* SDK already defined them (see above). */
+#elif defined(PORT)
 #define INTPTR_MIN  (-0x8000000000000000)
 #define INTPTR_MAX  0x7FFFFFFFFFFFFFFF
 #define UINTPTR_MAX 0xFFFFFFFFFFFFFFFF
