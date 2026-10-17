@@ -864,6 +864,19 @@ void Background_UpdateSkyboxVtx(Vtx* vtx, Background* background, Camera* camera
 
 extern s8 gGamePaused;
 
+#ifdef PORT
+// SET_VTX stores each position as s16, so a corner past +/-32000 wraps to the far side of the
+// world. Pin it to the skybox bound instead. Call this before the texture coordinates are derived
+// from the position, so the UV follows the pinned corner rather than the unclamped one.
+static void Background_ClampVtxCoord(f32* coord) {
+    if (*coord < -32000.0f) {
+        *coord = -32000.0f;
+    } else if (*coord > 32000.0f) {
+        *coord = 32000.0f;
+    }
+}
+#endif
+
 void Background_UpdateVenueFloorVtx(Vtx* vtx, Background* background, Camera* camera, f32 xOffset1, f32 zOffset1,
                                     f32 xOffset2, f32 zOffset2, f32 xRange, f32 zRange, s32 brightness1,
                                     s32 brightness2) {
@@ -893,6 +906,16 @@ void Background_UpdateVenueFloorVtx(Vtx* vtx, Background* background, Camera* ca
     zPositions[2] = background->pos.z + zOffset2 + zRange;
     xPositions[3] = background->pos.x + xOffset2 - xRange;
     zPositions[3] = background->pos.z + zOffset2 - zRange;
+
+#ifdef PORT
+    // Pin the corners before the UVs below are derived from them, so the texture stays locked to
+    // the drawn geometry instead of following positions that were never drawn.
+    for (i = 0; i < 4; i++) {
+        Background_ClampVtxCoord(&xPositions[i]);
+        Background_ClampVtxCoord(&zPositions[i]);
+    }
+    Background_ClampVtxCoord(&y);
+#endif
 
     perspectiveRatio = (floorScroll->relativeBackgroundHeight - camera->eye.y) / (y - camera->eye.y);
 
@@ -1014,6 +1037,16 @@ void Background_UpdateCloudVtx(Vtx* vtx, Background* background, Camera* camera,
     zPositions[2] = background->pos.z + zOffset2 + zRange;
     xPositions[3] = background->pos.x + xOffset2 - xRange;
     zPositions[3] = background->pos.z + zOffset2 - zRange;
+
+#ifdef PORT
+    // Same pinning as the floor. The cloud UVs read these positions and the cloud height, so clamp
+    // both before the texture coordinates are derived from them.
+    for (i = 0; i < 4; i++) {
+        Background_ClampVtxCoord(&xPositions[i]);
+        Background_ClampVtxCoord(&zPositions[i]);
+    }
+    Background_ClampVtxCoord(&y);
+#endif
 
     if (!gGamePaused) {
         cloudScroll->xScroll += cloudScroll->xScrollSpeed;

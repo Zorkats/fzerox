@@ -493,6 +493,12 @@ void CourseSelect_Init(void) {
 }
 
 void NextCourseSelect_Init(void) {
+#ifdef PORT
+    /* Save GP in progress: restore a taken Continue Cup request, or capture the GP boundary. Runs
+       before anything below reads gCourseIndex or the racer state. */
+    extern void gdx_gp_resume_next_course_init(void);
+    gdx_gp_resume_next_course_init();
+#endif
     D_800CCFE8 = 3;
     sCourseSelectState = COURSE_SELECT_NEXT_COURSE_AWAIT_INPUT;
     if (gCourseIndex >= COURSE_X_1) {
@@ -549,7 +555,7 @@ extern u16 gInputPressed;
 extern u16 gInputButtonPressed;
 extern Camera gCameras[];
 extern s32 gTransitionState;
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 
 s32 CourseSelect_Update(void) {
     s32 originalCupSelectOption;

@@ -708,6 +708,18 @@ void Racer_SetupStartPositions(void) {
 
 extern s8 gTitleDemoState;
 
+#ifdef PORT
+/* Single Race hooks (port/gdx_single_race.c). Stock builds never reach these. */
+extern void gdx_single_race_begin_race(int eligible);
+extern int gdx_single_race_active(void);
+extern int gdx_single_race_finite(void);
+extern int gdx_single_race_lap_count(void);
+extern int gdx_single_race_racer_count(void);
+extern int gdx_single_race_random_rival(void);
+extern void gdx_single_race_store_lap_time(int racerId, int lapIndex, int lapTime);
+extern int gdx_single_race_get_lap_time(int racerId, int lapIndex);
+#endif
+
 void Racer_UpdateRivalRacer(void) {
     s32 var_a2;
     s32 var_a3;
@@ -716,6 +728,13 @@ void Racer_UpdateRivalRacer(void) {
     Racer* var_v0;
     Racer* var_v1;
 
+#ifdef PORT
+    /* Single Race random rival, chosen at race start by gdx_single_race_begin_race. */
+    if (gdx_single_race_random_rival() >= 0) {
+        sRivalRacer = &gRacers[gdx_single_race_random_rival()];
+        return;
+    }
+#endif
     if ((gGameMode != GAMEMODE_GP_RACE) || ((gTotalRacers - gRacersRetired) < 2) ||
         (gTitleDemoState != TITLE_DEMO_INACTIVE)) {
         sRivalRacer = NULL;
@@ -1244,6 +1263,11 @@ void func_8008AA8C(void) {
     s32 var_a1;
     s32 var_v1;
     Racer* racer;
+#ifdef PORT
+    /* Racer.lapTimes holds three laps. A finite Single Race can run more, so the per-racer
+       estimate stops at three; the extra laps only live in the Single Race lap table. */
+    s32 gdxStructLapLimit = (gTotalLapCount < 3) ? gTotalLapCount : 3;
+#endif
 
     for (racer = sLastRacer; racer >= gRacers; racer--) {
         if (racer->stateFlags & RACER_STATE_FINISHED) {
@@ -1285,12 +1309,20 @@ void func_8008AA8C(void) {
 
                 var_a0++;
 
+#ifdef PORT
+                if (var_a0 >= gdxStructLapLimit) {
+#else
                 if (var_a0 >= gTotalLapCount) {
+#endif
                     break;
                 }
             }
 
+#ifdef PORT
+            while (var_a0 < gdxStructLapLimit) {
+#else
             while (var_a0 < gTotalLapCount) {
+#endif
                 racer->lapTimes[var_a0] = (racer->raceTime - var_a1) / (gTotalLapCount - var_a0);
                 var_a1 += racer->lapTimes[var_a0];
                 var_a0++;
@@ -1673,6 +1705,12 @@ void Racer_InitRacer(Racer* racer) {
     } else {
         racer->stateFlags = RACER_STATE_ACTIVE | RACER_STATE_FLAGS_20000000 | RACER_STATE_FLAGS_8000;
     }
+#ifdef PORT
+    /* Finite Single Race follows GP boost rules: CAN_BOOST is granted per completed lap. */
+    if (gdx_single_race_finite()) {
+        racer->stateFlags &= ~RACER_STATE_CAN_BOOST;
+    }
+#endif
     if ((racer->id >= gNumPlayers) || (D_800CE77C != 0) || (gGameMode == GAMEMODE_RECORDS) ||
         (gGameMode == GAMEMODE_GP_END_CS) || (gTitleDemoState != TITLE_DEMO_INACTIVE)) {
         racer->stateFlags |= RACER_STATE_CPU_CONTROLLED;
@@ -1804,6 +1842,13 @@ void Racer_Init(void) {
     }
     D_800E5FD4 = D_800E5FD6;
     D_800E5FF0++;
+#ifdef PORT
+    /* Single Race snapshot for this race start. gTotalLapCount returns to the stock 3 unless a
+       finite Single Race is active, so no earlier race can leak its lap count. */
+    gdx_single_race_begin_race((gGameMode == GAMEMODE_PRACTICE) && (gNumPlayers == 1) &&
+                               (gTitleDemoState == TITLE_DEMO_INACTIVE));
+    gTotalLapCount = gdx_single_race_lap_count();
+#endif
 
     if (gNumPlayers == 1) {
         switch (gGameMode) {
@@ -1838,7 +1883,11 @@ void Racer_Init(void) {
                 if (gGameMode == GAMEMODE_PRACTICE || gGameMode == GAMEMODE_DEATH_RACE || D_800E5FF0 == 1) {
                     func_80089800();
                 }
+#ifdef PORT
+                gTotalRacers = gdx_single_race_racer_count(); /* 30 unless Single Race is active */
+#else
                 gTotalRacers = 30;
+#endif
                 break;
         }
     } else {
@@ -4490,7 +4539,16 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                         racer->stateFlags |= RACER_STATE_CAN_BOOST;
                         i = racer->raceTime -
                             (s32) ((50.0f * racer->lapDistance) / (3.0f * (gCurrentCourseInfo->length - sp128)));
+#ifdef PORT
+                        /* Single Race keeps every lap in its own table. Racer.lapTimes has three
+                           slots, so the struct only receives the first three laps, as stock. */
+                        gdx_single_race_store_lap_time(racer->id, racer->lap - 2, (s32) (i - racer->completedLapsTime));
+                        if ((racer->lap - 2) < 3) {
+                            racer->lapTimes[racer->lap - 2] = (s32) (i - racer->completedLapsTime);
+                        }
+#else
                         racer->lapTimes[racer->lap - 2] = (s32) (i - racer->completedLapsTime);
+#endif
                         racer->completedLapsTime = i;
 #ifdef PORT
                         /* Announces the completed lap with the post-increment lap counter, so a
@@ -4500,13 +4558,29 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                         { extern void GameEvents_FireOnLapCompleted(s32 racerId, s32 lap); GameEvents_FireOnLapCompleted(racer->id, racer->lap); }
 #endif
                         racer->startNewPracticeLap = true;
+#ifdef PORT
+#ifndef EXPANSION_KIT
+                        /* A finite Single Race finishes through the GP branch below, not the Practice wrap. */
+                        if (((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) ||
+                            (gGameMode == GAMEMODE_DEATH_RACE)) {
+#else
+                        if (((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) ||
+                            (gGameMode == GAMEMODE_DEATH_RACE) || (gGameMode == GAMEMODE_COURSE_EDIT)) {
+#endif
+#else
 #ifndef EXPANSION_KIT
                         if ((gGameMode == GAMEMODE_PRACTICE) || (gGameMode == GAMEMODE_DEATH_RACE)) {
 #else
                         if ((gGameMode == GAMEMODE_PRACTICE) || (gGameMode == GAMEMODE_DEATH_RACE) ||
                             (gGameMode == GAMEMODE_COURSE_EDIT)) {
 #endif
+#endif
+#ifdef PORT
+                            /* Any Single Race skips the Practice best-lap compare. */
+                            if ((racer == gRacers) && !gdx_single_race_active()) {
+#else
                             if (racer == gRacers) {
+#endif
                                 if (racer->lapTimes[racer->lap - 2] < gPracticeBestLap) {
                                     gPracticeBestLap = racer->lapTimes[racer->lap - 2];
                                     gStartNewBestLap = true;
@@ -5757,7 +5831,11 @@ void Racer_Update(void) {
                 break;
             case 30:
                 if (gRacers[0].stateFlags & RACER_STATE_FINISHED) {
+#ifdef PORT
+                    if ((gGameMode == GAMEMODE_GP_RACE) || (gGameMode == GAMEMODE_DEATH_RACE) || gdx_single_race_finite()) {
+#else
                     if ((gGameMode == GAMEMODE_GP_RACE) || (gGameMode == GAMEMODE_DEATH_RACE)) {
+#endif
                         Audio_TriggerSystemSE(NA_SE_61);
                         break;
                     } else if (gGameMode == GAMEMODE_TIME_ATTACK) {
@@ -5770,14 +5848,71 @@ void Racer_Update(void) {
                 }
                 break;
             case 120:
+#ifdef PORT
+                if (((gGameMode == GAMEMODE_GP_RACE) || gdx_single_race_finite()) &&
+                    (gRacers[0].stateFlags & RACER_STATE_FINISHED) && (gRacers[0].position == 1)) {
+#else
                 if ((gGameMode == GAMEMODE_GP_RACE) && (gRacers[0].stateFlags & RACER_STATE_FINISHED) &&
                     (gRacers[0].position == 1)) {
+#endif
                     Audio_TriggerSystemSE(NA_SE_51);
                 }
                 break;
         }
     }
 }
+
+#ifdef PORT
+/* 7A: arms the custom soundtrack of the course about to start (port/gdx_course_music.h). Only the
+   editor test run and the six disk Edit Cup slots have a course file, so every other race clears
+   the override and a stale editor name never reaches a stock course. */
+extern bool gInCourseEditTestRun;
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
+extern int gdx_course_state_edit_file_id(char* out, int outCap);
+extern int gdx_course_music_course_id(const char* name, const char* extension, char* out, int outCap);
+extern void gdx_course_music_arm_for_course(const char* courseId, int bgmId);
+extern int gdx_course_skybox_resolve(const char* courseId);
+
+/* 7A/9D: the course file id ("NAME.EXT") of the course about to start: the editor test run, or one of the
+   six disk Edit Cup slots. Returns 1 when out holds the id. Every other course has no course file. */
+int gdx_racer_course_file_id(char* out, int outCap) {
+    s32 diskCourseIndex = gCurrentCourseInfo->courseIndex - COURSE_EDIT_1;
+
+    if (gInCourseEditTestRun) {
+        return gdx_course_state_edit_file_id(out, outCap);
+    }
+    if ((diskCourseIndex >= 0) && (diskCourseIndex < 6) && (gEditCupTrackNames[diskCourseIndex][0] != '\0')) {
+        char name[EDIT_CUP_TRACK_NAME_SIZE + 1];
+
+        memcpy(name, gEditCupTrackNames[diskCourseIndex], EDIT_CUP_TRACK_NAME_SIZE);
+        name[EDIT_CUP_TRACK_NAME_SIZE] = '\0';
+        return gdx_course_music_course_id(name, "CRSD", out, outCap);
+    }
+    return 0;
+}
+
+static void gdx_racer_arm_course_music(void) {
+    char courseId[26]; /* GDX_COURSE_FILE_ID_MAX + 1 */
+    s32 haveId = gdx_racer_course_file_id(courseId, sizeof(courseId));
+
+    gdx_course_music_arm_for_course(haveId ? courseId : NULL, Course_GetBgm());
+}
+
+/* 9D: a course whose skybox was chosen from a custom Background row loads that row's stock fallback. Runs in
+   Course_Init (course.c), before func_8007F4E0 reads the byte. A course with no record keeps its stored byte. */
+void gdx_racer_resolve_course_skybox(void) {
+    char courseId[26]; /* GDX_COURSE_FILE_ID_MAX + 1 */
+    s32 stockSkybox;
+
+    if (!gdx_racer_course_file_id(courseId, sizeof(courseId))) {
+        return;
+    }
+    stockSkybox = gdx_course_skybox_resolve(courseId);
+    if (stockSkybox >= 0) {
+        COURSE_CONTEXT()->courseData.skybox = stockSkybox;
+    }
+}
+#endif
 
 extern GfxPool D_1000000;
 
@@ -7128,6 +7263,9 @@ block_115:
                         Audio_TriggerSystemSE(NA_SE_11);
                     }
                     if ((gRaceIntroTimer == 1) && (gTitleDemoState == TITLE_DEMO_INACTIVE)) {
+#ifdef PORT
+                        gdx_racer_arm_course_music();
+#endif
                         if (gCurrentCourseInfo->courseIndex < COURSE_EDIT_1) {
                             func_8007E0AC(D_800CF4D8[gCurrentCourseInfo->courseIndex]);
                         } else if (gCurrentCourseInfo->courseIndex == COURSE_DEATH_RACE) {
@@ -7174,12 +7312,22 @@ block_115:
     } else if ((gTotalRacers >= 2) && !(playerRacer->stateFlags & (RACER_STATE_FINISHED | RACER_STATE_RETIRED)) &&
                (gGameMode != GAMEMODE_GP_END_CS)) {
         gSPDisplayList(gfx++, D_4007EA8);
+#ifdef PORT
+#ifndef EXPANSION_KIT
+        /* Single Race shows the position markers, as GP does. */
+        if (gdx_single_race_active() || ((gGameMode != GAMEMODE_PRACTICE) && (gGameMode != GAMEMODE_DEATH_RACE))) {
+#else
+        if (gdx_single_race_active() || ((gGameMode != GAMEMODE_PRACTICE) && (gGameMode != GAMEMODE_DEATH_RACE) &&
+                                         (gGameMode != GAMEMODE_COURSE_EDIT))) {
+#endif
+#else
 #ifndef EXPANSION_KIT
         if ((gGameMode != GAMEMODE_PRACTICE) && (gGameMode != GAMEMODE_DEATH_RACE)) {
 #else
 
         if ((gGameMode != GAMEMODE_PRACTICE) && (gGameMode != GAMEMODE_DEATH_RACE) &&
             (gGameMode != GAMEMODE_COURSE_EDIT)) {
+#endif
 #endif
             if (gTotalRacers < 3) {
                 var_s4 = gTotalRacers;
@@ -7255,9 +7403,16 @@ block_115:
             // FAKE
             if (1) {}
 
+#ifdef PORT
+            if (((gGameMode == GAMEMODE_GP_RACE) || (gdx_single_race_random_rival() >= 0)) &&
+                (sRivalRacer != NULL) && (sRivalRacer->machineLod != 0) &&
+                !(sRivalRacer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) &&
+                (gRacers[0].position >= sRivalRacer->position)) {
+#else
             if ((gGameMode == GAMEMODE_GP_RACE) && (sRivalRacer != NULL) && (sRivalRacer->machineLod != 0) &&
                 !(sRivalRacer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) &&
                 (gRacers[0].position >= sRivalRacer->position)) {
+#endif
                 temp_fs4 = sRivalRacer->segmentPositionInfo.pos.x + (20.0f * sRivalRacer->trueBasis.y.x);
                 temp_fs5 = sRivalRacer->segmentPositionInfo.pos.y + (20.0f * sRivalRacer->trueBasis.y.y);
                 sp54C = sRivalRacer->segmentPositionInfo.pos.z + (20.0f * sRivalRacer->trueBasis.y.z);

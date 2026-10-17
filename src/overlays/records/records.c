@@ -150,7 +150,7 @@ extern s8 gGamePaused;
 extern s32 D_i2_80106F10;
 extern s32 gDifficulty;
 extern s32 gCourseIndex;
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 
 void Records_Init(void) {
     bool changingCourseIndex;

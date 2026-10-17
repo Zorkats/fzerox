@@ -40,9 +40,9 @@ CourseData D_8010CF50 = {
 };
 
 #ifndef EXPANSION_KIT
-char gEditCupTrackNames[6][9] = { 0 };
+char gEditCupTrackNames[6][EDIT_CUP_TRACK_NAME_SIZE] = { 0 };
 #else
-char gEditCupTrackNames[6 * 4][9] = { 0 };
+char gEditCupTrackNames[6 * 4][EDIT_CUP_TRACK_NAME_SIZE] = { 0 };
 #endif
 
 #ifdef EXPANSION_KIT

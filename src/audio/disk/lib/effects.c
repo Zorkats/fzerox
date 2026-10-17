@@ -1,6 +1,11 @@
 #include "global.h"
 #include "audio.h"
 
+#ifdef PORT
+extern float gdx_audio_seq_player_scale(int playerIndex);
+extern int gdx_audio_seq_player_scale_changed(int playerIndex);
+#endif
+
 void Audio_SequenceChannelProcessSound(SequenceChannel* channel, bool recalculateVolume, bool applyBend) {
     f32 channelVolume;
     f32 chanFreqScale;
@@ -51,6 +56,13 @@ void Audio_SequenceChannelProcessSound(SequenceChannel* channel, bool recalculat
 
 void Audio_SequencePlayerProcessSound(SequencePlayer* seqPlayer) {
     s32 i;
+#ifdef PORT
+    f32 portScale;
+
+    if (gdx_audio_seq_player_scale_changed((int) (seqPlayer - gAudioCtx.seqPlayers))) {
+        seqPlayer->recalculateVolume = true;
+    }
+#endif
 
     if (seqPlayer->fadeTimer != 0) {
         seqPlayer->fadeVolume += seqPlayer->fadeVelocity;
@@ -72,6 +84,12 @@ void Audio_SequencePlayerProcessSound(SequencePlayer* seqPlayer) {
 
     if (seqPlayer->recalculateVolume) {
         seqPlayer->appliedFadeVolume = seqPlayer->fadeVolume * seqPlayer->fadeVolumeScale;
+#ifdef PORT
+        portScale = gdx_audio_seq_player_scale((int) (seqPlayer - gAudioCtx.seqPlayers));
+        if (portScale != 1.0f) {
+            seqPlayer->appliedFadeVolume *= portScale;
+        }
+#endif
     }
 
     for (i = 0; i < 16; i++) {

@@ -38,7 +38,7 @@ void func_i10_8012B894(s32 progress) {
 
 extern s32 D_800D11C8[6];
 extern OSMesgQueue gMFSMesgQ;
-extern u8 gEditCupTrackNames[4 * 6][9];
+extern u8 gEditCupTrackNames[4 * 6][EDIT_CUP_TRACK_NAME_SIZE];
 
 void func_i10_8012B904(void) {
     s32 i;

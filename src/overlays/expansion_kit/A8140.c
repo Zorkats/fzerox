@@ -431,7 +431,20 @@ s32 func_xk1_8002BD64(u8 arg0, char* extension) {
         if ((extension == NULL) || (mfsStrnCmp(gMfsRamArea.directoryEntry[*var_s1].extension, extension, 3) == 0)) {
             temp_s0 = &D_xk1_8003A5D8[D_xk1_8003A5D0];
             temp_s0->unk_22 = 0;
+#ifdef PORT
+            /* A 20-character directory name has no NUL, so mfsStrCpy would run on into the
+               extension field. Copy at most the 20 name bytes. */
+            {
+                s32 n;
+
+                for (n = 0; (n < 20) && (gMfsRamArea.directoryEntry[*var_s1].name[n] != '\0'); n++) {
+                    temp_s0->name[n] = gMfsRamArea.directoryEntry[*var_s1].name[n];
+                }
+                temp_s0->name[n] = '\0';
+            }
+#else
             mfsStrCpy(temp_s0->name, gMfsRamArea.directoryEntry[*var_s1].name);
+#endif
             mfsStrCpy(temp_s0->extension, gMfsRamArea.directoryEntry[*var_s1].extension);
             temp_s0->attr = gMfsRamArea.directoryEntry[*var_s1].attr;
             var_s6++;

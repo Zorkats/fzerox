@@ -5,6 +5,12 @@
 #include "fzx_game.h"
 #include "fzx_racer.h"
 
+#ifdef PORT
+// 6A streamed BGM replacement (port/gdx_music_stream.cpp). Start and stop run on the game thread.
+extern void gdx_music_stream_bgm_start(int bgmId);
+extern void gdx_music_stream_bgm_stop(void);
+#endif
+
 u8 sAudioRetireStatus = 0;
 u8 sActiveVoiceSE = 0;
 u8 sVoiceSEStack1 = 0;
@@ -776,6 +782,9 @@ void Audio_DDBgmStart(u8 bgm) {
     sActiveBgm = bgm;
     sBgmRomLoading = true;
     D_80771C74 = 1;
+#ifdef PORT
+    gdx_music_stream_bgm_start(bgm);
+#endif
 
     AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
     AUDIOCMD_CHANNEL_SET_VOL_SCALE(1, bgm + 2, 1.0f);
@@ -798,6 +807,9 @@ void Audio_DDBgmStart2(u8 bgm) {
     }
     sBgmRomLoading = true;
     D_80771C74 = 1;
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 0);
     sActiveBgm = bgm;
     D_80771C64 = bgm;
@@ -808,12 +820,29 @@ void Audio_DDBgmStart2(u8 bgm) {
 // Na_DDBgm_Stop
 void Audio_DDBgmStop(void) {
     PRINTF("==BANDO== Na_DDBgm_Stop Called\n");
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 120);
     sBgmRomLoading = false;
     D_80771C74 = 0;
     D_80771C98 = false;
     D_80771C9C = 0;
 }
+
+#ifdef PORT
+// Raw seq player 1 fade for the streamed BGM replacement (port/gdx_music_stream.cpp, audio thread):
+// fadeVolume x fadeVolumeScale, without the port music slider, which the stream applies itself.
+// Zero once the player is disabled, so a draining stream closes when the stock fade completes.
+f32 Audio_PortBgmStreamFade(void) {
+    SequencePlayer* seqPlayer = &gAudioCtx.seqPlayers[1];
+
+    if (!seqPlayer->enabled) {
+        return 0.0f;
+    }
+    return seqPlayer->fadeVolume * seqPlayer->fadeVolumeScale;
+}
+#endif
 
 // Na_BetaBgm_Start
 void Audio_BetaBgmStart(u8 bgm) {
@@ -903,6 +932,9 @@ void Audio_RomBgmStart(u8 bgm) {
         case BGM_TITLE:
             AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, bgm + SEQ_DDBGM_MUTE_CITY, 0, 0);
+#ifdef PORT
+            gdx_music_stream_bgm_start(bgm);
+#endif
             break;
         case BGM_SELECT:
         case BGM_OPTION:
@@ -910,6 +942,9 @@ void Audio_RomBgmStart(u8 bgm) {
             if (D_80771C80 == 0) {
                 AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
                 AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, bgm + SEQ_DDBGM_MUTE_CITY, 0, 0);
+#ifdef PORT
+                gdx_music_stream_bgm_start(bgm);
+#endif
             } else {
                 D_80771C54 = bgm + 1;
             }
@@ -926,12 +961,21 @@ void Audio_RomBgmStop(void) {
     PRINTF("==BANDO== Na_ROMBgm_Stop Called\n");
     switch (sActiveBgm) {
         case BGM_TITLE:
+#ifdef PORT
+            gdx_music_stream_bgm_stop();
+#endif
             AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 200);
             break;
         case BGM_SELECT:
+#ifdef PORT
+            gdx_music_stream_bgm_stop();
+#endif
             AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 100);
             break;
         case BGM_OPTION:
+#ifdef PORT
+            gdx_music_stream_bgm_stop();
+#endif
             AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 100);
             break;
     }
@@ -943,6 +987,9 @@ void Audio_RomBgmStop(void) {
 // Na_ROMBgm_Stop2
 void Audio_RomBgmStop2(void) {
     PRINTF("==BANDO== Na_ROMBgm_Stop Called\n");
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 200);
 }
 
@@ -1068,6 +1115,9 @@ void Audio_PauseSet(u8 status) {
             AUDIOCMD_CHANNEL_SET_VOL_SCALE(0, 8, 0.0f);
             AUDIOCMD_CHANNEL_SET_VOL_SCALE(0, 9, 0.0f);
             AUDIOCMD_CHANNEL_SET_VOL_SCALE(0, 14, 0.0f);
+#ifdef PORT
+            gdx_music_stream_bgm_stop();
+#endif
             AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 0);
 
             switch (D_80771C7C) {
@@ -1121,6 +1171,9 @@ void Audio_AllSoundStop(void) {
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(0, 0);
     AudioThread_ScheduleProcessCmds();
     if (D_80771C74 == 1) {
+#ifdef PORT
+        gdx_music_stream_bgm_stop();
+#endif
         AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 0);
     }
 }
@@ -1195,6 +1248,9 @@ void func_8074252C(void) {
         AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
         AUDIOCMD_CHANNEL_SET_VOL_SCALE(1, bgm + 2, 1.0f);
         AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, bgm + SEQ_DDBGM_MUTE_CITY, 0, 0);
+#ifdef PORT
+        gdx_music_stream_bgm_start(bgm);
+#endif
         D_80771C9C = 0;
         D_80771C98 = false;
     }
@@ -1264,6 +1320,9 @@ void func_8074270C(void) {
         if (D_80771C54 != 0) {
             AUDIOCMD_SEQPLAYER_FADE_VOLUME_SCALE(1, 1.0f);
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, (D_80771C54 - 1) + SEQ_DDBGM_MUTE_CITY, 0, 0);
+#ifdef PORT
+            gdx_music_stream_bgm_start(D_80771C54 - 1);
+#endif
             D_80771C54 = 0;
         }
     }
@@ -1544,6 +1603,9 @@ void func_807427C0(void) {
 // Na_Init_Editor
 void Audio_EditorInit(void) {
     PRINTF("==BANDO== Na_Init_Editor Called\n");
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 200);
     Audio_DDBgmReadyInter(BGM_COURSE_EDITOR);
     D_80771C8C = 1;
@@ -1585,6 +1647,9 @@ void Audio_EditorBgmDelaySet(void) {
 #endif
         if (D_800D11C8[2] == 1) {
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, SEQ_DDBGM_COURSE_EDITOR, 0, 0);
+#ifdef PORT
+            gdx_music_stream_bgm_start(BGM_COURSE_EDITOR);
+#endif
             D_80771C74 = 1;
             sActiveBgm = BGM_COURSE_EDITOR;
         }
@@ -1596,6 +1661,9 @@ void Audio_EditorBgmDelaySet(void) {
 // Na_Init_Editor2
 void Audio_Editor2Init(void) {
     PRINTF("==BANDO== Na_Init_Editor2 Called\n");
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 100);
     Audio_DDBgmReadyInter(BGM_MACHINE_EDITOR);
     D_80771C90 = 1;
@@ -1629,6 +1697,9 @@ void Audio_Editor2BgmDelaySet(void) {
     if ((D_80771C90 > 150) && (D_80771C7C == 0)) {
         if (D_800D11C8[2] == 1) {
             AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, SEQ_DDBGM_MACHINE_EDITOR, 0, 0);
+#ifdef PORT
+            gdx_music_stream_bgm_start(BGM_MACHINE_EDITOR);
+#endif
             sActiveBgm = BGM_MACHINE_EDITOR;
         }
         D_80771C90 = 0;
@@ -1641,6 +1712,9 @@ void Audio_Editor2BgmDelaySet(void) {
 void Audio_EditorExit(void) {
     PRINTF("==BANDO== Na_Exit_Editor Called\n");
     Audio_TriggerSystemSE(NA_SE_16);
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 100);
 #ifdef PORT
     /* Guard 2 of 2 for the EK menu-exit BGM race (mechanism at sPortRomBgmStartEpoch above).
@@ -1681,6 +1755,9 @@ void Audio_EditorExit(void) {
 // Na_Editor_Bgm_Stop
 void Audio_EditorBgmStop(void) {
     PRINTF("==BANDO== Na_Editor_Bgm_Stop Called \n");
+#ifdef PORT
+    gdx_music_stream_bgm_stop();
+#endif
     AUDIOCMD_GLOBAL_DISABLE_SEQPLAYER(1, 200);
 }
 
@@ -1689,6 +1766,9 @@ void Audio_EditorBgmRestart(void) {
     PRINTF("==BANDO== Na_Editor_Bgm_Restart Called \n");
     if (D_800D11C8[2] == 1) {
         AUDIOCMD_GLOBAL_INIT_SEQPLAYER(1, SEQ_DDBGM_COURSE_EDITOR, 0, 0);
+#ifdef PORT
+        gdx_music_stream_bgm_start(BGM_COURSE_EDITOR);
+#endif
         D_80771C74 = 1;
         sActiveBgm = BGM_COURSE_EDITOR;
     }

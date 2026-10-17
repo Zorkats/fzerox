@@ -11,7 +11,7 @@
 char sDDSaveGhostFileName[] = "GHOST00";
 
 extern OSMesgQueue gMFSMesgQ;
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 extern s32 gLeoDriveConnectionState;
 
 #ifdef PORT

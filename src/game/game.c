@@ -46,6 +46,131 @@ static s32 sGdxResetRequested = false;
 void gdx_game_request_reset(void) {
     sGdxResetRequested = true;
 }
+
+/* Save GP in progress (port/gdx_gp_resume.h). The record is captured where NextCourseSelect_Init
+ * runs for a GP next course, restored in that same function when "Continue Cup" was taken from the
+ * main menu, and cleared when a cup ends or the GP game over is quit. The codec and file live in
+ * port/; this block only copies game globals in and out. */
+#define GDX_GP_RESUME_STATE_ONLY
+#include "../../../port/gdx_gp_resume.h"
+
+extern s32 gSelectedMode;
+extern s32 D_800CD384;
+extern s32 gCourseIndex;
+extern s32 D_800E5FF0;
+extern s16 gLastRandomCourseIndex;
+extern s16 gPlayerLives[];
+extern s16 gPlayerCharacters[];
+extern s16 gPlayerMachineSkins[];
+extern f32 gCharacterLastEngine[];
+extern Racer gRacers[];
+extern s32 gRandSeed1;
+extern u32 gRandMask1;
+extern s32 gRandSeed2;
+extern u32 gRandMask2;
+extern void Math_Rand1Init(s32 seed, s32 mask);
+extern void Math_Rand2Init(s32 seed, s32 mask);
+
+static GdxGpResumeState sGdxResumeState;
+static s32 sGdxResumePending = false;
+static s32 sGdxResumeRequested = false;
+
+static void gdx_gp_resume_capture(GdxGpResumeState* s) {
+    s32 i;
+
+    s->cup = gCupType;
+    s->difficulty = gDifficulty;
+    s->numPlayers = gNumPlayers;
+    s->courseIndex = gCourseIndex;
+    s->lastRandomCourseIndex = gLastRandomCourseIndex;
+    s->raceCounter = D_800E5FF0;
+    s->randSeed1 = gRandSeed1;
+    s->randMask1 = gRandMask1;
+    s->randSeed2 = gRandSeed2;
+    s->randMask2 = gRandMask2;
+    for (i = 0; i < GDX_GP_RESUME_PLAYERS; i++) {
+        s->lives[i] = gPlayerLives[i];
+        s->playerCharacter[i] = gPlayerCharacters[i];
+        s->playerSkin[i] = gPlayerMachineSkins[i];
+    }
+    for (i = 0; i < GDX_GP_RESUME_RACERS; i++) {
+        s->racers[i].points = gRacers[i].points;
+        s->racers[i].character = gRacers[i].character;
+        s->racers[i].skin = gRacers[i].machineSkinIndex;
+        /* Indexed by character, the same way machine.c reads it back for the next race. */
+        s->engine[i] = gCharacterLastEngine[i];
+    }
+}
+
+static void gdx_gp_resume_restore(const GdxGpResumeState* s) {
+    s32 i;
+
+    gCupType = s->cup;
+    gDifficulty = s->difficulty;
+    gNumPlayers = s->numPlayers;
+    gSelectedMode = MODE_GP_RACE;
+    gCourseIndex = s->courseIndex;
+    gLastRandomCourseIndex = (s16) s->lastRandomCourseIndex;
+    D_800E5FF0 = s->raceCounter;
+    for (i = 0; i < GDX_GP_RESUME_PLAYERS; i++) {
+        gPlayerLives[i] = (s16) s->lives[i];
+        gPlayerCharacters[i] = (s16) s->playerCharacter[i];
+        gPlayerMachineSkins[i] = (s16) s->playerSkin[i];
+    }
+    for (i = 0; i < GDX_GP_RESUME_RACERS; i++) {
+        gRacers[i].points = (s16) s->racers[i].points;
+        gRacers[i].character = (s8) s->racers[i].character;
+        gRacers[i].machineSkinIndex = (s16) s->racers[i].skin;
+        gCharacterLastEngine[i] = s->engine[i];
+    }
+    /* Same RNG words that Course_GenerateRandomCourse will draw from for the next X Cup course. */
+    Math_Rand1Init(s->randSeed1, (s32) s->randMask1);
+    Math_Rand2Init(s->randSeed2, (s32) s->randMask2);
+}
+
+/* Menu gate: true only on the main menu's mode grid (D_800CD384 0) or its class list (1, where the
+   CONTINUE row of ovl_i6/main_menu.c sits) with nothing else in flight. */
+int gdx_gp_resume_safe_point(void) {
+    return (gGameMode == GAMEMODE_FLX_MAIN_MENU) && (gGameModeChangeState == GAMEMODE_UPDATE) &&
+           (gQueuedGameMode == gGameMode) && (gMenuChangeMode == MENU_CHANGE_INACTIVE) &&
+           ((D_800CD384 == 0) || (D_800CD384 == 1)) &&
+           !sGdxResetRequested && !sGdxResumeRequested && !sGdxResumePending;
+}
+
+/* Menu button. Consumed by func_800690FC on the next tick, after the game fibers are parked. */
+void gdx_gp_resume_request_continue(void) {
+    sGdxResumeRequested = true;
+}
+
+/* Called from NextCourseSelect_Init. Restores a taken Continue request, or captures the boundary. */
+void gdx_gp_resume_next_course_init(void) {
+    GdxGpResumeState s;
+
+    if (sGdxResumePending) {
+        sGdxResumePending = false;
+        gdx_gp_resume_restore(&sGdxResumeState);
+        return;
+    }
+    if (gSelectedMode != MODE_GP_RACE || gCupType < 0 || gCupType > X_CUP) {
+        return;
+    }
+    /* A crash restart or re-do reaches this screen for the course already in progress. The record
+     * from the previous boundary is still the right resume point, so keep it. */
+    if (gCourseIndex == gLastRandomCourseIndex) {
+        return;
+    }
+    gdx_gp_resume_capture(&s);
+    if (gdx_gp_resume_save(&s) != GDX_GP_RESUME_OK) {
+        /* Never leave a record from an earlier boundary behind a failed capture. */
+        gdx_gp_resume_clear();
+    }
+}
+
+void gdx_gp_resume_on_game_over(void) {
+    if (gSelectedMode == MODE_GP_RACE) {
+        gdx_gp_resume_clear();
+    }
+}
 #endif /* PORT */
 
 void (*sGamemodeInitFuncs[])(void) = {
@@ -270,6 +395,9 @@ void func_80068BC0(void) {
             gGameModeChangeState = GAMEMODE_CHANGE_START;
             if (gCourseIndex % 6 == 5) {
                 gQueuedGameMode = GAMEMODE_GP_END_CS;
+#ifdef PORT
+                gdx_gp_resume_clear(); /* the cup is finished, so there is nothing left to continue */
+#endif
             } else {
                 gQueuedGameMode = GAMEMODE_FLX_GP_RACE_NEXT_COURSE;
                 gCourseIndex++;
@@ -507,6 +635,19 @@ void func_800690FC(void) {
              * owns the transition. Forcing CHANGE_START mid-transition skips teardown/init
              * phases and can leave the overlay/object arena partially reinitialized. */
             gQueuedGameMode = GAMEMODE_FLX_TITLE;
+        }
+    }
+
+    if (sGdxResumeRequested && (gGameModeChangeState == GAMEMODE_UPDATE)) {
+        extern void gdx_ck(const char*);
+        sGdxResumeRequested = false;
+        /* Route through the same next-course screen a race uses; its init restores the record. */
+        if (gdx_gp_resume_safe_point() && gdx_gp_resume_load(&sGdxResumeState) == GDX_GP_RESUME_OK) {
+            gdx_ck("[game] continue cup accepted");
+            sGdxResumePending = true;
+            gQueuedGameMode = GAMEMODE_FLX_GP_RACE_NEXT_COURSE;
+        } else {
+            gdx_ck("[game] continue cup refused");
         }
     }
 

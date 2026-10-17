@@ -1,6 +1,11 @@
 #include "global.h"
 #include "audio.h"
 
+#ifdef PORT
+extern float gdx_audio_seq_player_scale(int playerIndex);
+extern int gdx_audio_seq_player_scale_changed(int playerIndex);
+#endif
+
 static char D_800D0840[] = "Audio:Envp: overflow  %f\n";
 
 void Audio_SequenceChannelProcessSound(SequenceChannel* channel, bool updateVolume) {
@@ -45,9 +50,22 @@ void Audio_SequenceChannelProcessSound(SequenceChannel* channel, bool updateVolu
 
 void Audio_SequencePlayerProcessSound(SequencePlayer* seqPlayer) {
     s32 i;
+#ifdef PORT
+    f32 portScale;
+
+    if (gdx_audio_seq_player_scale_changed((int) (seqPlayer - gSeqPlayers))) {
+        seqPlayer->recalculateVolume = true;
+    }
+#endif
 
     if (seqPlayer->recalculateVolume) {
         seqPlayer->appliedFadeVolume = seqPlayer->fadeVolume * seqPlayer->fadeVolumeScale;
+#ifdef PORT
+        portScale = gdx_audio_seq_player_scale((int) (seqPlayer - gSeqPlayers));
+        if (portScale != 1.0f) {
+            seqPlayer->appliedFadeVolume *= portScale;
+        }
+#endif
     }
 
     for (i = 0; i < 16; i++) {

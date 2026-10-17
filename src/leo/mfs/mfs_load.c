@@ -1,5 +1,8 @@
 #include "leo/leo_internal.h"
 #include "leo/mfs.h"
+#ifdef PORT
+#include "../../../../port/gdx_edit_cup.h"
+#endif
 
 s32 Mfs_LoadFileIter(s32 fatId, u8* buf, u32 sizeToLoad, s32* nextFatIdPtr, u8** nextBufPos, s32* sizeLeftPtr,
                      bool isEncoded) {
@@ -110,7 +113,51 @@ s32 Mfs_CalculateSizeAndLoadFile(u16 entryId, u8* buf, u32 sizeToLoad) {
 #endif
 }
 
+#ifdef PORT
+// The port's Edit Cup slots are 21 bytes wide (port/gdx_edit_cup.h). A load of that image reads the stock
+// CRS_ENTRY.CENT and merges the long names from CRS_ENTRY.CENL when it is present and valid; every other
+// load is the stock function, renamed.
+static s32 Mfs_LoadFileInDirStock(u16 dirId, char* name, char* extension, u8* buf, s32 sizeToLoad);
+
+// The disk read path moves whole blocks, so the files load into a buffer one full block long (the largest
+// zone), like the save side in mfs_save.c. The disk thread is the only caller.
+static u8 sGdxEditCupLoadBlock[BLK_SIZE_ZONE0];
+
 s32 Mfs_LoadFileInDir(u16 dirId, char* name, char* extension, u8* buf, s32 sizeToLoad) {
+    u8* cent = sGdxEditCupLoadBlock;
+    u8* cenl = sGdxEditCupLoadBlock;
+    u16 entryId;
+
+    if (!gdx_edit_cup_is_wide_cent(name, extension, sizeToLoad)) {
+        return Mfs_LoadFileInDirStock(dirId, name, extension, buf, sizeToLoad);
+    }
+    memset(sGdxEditCupLoadBlock, 0, sizeof(sGdxEditCupLoadBlock));
+    if (Mfs_LoadFileInDirStock(dirId, name, extension, cent, GDX_EDIT_CUP_CENT_SIZE) < 0) {
+        return -1;
+    }
+    gdx_edit_cup_unpack_cent(cent, (char*) buf);
+    memset(sGdxEditCupLoadBlock, 0, sizeof(sGdxEditCupLoadBlock));
+    if (dirId == MFS_ENTRY_WORKING_DIR) {
+        dirId = gWorkingDirectory;
+    }
+    if (dirId == MFS_ENTRY_WORKING_PARENT_DIR) {
+        dirId = Mfs_GetParentDir(MFS_ENTRY_WORKING_DIR);
+    }
+    entryId = Mfs_GetFileIndex(dirId, name, "CENL");
+    if ((entryId != MFS_ENTRY_DOES_NOT_EXIST) &&
+        (gMfsRamArea.directoryEntry[entryId].fileSize == GDX_EDIT_CUP_CENL_SIZE) &&
+        (Mfs_LoadFileInDirStock(dirId, name, "CENL", cenl, GDX_EDIT_CUP_CENL_SIZE) == 0) &&
+        gdx_edit_cup_cenl_valid(cenl, GDX_EDIT_CUP_CENL_SIZE)) {
+        gdx_edit_cup_merge_cenl(cenl, (char*) buf);
+    }
+    gMfsError = LEO_ERROR_GOOD;
+    return 0;
+}
+
+static s32 Mfs_LoadFileInDirStock(u16 dirId, char* name, char* extension, u8* buf, s32 sizeToLoad) {
+#else
+s32 Mfs_LoadFileInDir(u16 dirId, char* name, char* extension, u8* buf, s32 sizeToLoad) {
+#endif
     u16 entryId;
 
 #if MFS_VERSION == MFS_VERSION_B

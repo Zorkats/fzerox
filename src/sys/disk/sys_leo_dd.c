@@ -250,7 +250,7 @@ s32 SLMFSLoadSpecial2(u16 dirId, char* name, char* extension, u8* buf, s32 sizeT
     }
 }
 
-extern char gEditCupTrackNames[6 * 4][9];
+extern char gEditCupTrackNames[6 * 4][EDIT_CUP_TRACK_NAME_SIZE];
 
 void func_8070470C(void) {
     s32 i;

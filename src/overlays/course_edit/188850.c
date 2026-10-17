@@ -14,6 +14,10 @@ extern float gdx_course_edit_min_y(void);
 extern float gdx_course_edit_max_y(void);
 #include "../../../../port/gdx_course_edit_input.h"
 #include "../../../../port/gdx_course_edit_menu.h"
+#include "../../../../port/gdx_course_edit_undo.h"
+#include "../../../../port/gdx_course_state.h"
+/* Shows a short message at the top of the Course Edit hint strip (port/gdx_course_edit_help.cpp). */
+extern void gdx_course_edit_flash_message(const char* text);
 
 static bool sGdxCourseEditMouseOwner;
 static s32 sGdxCourseEditMouseTool;
@@ -178,12 +182,21 @@ void func_xk2_800D7058(void) {
 
 #ifdef PORT
     // Slice 1: wheel dolly. Only when no sub-menu, dialog, or help overlay is open so file lists
-    // and long dropdowns keep scrolling with the wheel exactly as today. Positive detent (wheel
-    // toward the user) zooms out, negative detent zooms in.
+    // and long dropdowns keep scrolling with the wheel exactly as today. Each step multiplies the
+    // distance by 0.88 (zoom in) or divides it by 0.88 (zoom out), so near and far zoom move at the
+    // same relative speed. The port already applied the zoom sensitivity to the detent count, so a
+    // sensitivity of 200 means two steps per detent. Positive detent (wheel toward the user) zooms
+    // out, negative detent zooms in.
     if ((D_800D6CA0.unk_08 == 0) && (D_xk2_80119918 == 0)) {
         s32 wheel = gdx_course_edit_mouse_wheel();
         if (wheel != 0) {
-            D_xk2_80104CB4 += wheel * 300;
+            f32 dist = D_xk2_80104CB4;
+            s32 steps = ABS(wheel);
+            s32 i;
+            for (i = 0; i < steps; i++) {
+                dist = (wheel < 0) ? dist * 0.88f : dist / 0.88f;
+            }
+            D_xk2_80104CB4 = (s32)(dist + 0.5f);
         }
     }
 #endif
@@ -348,16 +361,14 @@ void func_xk2_800D78A0(void) {
     }
 
 #ifdef PORT
-    // Slice 1: MMB drag orbits the camera. Positive horizontal drag (right) matches BTN_RIGHT
-    // (yaw decrease); negative vertical drag (up) matches BTN_UP (pitch increase). Sensitivity is
-    // 0.5 degrees per OS pixel, about 3x the D-pad per-frame rate at typical mouse drag speeds.
+    // Slice 1: MMB drag orbits the camera. The port converts the drag into whole degrees per game
+    // tick (0.5 degrees per OS pixel, fraction carried between ticks) and applies the signs: a drag
+    // right yaws like BTN_RIGHT (yaw decrease), a drag up pitches like BTN_UP (pitch increase).
     {
-        s32 dx;
-        s32 dy;
-        if (gdx_course_edit_mouse_orbit_delta(&dx, &dy)) {
-            s32 yawDelta = (s32)(dx * 0.5f);
-            s32 pitchDelta = (s32)(-dy * 0.5f);
-            D_800D6CA0.unk_14 = ((D_800D6CA0.unk_14 - yawDelta) % 360);
+        s32 yawDelta;
+        s32 pitchDelta;
+        if (gdx_course_edit_mouse_orbit_delta(&yawDelta, &pitchDelta)) {
+            D_800D6CA0.unk_14 = ((D_800D6CA0.unk_14 + yawDelta) % 360);
             if (D_800D6CA0.unk_14 < 0) {
                 D_800D6CA0.unk_14 += 360;
             }
@@ -868,6 +879,12 @@ void func_xk2_800D8AB8(void) {
             Math_VectorGetDistance(temp_v0->pos, temp_v0->next->pos);
 
             temp_a1 = gDesignStyleOption;
+#ifdef PORT
+            if (temp_a1 >= TRACK_DESIGN_STYLE_LOOP) {
+                // LOOP and SPLIT have no track shape commit here, and sp2C only has 8 entries
+                return;
+            }
+#endif
             temp_v1 = sp2C[temp_a1];
             if (((temp_v0->prev->trackSegmentInfo & TRACK_SHAPE_MASK) != sp2C[temp_a1]) &&
                 ((temp_v0->next->trackSegmentInfo & TRACK_SHAPE_MASK) == sp2C[temp_a1])) {
@@ -981,6 +998,124 @@ extern s32 D_xk2_800F704C;
 extern s32 gCourseEditHighlightedIconIndex;
 extern MenuWidget gCourseEditWidget;
 
+#ifdef PORT
+extern CourseInfo* gCurrentCourseInfo;
+
+/* SPLIT design (PORT only): insert one control point at the curve midpoint between the active point and
+ * its next point. The gates follow func_xk2_800F07A4 (loop). The new point takes the average radii and bank
+ * angle of its two neighbors, and its trackSegmentInfo from the active point. */
+static void gdx_course_edit_split_segment(void) {
+    CourseSegment newSeg;
+    CourseSegment* activeSeg;
+    CourseSegment* nextSeg;
+    Vec3f mid;
+    s32 activeIndex;
+    s32 nextIndex;
+    s32 bankAverage;
+
+    if ((gCourseEditCursorYPos < 0x38) || (D_800D6CA0.unk_08 == 1) || (D_800D6CA0.unk_08 == 3) ||
+        (D_800D6CA0.unk_08 == 2) || (D_800D6CA0.unk_08 == 0x10) ||
+        !((gCreateOption == CREATE_OPTION_DESIGN) && (gDesignStyleOption == TRACK_DESIGN_STYLE_SPLIT)) ||
+        !(gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) || (D_800D6CA0.unk_0C < 0) ||
+        (D_800D6CA0.unk_0C >= D_802CB6D0.controlPointCount)) {
+        return;
+    }
+    if (D_800D6CA0.unk_0C == 0) {
+        gdx_course_edit_flash_message("Split: the start segment cannot be split");
+        Audio_TriggerSystemSE(NA_SE_32);
+        return;
+    }
+    if (D_802CB6D0.controlPointCount < 4) {
+        gdx_course_edit_flash_message("Split: the course needs 4 or more points");
+        Audio_TriggerSystemSE(NA_SE_32);
+        return;
+    }
+    if (D_802CB6D0.controlPointCount >= 60) {
+        gdx_course_edit_flash_message("Split: the course already has 60 points");
+        Audio_TriggerSystemSE(NA_SE_32);
+        return;
+    }
+    if (gCurrentCourseInfo->length > 300000.0f) {
+        gdx_course_edit_flash_message("Split: the course is at the length limit");
+        Audio_TriggerSystemSE(NA_SE_32);
+        return;
+    }
+
+    activeIndex = D_800D6CA0.unk_0C;
+    activeSeg = &D_802CB6D0.unk_0000[activeIndex];
+    nextSeg = activeSeg->next;
+    nextIndex = nextSeg->segmentIndex;
+
+    Course_SplineGetPosition(activeSeg, 0.5f, &mid);
+    mid.x = Math_Round(mid.x);
+    mid.y = Math_Round(mid.y);
+    mid.z = Math_Round(mid.z);
+    if ((Math_VectorGetDistance(activeSeg->pos, mid) < 498.0f) ||
+        (Math_VectorGetDistance(mid, nextSeg->pos) < 498.0f)) {
+        gdx_course_edit_flash_message("Split: this segment is too short to split");
+        Audio_TriggerSystemSE(NA_SE_32);
+        return;
+    }
+
+    bankAverage = (COURSE_CONTEXT()->courseData.bankAngle[activeIndex] +
+                   COURSE_CONTEXT()->courseData.bankAngle[nextIndex]) / 2;
+
+    gdx_course_edit_undo_set_pending_label(GDX_COURSE_EDIT_UNDO_LABEL_SPLIT);
+    func_xk2_800EF78C();
+    Audio_TriggerSystemSE(NA_SE_39);
+
+    newSeg.pos = mid;
+    newSeg.radiusLeft = (activeSeg->radiusLeft + nextSeg->radiusLeft) * 0.5f;
+    newSeg.radiusRight = (activeSeg->radiusRight + nextSeg->radiusRight) * 0.5f;
+    newSeg.trackSegmentInfo = activeSeg->trackSegmentInfo;
+    func_xk2_800E6CA8(activeIndex, newSeg);
+    COURSE_CONTEXT()->courseData.bankAngle[activeIndex + 1] = (s16)bankAverage;
+
+    func_i2_800BE8BC(gCurrentCourseInfo);
+    func_80074CE4(gCurrentCourseInfo);
+    D_xk2_800F7040 = 3;
+}
+
+extern s32 D_xk2_800F7058;
+s32 func_xk2_800DD76C(f32 arg0);
+
+/* Mouse mode has no Z, the button that picks the segment in DESIGN and PARTS (func_xk2_800DCDD0). A click
+ * there picks the segment under the cursor before the A handlers apply to it, with the same pick as Z.
+ * Returns 0 when the click missed the track, so the A handlers skip it instead of applying to an older pick. */
+static s32 gdx_course_edit_click_pick_segment(void) {
+    s32 mouseX;
+    s32 mouseY;
+    s32 sample;
+    s32 start;
+    s32 end;
+    s32 i;
+
+    if (!(D_80119720->buttonPressed & BTN_A) || (D_800D6CA0.unk_08 != 0) || (gCourseEditCursorYPos < 56) ||
+        ((gCreateOption != CREATE_OPTION_DESIGN) && (gCreateOption != CREATE_OPTION_PARTS)) ||
+        (D_802CB6D0.controlPointCount == 0) || !gdx_course_edit_mouse_pos(&mouseX, &mouseY)) {
+        return 1;
+    }
+    sample = func_xk2_800DD76C(400.0f);
+    if (sample == -1) {
+        return 0;
+    }
+    for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+        end = D_80128690[D_802CB6D0.unk_0000[i].next->segmentIndex].unk_00;
+        start = D_80128690[i].unk_00;
+        if (i + 1 == D_802CB6D0.controlPointCount) {
+            end = D_xk2_800F7058;
+        }
+        if ((i == 0) && (end < start)) {
+            start = 0;
+        }
+        if ((sample >= start) && (sample < end)) {
+            D_800D6CA0.unk_0C = i;
+        }
+    }
+    return 1;
+}
+#endif
+
 void func_xk2_800D8F04(void) {
     s32 pad[37];
     s32 temp_v1;
@@ -1042,14 +1177,21 @@ void func_xk2_800D8F04(void) {
             D_xk2_800F7044 = 0;
         }
     }
-    if ((gCourseEditCursorXPos < 230) || (gCourseEditCursorXPos >= 298) || (gCourseEditCursorYPos < 202) ||
-        (gCourseEditCursorYPos >= 222)) {
+    if (((gCourseEditCursorXPos < 230) || (gCourseEditCursorXPos >= 298) || (gCourseEditCursorYPos < 202) ||
+         (gCourseEditCursorYPos >= 222))
+#ifdef PORT
+        && gdx_course_edit_click_pick_segment()
+#endif
+    ) {
         func_xk2_800D8AB8();
         func_xk2_800D8CC4();
         func_xk2_800DC67C();
         func_xk2_800DC58C();
         func_xk2_800DC4E4();
         func_xk2_800F07A4();
+#ifdef PORT
+        gdx_course_edit_split_segment();
+#endif
     }
     func_xk2_800DD8C8();
     func_xk2_800DCCD8();
@@ -1563,6 +1705,17 @@ void func_xk2_800DA288(void) {
         }
     }
     var_s0 = false;
+#ifdef PORT
+    /* Same bounds as the other clamp sites, so Extended course height reaches the Y tool. */
+    if (sp64 < gdx_course_edit_min_y()) {
+        var_s0 = true;
+        D_xk2_80119734 = Math_Round(gdx_course_edit_min_y()) - Math_Round(D_807B6528.unk_0000[sp5C].pos.y);
+    }
+    if (sp60 > gdx_course_edit_max_y()) {
+        var_s0 = true;
+        D_xk2_80119734 = Math_Round(gdx_course_edit_max_y()) - Math_Round(D_807B6528.unk_0000[sp58].pos.y);
+    }
+#else
     if (sp64 < 0) {
         var_s0 = true;
         D_xk2_80119734 = -Math_Round(D_807B6528.unk_0000[sp5C].pos.y);
@@ -1571,6 +1724,7 @@ void func_xk2_800DA288(void) {
         var_s0 = true;
         D_xk2_80119734 = 5000 - Math_Round(D_807B6528.unk_0000[sp58].pos.y);
     }
+#endif
     if (var_s0) {
         Audio_TriggerSystemSE(NA_SE_32);
         for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
@@ -1902,13 +2056,17 @@ void func_xk2_800DB924(void) {
     if (D_800D6CA0.unk_00 != 0 || D_800D6CA0.unk_08 != 0 || D_xk2_80119918 != 0 || gInCourseEditTestRun) {
         deleteRequested = false;
     }
-    if (deleteRequested && gCreateOption == CREATE_OPTION_POINT) {
-        gMoveOption = MOVE_OPTION_CLEAR;
-    }
 #endif
+#ifdef PORT
+    /* The Delete key works in every point tool and leaves the current tool selected. */
+    if ((gCreateOption != CREATE_OPTION_POINT) || (!deleteRequested && gMoveOption != MOVE_OPTION_CLEAR)) {
+        return;
+    }
+#else
     if ((gCreateOption != CREATE_OPTION_POINT) || (gMoveOption != MOVE_OPTION_CLEAR)) {
         return;
     }
+#endif
 #ifdef PORT
     if (!deleteRequested && !gdx_course_edit_controller_a_pressed(gPlayerControlPorts[0])) {
         return;
@@ -2531,6 +2689,8 @@ void gdx_course_edit_native_update(void) {
     s32 targetOffset;
     GdxCourseEditVec3 target;
 
+    /* Undo, redo and History panel steps requested from the UI run here, on the game thread. */
+    gdx_course_edit_undo_tick();
     if (sGdxCourseEditMouseOwner) {
         if ((gCreateOption != CREATE_OPTION_POINT) || (D_800D6CA0.unk_08 != 0) || gInCourseEditTestRun ||
             (D_800D6CA0.unk_00 != 1) || D_xk2_80119918 != 0 || gMoveOption != sGdxCourseEditMouseTool ||
@@ -2569,6 +2729,8 @@ void gdx_course_edit_native_update(void) {
         gdx_course_edit_input_clear();
         return;
     }
+    /* Line up (tool 6, Enter). The port has pre-checked the run. This applies it with the undo backup. */
+    gdx_course_edit_native_apply_line_up();
     if (gdx_course_edit_input_take_drag_start(&pointIndex)) {
         gdx_course_edit_begin_mouse_drag(pointIndex);
         return;
@@ -3128,6 +3290,11 @@ void func_xk2_800DD8C8(void) {
         return;
     }
     if (D_80119720->buttonPressed & BTN_A) {
+#ifdef PORT
+        /* Gamepad A still lines up. Mouse mode blocks mouse A and keyboard A here and uses Enter instead. */
+        gdx_course_edit_undo_set_pending_label(GDX_COURSE_EDIT_UNDO_LABEL_LINE_UP);
+        func_xk2_800EF78C();
+#endif
         func_xk2_800EFCD0();
     }
 
@@ -3301,6 +3468,9 @@ void func_xk2_800DD938(void) {
                 Course_Load(D_xk2_80119884);
             }
             D_80030060[0] = '\0';
+#ifdef PORT
+            gdx_course_state_clear_edit_file();
+#endif
             func_xk2_800EACB0();
             D_xk2_800F7040 = 3;
             D_xk2_800F7060 = Math_Rand2() % 30;
@@ -3933,7 +4103,7 @@ void func_xk2_800DF370(void) {
     func_xk1_8002D2F0();
 }
 
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 extern s32 D_xk2_80103F10;
 
 void func_xk2_800DF42C(void) {

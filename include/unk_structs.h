@@ -596,8 +596,27 @@ typedef struct unk_807C6EA8 {
     /* 0x60 */ s32 bssSize;
 } unk_807C6EA8;
 
+#ifdef PORT
+/* An MFS file name holds 20 characters. Course Edit names its files through the shared name entry
+   (expansion_kit/A6340.c), so that entry and the title buffers D_80030060/D_8003006C hold this many
+   in the port. Machine Create keeps its 8 (CustomMachine.machineName is u8[9]). */
+#define GDX_EK_FILE_NAME_MAX 20
+/* An Edit Cup slot (gEditCupTrackNames) holds a whole Course Edit name. CRS_ENTRY.CENT on disk keeps its
+   stock 9-byte rows; MFS splits and merges the wide rows (port/gdx_edit_cup.h). */
+#define EDIT_CUP_TRACK_NAME_SIZE (GDX_EK_FILE_NAME_MAX + 1)
+#else
+#define EDIT_CUP_TRACK_NAME_SIZE 9
+#endif
+
 typedef struct unk_8003A5D8 {
+#ifdef PORT
+    /* MFS names reach 20 characters (MfsRamDirectoryEntry.name has no terminator at that length),
+       so the port keeps all of them plus a NUL instead of letting attr overwrite the tail. Offsets
+       below shift; nothing in the port depends on the 0x24 layout. */
+    char name[GDX_EK_FILE_NAME_MAX + 1];
+#else
     /* 0x00 */ char name[16];
+#endif
     /* 0x10 */ s32 attr;
     /* 0x14 */ s8 unk_14[0x8];
     /* 0x1C */ char unk_1C;

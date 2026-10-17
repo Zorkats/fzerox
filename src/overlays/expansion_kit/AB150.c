@@ -20,6 +20,10 @@ extern s32 gMfsError;
 extern s32 gGdxMfsListCompleted;
 extern s32 gGdxMfsListStatus;
 extern void gdx_dbg_logf(const char* fmt, ...);
+/* port/gdx_course_state.h: Course Edit keys and titles follow a renamed course file and leave a deleted one. */
+extern void gdx_course_state_on_file_renamed(const char* oldName, const char* oldExtension, const char* newName,
+                                             const char* newExtension);
+extern void gdx_course_state_on_file_deleted(const char* name, const char* extension);
 #endif
 
 void func_xk1_8002DF10(void) {
@@ -221,6 +225,16 @@ s32 func_xk1_8002E368(void) {
             }
             D_807C6EA8.unk_14 = D_xk1_80033404 = gMfsError;
             D_xk1_80033408 = D_80794CD8;
+#ifdef PORT
+            if (D_xk1_80033404 == LEO_ERROR_GOOD) {
+                if (D_807C6EA8.unk_00 == 15) {
+                    gdx_course_state_on_file_renamed(D_807C6EA8.oldName, D_807C6EA8.oldExtension, D_807C6EA8.newName,
+                                                     D_807C6EA8.newExtension);
+                } else if (D_807C6EA8.unk_00 == 16) {
+                    gdx_course_state_on_file_deleted(D_807C6EA8.name, D_807C6EA8.extension);
+                }
+            }
+#endif
 #ifdef PORT
             /* The in-game prompt is generic, so preserve bounded host diagnostics for invalid MFS roots. */
             {

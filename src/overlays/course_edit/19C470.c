@@ -66,6 +66,9 @@ extern u8 D_80030060[];
 extern u8 D_8003006C[];
 extern s32 D_80119880;
 extern unk_8003A5D8 D_xk1_8003A598;
+#ifdef PORT
+#include "../../../../port/gdx_course_state.h"
+#endif
 extern s32 D_xk2_80104378;
 extern unk_800D6CA0 D_800D6CA0;
 extern s32 D_xk1_80032C20;
@@ -114,6 +117,10 @@ s32 func_xk2_800EAA1C(u8* arg0) {
             func_xk2_800EA9B0(D_xk1_8003A598.extension, "CRSE");
             D_800D6CA0.unk_08 = 0x14;
         }
+#ifdef PORT
+        // The edited course now lives in this file, so its custom choices go under this name.
+        gdx_course_state_set_edit_file(D_xk1_8003A598.name, D_xk1_8003A598.extension);
+#endif
     }
     mfsStrCpy(D_80030060, arg0);
     mfsStrCpy(D_8003006C, arg0);
@@ -174,6 +181,13 @@ void func_xk2_800EACB0(void) {
     gVenueWidget.highlightedIndex = gVenueOption = COURSE_CONTEXT()->courseData.venue;
     gSkyboxOption = COURSE_CONTEXT()->courseData.skybox;
     gBGMOption = gBGMOptionToCourseBGM[COURSE_CONTEXT()->courseData.bgm];
+#ifdef PORT
+    {
+        extern void gdx_course_edit_restore_custom_rows(void);
+
+        gdx_course_edit_restore_custom_rows();
+    }
+#endif
     func_80077AD8(COURSE_CONTEXT()->courseData.venue);
     func_800747EC(gVenueOption);
     func_80074428(0);
@@ -208,6 +222,10 @@ s32 func_xk2_800EAF24(unk_8003A5D8* arg0) {
     func_80768574(MFS_ENTRY_WORKING_DIR, arg0->name, &D_xk1_8003A5D8[D_xk2_80119884].extension, &D_xk2_800F7408,
                   sizeof(CourseContext));
     mfsStrCpy(&D_80030060, arg0);
+#ifdef PORT
+    // Load fills only the title above, not D_xk1_8003A598, so the port records the loaded file itself.
+    gdx_course_state_set_edit_file(arg0->name, D_xk1_8003A5D8[D_xk2_80119884].extension);
+#endif
     return 0;
 }
 
@@ -398,7 +416,7 @@ extern u8 gExpansionKitNameEntryStr[];
 extern s32 D_xk2_80103F10;
 extern s32 D_xk2_80104378;
 extern s32 D_xk2_80119884;
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 
 void func_xk2_800EB400(void) {
     s32 courseIndex;
@@ -421,6 +439,9 @@ void func_xk2_800EB400(void) {
                     Course_Load(courseIndex);
                 }
                 D_80030060[0] = 0;
+#ifdef PORT
+                gdx_course_state_clear_edit_file();
+#endif
                 func_xk2_800EACB0();
                 gCourseEditFileOption = -1;
                 D_800D6CA0.unk_08 = 0;
@@ -521,13 +542,41 @@ void func_xk2_800EB400(void) {
                 func_xk1_8002D290();
                 break;
             }
+#ifdef PORT
+            /* The cup slot holds a whole Course Edit name (EDIT_CUP_TRACK_NAME_SIZE); MFS keeps names
+             * over 8 characters in CRS_ENTRY.CENL. mfsStrCpy copies without a bound, so the copy stops
+             * at the slot size. The file list copies names only up to their NUL, so bytes past a short
+             * name can be stale: copy up to the NUL. */
+            {
+                int i;
+
+                for (i = 0; i < GDX_EK_FILE_NAME_MAX && D_xk1_8003A5D8[courseIndex].name[i] != '\0'; i++) {
+                    gEditCupTrackNames[D_xk2_80103F10][i] = D_xk1_8003A5D8[courseIndex].name[i];
+                }
+                gEditCupTrackNames[D_xk2_80103F10][i] = '\0';
+            }
+#else
             mfsStrCpy(gEditCupTrackNames[D_xk2_80103F10], D_xk1_8003A5D8[courseIndex].name);
+#endif
             func_xk2_800EC110();
             D_800D6CA0.unk_08 = 0x37;
             break;
         case 7:
             func_xk1_800294AC();
+#ifdef PORT
+            /* Name entry holds a whole file name in Course Edit (GDX_EK_FILE_NAME_MAX), so a rename
+               starts from the full name. The bound still guards an unterminated list entry. */
+            {
+                int i;
+
+                for (i = 0; i < GDX_EK_FILE_NAME_MAX &&D_xk1_8003A5D8[courseIndex].name[i] != '\0'; i++) {
+                    gExpansionKitNameEntryStr[i] = D_xk1_8003A5D8[courseIndex].name[i];
+                }
+                gExpansionKitNameEntryStr[i] = '\0';
+            }
+#else
             mfsStrCpy(gExpansionKitNameEntryStr, D_xk1_8003A5D8[courseIndex].name);
+#endif
             func_xk2_800EAFA8(D_xk1_8003A5D8[courseIndex].name);
             gCourseEditFileOption = -1;
             D_800D6CA0.unk_08 = 0x33;

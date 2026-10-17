@@ -2577,6 +2577,22 @@ void Camera_InitViewport(Camera* camera) {
     }
 #undef GDX_SEGMENTED_TO_HOST
 
+#ifdef PORT
+    /* Overscan removal must reach these CPU mirrors too: position/rival markers and background
+       culling project through currentVpScale/Trans and the scissor mirrors, so they take the same
+       borderless pane that func_8006A00C submits. */
+    {
+        extern bool gdx_borderless_pane(s32 scissorBoxType, Vp** vp, ScissorBox** scissorBox);
+        Vp* gdxVp;
+        ScissorBox* gdxScissorBox;
+
+        if (gdx_borderless_pane(scissorBoxType, &gdxVp, &gdxScissorBox)) {
+            vp = gdxVp;
+            scissorBox = gdxScissorBox;
+        }
+    }
+#endif
+
     camera->currentVpScaleX = camera->startVpScaleX = camera->endVpScaleX = vp->vp.vscale[0] * 0.25f;
     camera->currentVpScaleY = camera->startVpScaleY = camera->endVpScaleY = vp->vp.vscale[1] * 0.25f;
 
@@ -2585,22 +2601,6 @@ void Camera_InitViewport(Camera* camera) {
 
     camera->startVpTransX = camera->endVpTransX = camera->currentVpTransX - camera->currentVpScaleX;
     camera->startVpTransY = camera->endVpTransY = camera->currentVpTransY - camera->currentVpScaleY;
-
-#ifdef PORT
-    /* Overscan removal must reach these CPU mirrors too: position/rival markers project through
-       currentVpScale/Trans, so they have to match the full-frame Vp func_8006A00C submits. */
-    {
-        extern int gdx_remove_borders(void);
-        if (scissorBoxType == SCISSOR_BOX_FULL_SCREEN && gdx_remove_borders()) {
-            camera->currentVpScaleX = camera->startVpScaleX = camera->endVpScaleX = 160.0f;
-            camera->currentVpScaleY = camera->startVpScaleY = camera->endVpScaleY = 120.0f;
-            camera->currentVpTransX = 160.0f;
-            camera->currentVpTransY = 120.0f;
-            camera->startVpTransX = camera->endVpTransX = 0.0f;
-            camera->startVpTransY = camera->endVpTransY = 0.0f;
-        }
-    }
-#endif
 
     camera->currentScissorLeft = camera->startScissorLeft = camera->endScissorLeft = scissorBox->left;
     camera->currentScissorTop = camera->startScissorTop = camera->endScissorTop = scissorBox->top;
@@ -2818,6 +2818,30 @@ extern s32 D_i2_80106F10;
 extern s32 sNumCameras;
 extern s16 D_800E5FBC;
 
+#ifdef PORT
+/* Maps a CRT-safe outer edge from the race-end zoom tables to the true frame edge. Interior seam
+   values never appear in those tables, so everything else passes through. */
+static f32 Camera_GdxOpenSafeEdgeX(f32 x) {
+    if (x == 12.0f) {
+        return 0.0f;
+    }
+    if (x == 307.0f) {
+        return SCREEN_WIDTH;
+    }
+    return x;
+}
+
+static f32 Camera_GdxOpenSafeEdgeY(f32 y) {
+    if (y == 8.0f) {
+        return 0.0f;
+    }
+    if (y == 231.0f) {
+        return SCREEN_HEIGHT;
+    }
+    return y;
+}
+#endif
+
 void Camera_UpdateViewportTransition(void) {
     Racer* racer;
     f32 temp_fv0;
@@ -3003,6 +3027,24 @@ void Camera_UpdateViewportTransition(void) {
                     }
                     break;
             }
+#ifdef PORT
+            /* The race-end zoom targets hardcoded CRT-safe edges (12/307, 8/231); with overscan
+               removal the winner's pane has to grow to the true frame and the others collapse onto
+               its edges, or the zoom ends inside a black border again. The end viewports already
+               span the full frame in stock. */
+            {
+                extern int gdx_remove_borders(void);
+
+                if (gdx_remove_borders()) {
+                    for (i = 0, camera = gCameras; i < sNumCameras; i++, camera++) {
+                        camera->endScissorLeft = Camera_GdxOpenSafeEdgeX(camera->endScissorLeft);
+                        camera->endScissorRight = Camera_GdxOpenSafeEdgeX(camera->endScissorRight);
+                        camera->endScissorTop = Camera_GdxOpenSafeEdgeY(camera->endScissorTop);
+                        camera->endScissorBottom = Camera_GdxOpenSafeEdgeY(camera->endScissorBottom);
+                    }
+                }
+            }
+#endif
         }
     } else if ((gCameras[sMultiplayerFocusCameraId].transitionTimer == 30) && !D_80141D70) {
         D_80141D70 = true;

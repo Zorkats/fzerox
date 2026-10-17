@@ -165,6 +165,97 @@ extern s32 gLeoDriveConnectionState;
 const s32 kDefaultSubOptionLimits[] = { 2, 1, 0, 2, 0, 2, 0, 0 };
 const s32 kMaxSubOptionLimits[] = { 3, 1, 0, 2, 0, 3, 0, 0 };
 
+#ifdef PORT
+/* Slice 7: a CONTINUE row under the Grand Prix classes while a cup in progress is saved. It takes the same
+   path as the Continue Cup button of the port menu (game.c gdx_gp_resume_request_continue). */
+extern int gdx_gp_resume_available(int* outDifficulty);
+extern void gdx_gp_resume_request_continue(void);
+extern Gfx* func_80078DB4(Gfx* gfx, unk_80077D50* arg1, s32 left, s32 top, TexturePtr texture, u32 arg5, s32 arg6,
+                          s32 arg7, f32 arg8, f32 arg9);
+
+static bool sGdxContinueAvailable = false;
+/* Frames the class list ignores input after CONTINUE, so the request is taken before anything else moves. */
+static s32 sGdxContinueHoldTimer = 0;
+
+/* The game has no CONTINUE in the class font, so the word is cut from the class textures already loaded:
+   every letter is in NOVICE or EXPERT except U, which is the top of the V over the bottom of the O. Glyphs
+   keep their black outline and sit one transparent column apart, as in the stock words. */
+#define GDX_CONTINUE_TEX_WIDTH 72
+#define GDX_CONTINUE_TEX_HEIGHT 18
+#define GDX_CONTINUE_SPLIT_ROW 9
+
+typedef struct GdxContinueGlyph {
+    u8 fromExpert;
+    u8 topX;    /* source column of rows above GDX_CONTINUE_SPLIT_ROW */
+    u8 bottomX; /* source column of the rest */
+    u8 width;
+} GdxContinueGlyph;
+
+static const GdxContinueGlyph kGdxContinueGlyphs[] = {
+    { 0, 41, 41, 8 },  /* C */
+    { 0, 18, 18, 8 },  /* O */
+    { 0, 7, 7, 10 },   /* N */
+    { 1, 50, 50, 8 },  /* T */
+    { 0, 36, 36, 4 },  /* I */
+    { 0, 7, 7, 10 },   /* N */
+    { 0, 27, 18, 8 },  /* U: V over O */
+    { 0, 50, 50, 7 },  /* E */
+};
+
+/* u64 storage keeps the texture 8-byte aligned, as texture loads expect. */
+static u64 sGdxContinueTexStorage[GDX_CONTINUE_TEX_WIDTH * GDX_CONTINUE_TEX_HEIGHT * sizeof(u16) / sizeof(u64)];
+#define sGdxContinueTex ((u16*) sGdxContinueTexStorage)
+static unk_80077D50 sGdxContinueTexInfo = {
+    17, sGdxContinueTexStorage, GDX_CONTINUE_TEX_WIDTH, GDX_CONTINUE_TEX_HEIGHT, 0
+};
+static bool sGdxContinueTexReady = false;
+
+/* Builds the word once the class textures are loaded. Returns false while they are not. */
+static bool gdx_main_menu_build_continue_tex(void) {
+    const u16* novice;
+    const u16* expert;
+    s32 i;
+    s32 y;
+    s32 x = 1;
+
+    if (sGdxContinueTexReady) {
+        return true;
+    }
+    novice = (const u16*) func_800783AC(aNoviceTex);
+    expert = (const u16*) func_800783AC(aExpertTex);
+    if ((novice == NULL) || (expert == NULL)) {
+        return false;
+    }
+    for (i = 0; i < ARRAY_COUNT(kGdxContinueGlyphs); i++) {
+        const GdxContinueGlyph* glyph = &kGdxContinueGlyphs[i];
+        const u16* src = glyph->fromExpert ? expert : novice;
+
+        for (y = 0; y < GDX_CONTINUE_TEX_HEIGHT; y++) {
+            s32 srcX = (y < GDX_CONTINUE_SPLIT_ROW) ? glyph->topX : glyph->bottomX;
+
+            memcpy(&sGdxContinueTex[y * GDX_CONTINUE_TEX_WIDTH + x], &src[y * TEX_WIDTH(aNoviceTex) + srcX],
+                   glyph->width * sizeof(u16));
+        }
+        x += glyph->width + 1;
+    }
+    sGdxContinueTexReady = true;
+    return true;
+}
+
+/* Last class row the player can reach in the current unlock state. */
+static s32 gdx_main_menu_class_limit(s32 mode) {
+    if ((gUnlockableLevel < 2) && !gSettingEverythingUnlocked) {
+        return kDefaultSubOptionLimits[mode];
+    }
+    return kMaxSubOptionLimits[mode];
+}
+
+/* Row index of CONTINUE in the Grand Prix class list, or -1 when no cup can be resumed. */
+static s32 gdx_main_menu_continue_row(void) {
+    return sGdxContinueAvailable ? gdx_main_menu_class_limit(MODE_GP_RACE) + 1 : -1;
+}
+#endif
+
 s32 MainMenu_Update(void) {
     s32 previous;
     bool var_v1_2;
@@ -300,10 +391,28 @@ s32 MainMenu_Update(void) {
             }
             break;
         case 1:
+#ifdef PORT
+            if (sGdxContinueHoldTimer > 0) {
+                sGdxContinueHoldTimer--;
+                break;
+            }
+#endif
             previous = gModeSubOption[gSelectedMode];
             if (gInputPressed & BTN_DOWN) {
                 gModeSubOption[gSelectedMode]++;
             }
+#ifdef PORT
+            {
+                s32 limit = gdx_main_menu_class_limit(gSelectedMode);
+
+                if ((gSelectedMode == MODE_GP_RACE) && (gdx_main_menu_continue_row() >= 0)) {
+                    limit = gdx_main_menu_continue_row();
+                }
+                if (limit < gModeSubOption[gSelectedMode]) {
+                    gModeSubOption[gSelectedMode] = limit;
+                }
+            }
+#else
             if ((gUnlockableLevel < 2) && !gSettingEverythingUnlocked) {
                 if (kDefaultSubOptionLimits[gSelectedMode] < gModeSubOption[gSelectedMode]) {
                     gModeSubOption[gSelectedMode] = kDefaultSubOptionLimits[gSelectedMode];
@@ -313,6 +422,7 @@ s32 MainMenu_Update(void) {
                     gModeSubOption[gSelectedMode] = kMaxSubOptionLimits[gSelectedMode];
                 }
             }
+#endif
 #ifndef VERSION_JP
             if (gSelectedMode == MODE_VS_BATTLE && (gControllersConnected < gModeSubOption[gSelectedMode] + 2)) {
                 gModeSubOption[gSelectedMode] = gControllersConnected - 2;
@@ -339,6 +449,14 @@ s32 MainMenu_Update(void) {
             } else if ((gInputButtonPressed & BTN_START) &&
                        (OBJECT_STATE(Object_Get(OBJECT_MAIN_MENU_UNLOCK_EVERYTHING)) == 7)) {
                 break;
+#ifdef PORT
+            } else if ((gInputButtonPressed & (BTN_A | BTN_START)) && (gSelectedMode == MODE_GP_RACE) &&
+                       (gModeSubOption[MODE_GP_RACE] == gdx_main_menu_continue_row())) {
+                /* The class list stays open (D_800CD384 1, a safe point) until game.c takes the request. */
+                Audio_TriggerSystemSE(NA_SE_62);
+                gdx_gp_resume_request_continue();
+                sGdxContinueHoldTimer = 30;
+#endif
             } else if (gInputButtonPressed & (BTN_A | BTN_START)) {
                 Audio_TriggerSystemSE(NA_SE_33);
                 D_800CD384 = 2;
@@ -521,6 +639,18 @@ void MainMenu_DifficultyInit(void) {
     for (i = 0; i < 4; i++) {
         func_80077D50_impl(sDifficultyCompTexInfos[i], 0, true);
     }
+#ifdef PORT
+    {
+        int savedDifficulty = 0;
+
+        sGdxContinueHoldTimer = 0;
+        sGdxContinueAvailable = gdx_gp_resume_available(&savedDifficulty) != 0;
+        if (!sGdxContinueAvailable && (gModeSubOption[MODE_GP_RACE] > gdx_main_menu_class_limit(MODE_GP_RACE))) {
+            /* The cup that row stood for is gone, so the cursor goes back to a class. */
+            gModeSubOption[MODE_GP_RACE] = 0;
+        }
+    }
+#endif
 }
 
 void MainMenu_TimeAttackModeInit(void) {
@@ -880,6 +1010,21 @@ Gfx* MainMenu_NumPlayersDraw(Gfx* gfx, Object* numPlayersObj) {
     return gfx;
 }
 
+#ifdef PORT
+/* The stock row color of the class lists: the chosen row pulses, then turns green once confirmed. */
+static Gfx* gdx_main_menu_row_color(Gfx* gfx, s32 row) {
+    if (gModeSubOption[gSelectedMode] != row) {
+        gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+        return gfx;
+    }
+    if ((D_800CD384 >= 2) && (D_800CD384 <= 4)) {
+        gDPSetPrimColor(gfx++, 0, 0, 0, 255, 0, 255);
+        return gfx;
+    }
+    return func_8007DB28(gfx, 0);
+}
+#endif
+
 Gfx* MainMenu_DifficultyDraw(Gfx* gfx, Object* difficultyObj) {
     s32 i;
     s32 temp_s6;
@@ -914,6 +1059,47 @@ Gfx* MainMenu_DifficultyDraw(Gfx* gfx, Object* difficultyObj) {
     gfx = func_80078EA0_impl(gfx, sSelectModeOptionFlamesCompTexInfo, OBJECT_LEFT(difficultyObj) - temp_s6,
                              OBJECT_TOP(difficultyObj), 0, 0, 0, 1.0f, 1.0f, true);
 
+#ifdef PORT
+    {
+        s32 classCount = ((gUnlockableLevel < 2) && !gSettingEverythingUnlocked) ? 3 : 4;
+        s32 continueRow = (gSelectedMode == MODE_GP_RACE) ? gdx_main_menu_continue_row() : -1;
+        s32 left = (OBJECT_LEFT(difficultyObj) - temp_s6) + 0x20;
+        s32 rowTop;
+        s32 rowStep;
+
+        /* The 80 pixel flame panel holds four 18 pixel rows. With CONTINUE, three classes take the stock
+           four-row layout and four classes squeeze to a 15 pixel step. */
+        if (continueRow < 0) {
+#ifdef VERSION_JP
+            rowTop = (classCount == 3) ? 0xC : 5;
+#else
+            rowTop = (classCount == 3) ? 0xE : 7;
+#endif
+            rowStep = (classCount == 3) ? 20 : 18;
+        } else if (classCount == 3) {
+            rowTop = 7;
+            rowStep = 18;
+        } else {
+            rowTop = 3;
+            rowStep = 15;
+        }
+
+        for (i = 0; i < classCount; i++) {
+            gfx = gdx_main_menu_row_color(gfx, i);
+            gfx = func_80078EA0_impl(gfx, sDifficultyCompTexInfos[i], left,
+                                     OBJECT_TOP(difficultyObj) + rowTop + (i * rowStep), 1, 0, 0, 1.0f, 1.0f, true);
+        }
+        if ((continueRow >= 0) && gdx_main_menu_build_continue_tex()) {
+            /* The word is wider than the 64 pixel class rows; this centers both on the flame panel. */
+            s32 continueLeft = left - ((GDX_CONTINUE_TEX_WIDTH - TEX_WIDTH(aNoviceTex)) / 2);
+
+            gfx = gdx_main_menu_row_color(gfx, continueRow);
+            gfx = func_80078DB4(gfx, &sGdxContinueTexInfo, continueLeft,
+                                OBJECT_TOP(difficultyObj) + rowTop + (continueRow * rowStep), sGdxContinueTex, 1, 0,
+                                0, 1.0f, 1.0f);
+        }
+    }
+#else
     for (i = 0; i < 4; i++) {
         if (gModeSubOption[gSelectedMode] == i) {
             switch (D_800CD384) {
@@ -949,6 +1135,7 @@ Gfx* MainMenu_DifficultyDraw(Gfx* gfx, Object* difficultyObj) {
 #endif
         }
     }
+#endif
 
     return gfx;
 }

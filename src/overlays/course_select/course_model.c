@@ -125,7 +125,7 @@ extern s32 D_800DCCFC;
 extern Camera gCameras[];
 extern s32 gSelectedMode;
 extern s32 gCupType;
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 extern s8 sCourseSelectTrackNo;
 extern s32 sCourseSelectCup;
 extern s32 gCourseIndex;

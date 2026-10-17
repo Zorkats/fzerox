@@ -1,6 +1,10 @@
 #include "global.h"
 #ifdef PORT
 #include "../../../../port/gdx_course_edit_menu.h"
+#include "../../../../port/gdx_course_music.h"
+#include "../../../../port/gdx_course_packs.h"
+#include "../../../../port/gdx_course_state.h"
+#include "../../../../port/gdx_ek_text.h"
 #endif
 #include "fzx_course.h"
 #include "fzx_expansion_kit.h"
@@ -382,10 +386,37 @@ MenuDropItem sSkyboxMenuItems[] = {
       aExpansionKitMenu7Tex, aCourseEditSkyboxSunsetTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu8Tex, aCourseEditSkyboxSkyBlueTex, NULL, NULL, 16, 16, NULL, NULL },
+#ifdef PORT
+    // 9D custom skybox rows (indices 8 and up): a background only, like the 7A BGM rows. Their names are drawn
+    // by the highlight (gdx_draw_custom_skybox_label in course_edit/191080.c). Custom imagery is out of scope.
+#define GDX_SKYBOX_CUSTOM_ROW                                                                               \
+    {                                                                                                       \
+        aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex,       \
+            D_xk1_80030470, NULL, NULL, NULL, 48, 16, NULL, NULL                                            \
+    },
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+    GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW GDX_SKYBOX_CUSTOM_ROW
+#endif
 };
 
 MenuWidget gSkyboxWidget = { 8,   INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sSkyboxMenuItems, 160, 48, 160,
                              160, &gSkyboxOption };
+
+#ifdef PORT
+// 7A custom BGM rows (indices 14 and up). Their names are drawn by the highlight (func_xk2_800E5214 in
+// course_edit/191080.c); their number badges (15 and up) are composed at run time by gdx_bgm_bind_badges.
+#define GDX_BGM_CUSTOM_ROW                                                                                  \
+    {                                                                                                       \
+        aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex,       \
+            D_xk1_80030470, NULL, NULL, NULL, 48, 16, NULL, NULL                                            \
+    },
+#endif
 
 MenuDropItem sBGMMenuItems[] = {
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, D_xk1_80030470, NULL,
@@ -416,10 +447,64 @@ MenuDropItem sBGMMenuItems[] = {
       NULL, NULL, 48, 16, NULL, aExpansionKitMenu13Tex },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, D_xk1_80030470, NULL,
       NULL, NULL, 48, 16, NULL, aExpansionKitMenu14Tex },
+#ifdef PORT
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+    GDX_BGM_CUSTOM_ROW GDX_BGM_CUSTOM_ROW
+#endif
 };
 
 MenuWidget gBGMWidget = { 14,  INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sBGMMenuItems, 112, 48, 112,
                           256, &gBGMOption };
+
+#ifdef PORT
+#define GDX_BGM_CUSTOM_ROWS (ARRAY_COUNT(sBGMMenuItems) - 14)
+
+static u64 sGdxBgmBadges[GDX_BGM_CUSTOM_ROWS][GDX_EK_BADGE_BYTES / sizeof(u64)];
+static bool sGdxBgmBadgesBound = false;
+
+// Gives the custom BGM rows the number badges the stock rows have. The digits are cut from the stock badges
+// (port/gdx_ek_text.h), so this waits until the Expansion Kit textures hold their data.
+static void gdx_bgm_bind_badges(void) {
+    const unsigned char* badges[GDX_EK_BADGE_STOCK_MAX + 1] = {
+        NULL,
+        aExpansionKitMenu1Tex,
+        aExpansionKitMenu2Tex,
+        aExpansionKitMenu3Tex,
+        aExpansionKitMenu4Tex,
+        aExpansionKitMenu5Tex,
+        aExpansionKitMenu6Tex,
+        aExpansionKitMenu7Tex,
+        aExpansionKitMenu8Tex,
+        aExpansionKitMenu9Tex,
+        aExpansionKitMenu10Tex,
+        aExpansionKitMenu11Tex,
+        aExpansionKitMenu12Tex,
+        aExpansionKitMenu13Tex,
+        aExpansionKitMenu14Tex,
+        aExpansionKitMenu15Tex,
+    };
+    s32 i;
+
+    if (sGdxBgmBadgesBound) {
+        return;
+    }
+    for (i = 0; i < GDX_BGM_CUSTOM_ROWS; i++) {
+        // A composed badge needs digit ink, so a failure here means the textures are not loaded yet.
+        if (!gdx_ek_badge_compose(badges, 15 + i, (unsigned char*) sGdxBgmBadges[i])) {
+            return;
+        }
+    }
+    for (i = 0; i < GDX_BGM_CUSTOM_ROWS; i++) {
+        sBGMMenuItems[14 + i].subContentsI4Tex = sGdxBgmBadges[i];
+    }
+    sGdxBgmBadgesBound = true;
+}
+#endif
 
 MenuDropItem gTunnelTypeMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
@@ -770,6 +855,10 @@ MenuDropItem sMoveMenuItems[] = {
 MenuWidget gMoveWidget = { 7,   INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sMoveMenuItems, 112, 48, 112,
                            144, &gMoveOption };
 
+#ifdef PORT
+extern u8 aCourseEditSplitTex[];
+#endif
+
 MenuDropItem sDesignStyleMenuItems[] = {
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditRoadTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
@@ -789,10 +878,18 @@ MenuDropItem sDesignStyleMenuItems[] = {
       NULL, NULL, NULL, 48, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditLoopTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
+#ifdef PORT
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditSplitTex,
+      NULL, NULL, NULL, 48, 16, NULL, NULL },
+#endif
 };
 
 MenuWidget gDesignStyleWidget = {
+#ifdef PORT
+    10, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sDesignStyleMenuItems, 112, 48, 112, 192, &gDesignStyleOption
+#else
     9, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sDesignStyleMenuItems, 112, 48, 112, 176, &gDesignStyleOption
+#endif
 };
 
 MenuDropItem sPartsStyleMenuItems[] = {
@@ -1414,6 +1511,35 @@ void func_xk1_8002820C(void) {
     gCourseEditMenuItems[2].widget = NULL;
 }
 
+#ifdef PORT
+// 7A: the courseId ("NAME.EXT") of the track being edited. 0 when the track has no disk file yet.
+// GDX_BGM_COURSE_ID_MAX is GDX_COURSE_FILE_ID_MAX + 1 (port/gdx_course_registry.h, kept out of decomp).
+#define GDX_BGM_COURSE_ID_MAX 26
+
+static s32 gdx_bgm_course_id(char* courseId, size_t cap) {
+    return gdx_course_state_edit_file_id(courseId, (int) cap);
+}
+
+// A loaded track sets its menu rows from the stock fallback bytes in its data. Its custom skybox and
+// BGM rows are then shown instead, so the menu matches the track without reopening the category.
+void gdx_course_edit_restore_custom_rows(void) {
+    char courseId[GDX_BGM_COURSE_ID_MAX];
+    s32 extIndex;
+
+    if (!gdx_bgm_course_id(courseId, sizeof(courseId))) {
+        return;
+    }
+    extIndex = gdx_course_skybox_choice(courseId);
+    if (extIndex >= 0) {
+        gSkyboxOption = 8 + extIndex;
+    }
+    extIndex = gdx_course_music_choice(courseId);
+    if (extIndex >= 0) {
+        gBGMOption = 14 + extIndex;
+    }
+}
+#endif
+
 void func_xk1_80028250(void) {
 #ifdef PORT
     CourseEdit_InitLavaIcons();
@@ -1428,6 +1554,9 @@ void func_xk1_80028250(void) {
         &gCylinderTypeWidget,
         NULL,
         NULL,
+#ifdef PORT
+        NULL,
+#endif
     };
     s32* sCourseDesignTypeOptions[] = {
         &gRoadTypeOption,
@@ -1439,6 +1568,9 @@ void func_xk1_80028250(void) {
         &gCylinderTypeOption,
         NULL,
         NULL,
+#ifdef PORT
+        NULL,
+#endif
     };
     MenuWidget* sCoursePartTypeWidgets[] = {
         &sPitTypeWidget,      &sDashTypeWidget, &sDirtTypeWidget,     &sIceTypeWidget,  &sJumpTypeWidget,
@@ -1487,6 +1619,9 @@ void func_xk1_80028250(void) {
             switch (gDesignStyleOption) {
                 case TRACK_DESIGN_STYLE_SPACE:
                 case TRACK_DESIGN_STYLE_LOOP:
+#ifdef PORT
+                case TRACK_DESIGN_STYLE_SPLIT:
+#endif
                     gCourseEditMenuItems[2].contentsTex = NULL;
                     break;
                 default:
@@ -1531,11 +1666,48 @@ void func_xk1_80028250(void) {
             gCourseEditMenuItems[1].contentsTex = aCourseEditSceneTex;
             gCourseEditMenuItems[1].widget = &gVenueWidget;
             gCourseEditMenuOptions[1] = &gVenueOption;
+#ifdef PORT
+            {
+                // 9D: the list covers the 8 stock skyboxes and the custom rows. A custom choice of the track
+                // is shown as the current row, unless a click on this list is pending.
+                char courseId[GDX_BGM_COURSE_ID_MAX];
+                s32 skyCount = gdx_course_skybox_count();
+
+                gSkyboxWidget.numItems = 8 + skyCount;
+                gSkyboxWidget.cursorMaxPosY = 160 + 16 * skyCount;
+                if (gSkyboxWidget.openIndex == INVALID_OPTION && gdx_bgm_course_id(courseId, sizeof(courseId))) {
+                    s32 skyIndex = gdx_course_skybox_choice(courseId);
+
+                    if (skyIndex >= 0) {
+                        gSkyboxOption = 8 + skyIndex;
+                    }
+                }
+            }
+#endif
             gCourseEditMenuItems[2].contentsTex = aCourseEditSkyTex;
             gCourseEditMenuItems[2].widget = &gSkyboxWidget;
             gCourseEditMenuOptions[2] = &gSkyboxOption;
             break;
         case CREATE_OPTION_BGM:
+#ifdef PORT
+            {
+                // 7A: the list covers the 14 stock rows and the custom files. A custom choice of the
+                // track is shown as the current row, unless a click on this list is pending.
+                char courseId[GDX_BGM_COURSE_ID_MAX];
+                s32 extCount = gdx_course_music_count();
+
+                gdx_bgm_bind_badges();
+                gBGMWidget.numItems = 14 + extCount;
+                gBGMWidget.cursorMaxPosY = 256 + 16 * extCount;
+                if (gBGMWidget.openIndex == INVALID_OPTION && gdx_bgm_course_id(courseId, sizeof(courseId))) {
+                    s32 extIndex = gdx_course_music_choice(courseId);
+
+                    if (extIndex >= 0) {
+                        gBGMOption = 14 + extIndex;
+                    }
+                }
+            }
+#endif
             gCourseEditMenuItems[1].contentsTex = aCourseEditTypeTex;
             gCourseEditMenuItems[1].widget = &gBGMWidget;
             gCourseEditMenuOptions[1] = &gBGMOption;
@@ -1561,6 +1733,9 @@ void func_xk1_8002860C(void) {
     func_xk2_800EF78C();
     func_xk2_800F5C50();
     D_80030060[0] = '\0';
+#ifdef PORT
+    gdx_course_state_clear_edit_file();
+#endif
     D_xk2_80104CB8 = 0;
     D_xk2_80104CC0 = 0;
     D_xk2_80104CB0 = 90;
@@ -1680,6 +1855,9 @@ void func_xk1_80028818(void) {
             gCourseEditMenuItems[2].widget = NULL;
             break;
         case TRACK_DESIGN_STYLE_LOOP:
+#ifdef PORT
+        case TRACK_DESIGN_STYLE_SPLIT:
+#endif
             gCourseEditMenuItems[2].contentsTex = NULL;
             gCourseEditMenuItems[2].widget = NULL;
             break;
@@ -1850,18 +2028,104 @@ void func_xk1_80028EF0(void) {
     }
 }
 
+#ifdef PORT
+// 9D: a custom skybox row was chosen. Stores the key for the track and gives the track the stock fallback
+// skybox of the entry, which is the only skybox byte the course holds (CourseData has no room for keys).
+static void gdx_skybox_commit_custom(s32 skyIndex) {
+    char courseId[GDX_BGM_COURSE_ID_MAX];
+    s32 stockByte;
+
+    // A track with no name yet cannot hold a key, so the row falls back to the skybox the track has.
+    if (!gdx_bgm_course_id(courseId, sizeof(courseId))) {
+        gSkyboxOption = COURSE_CONTEXT()->courseData.skybox;
+        return;
+    }
+    stockByte = gdx_course_skybox_set_choice(courseId, skyIndex);
+    if (stockByte < 0) {
+        gSkyboxOption = COURSE_CONTEXT()->courseData.skybox;
+        return;
+    }
+    gSkyboxOption = 8 + skyIndex;
+    COURSE_CONTEXT()->courseData.skybox = stockByte;
+}
+
+// 9D: a stock skybox was chosen, so the track no longer has a custom skybox choice.
+static void gdx_skybox_clear_custom(void) {
+    char courseId[GDX_BGM_COURSE_ID_MAX];
+
+    if (gdx_bgm_course_id(courseId, sizeof(courseId))) {
+        gdx_course_skybox_set_choice(courseId, -1);
+    }
+}
+#endif
+
 void func_xk1_80028F50(void) {
     if (gSkyboxWidget.openIndex != INVALID_OPTION) {
+#ifdef PORT
+        // The close below clears openIndex, so the chosen row is read first.
+        s32 chosenIndex = gSkyboxWidget.openIndex;
+
         func_xk1_80027C80(&gCourseEditWidget);
+        if (chosenIndex >= 8) {
+            gdx_skybox_commit_custom(chosenIndex - 8);
+            return;
+        }
+        gdx_skybox_clear_custom();
+#else
+        func_xk1_80027C80(&gCourseEditWidget);
+#endif
         COURSE_CONTEXT()->courseData.skybox = gSkyboxOption;
     }
 }
 
 extern s32 D_800D11C8[];
 
+#ifdef PORT
+// 7A: a custom row was chosen. Stores the choice for the track, previews the file on the stream, and
+// gives the track the stock fallback byte of the entry.
+static void gdx_bgm_commit_custom(s32 extIndex) {
+    char courseId[GDX_BGM_COURSE_ID_MAX];
+    s32 stockByte;
+
+    // A track with no name yet cannot hold a key, so the row falls back to the track the course has.
+    if (!gdx_bgm_course_id(courseId, sizeof(courseId))) {
+        gBGMOption = gBGMOptionToCourseBGM[COURSE_CONTEXT()->courseData.bgm];
+        return;
+    }
+    stockByte = gdx_course_music_set_choice(courseId, extIndex);
+    if (stockByte < 0) {
+        gBGMOption = gBGMOptionToCourseBGM[COURSE_CONTEXT()->courseData.bgm];
+        return;
+    }
+    if (D_800D11C8[3] != 0) {
+        Audio_TriggerSystemSE(NA_SE_36);
+    }
+    gdx_course_music_preview(extIndex);
+    gLastCourseBGM = stockByte;
+    COURSE_CONTEXT()->courseData.bgm = stockByte;
+}
+
+// 7A: a stock row was chosen, so the track no longer has a custom choice.
+static void gdx_bgm_clear_custom(void) {
+    char courseId[GDX_BGM_COURSE_ID_MAX];
+
+    if (gdx_bgm_course_id(courseId, sizeof(courseId))) {
+        gdx_course_music_set_choice(courseId, -1);
+    }
+}
+#endif
+
 void func_xk1_80028F94(void) {
 
     if ((gBGMWidget.openIndex != INVALID_OPTION) && (func_807424CC() == 0)) {
+#ifdef PORT
+        if (gBGMWidget.openIndex >= 14) {
+            gdx_bgm_commit_custom(gBGMWidget.openIndex - 14);
+            gBGMWidget.openIndex = INVALID_OPTION;
+            return;
+        }
+        gdx_bgm_clear_custom();
+#endif
         if (gLastCourseBGM != gBGMOptionToCourseBGM[gBGMOption]) {
             if (D_800D11C8[3] != 0) {
                 Audio_TriggerSystemSE(NA_SE_36);

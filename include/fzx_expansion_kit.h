@@ -48,6 +48,9 @@ typedef enum TrackDesignStyle {
     /* 6 */ TRACK_DESIGN_STYLE_CYLINDER,
     /* 7 */ TRACK_DESIGN_STYLE_SPACE,
     /* 8 */ TRACK_DESIGN_STYLE_LOOP,
+#ifdef PORT
+    /* 9 */ TRACK_DESIGN_STYLE_SPLIT,
+#endif
 } TrackDesignStyle;
 
 typedef enum TrackPartStyle {

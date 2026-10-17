@@ -31,6 +31,17 @@ extern unk_807B3C20 D_802CB6D0;
 extern CourseData D_8010CF50;
 extern unk_800D6CA0 D_800D6CA0;
 
+#ifdef PORT
+// Multi-level undo lives in port/gdx_course_edit_undo.c. The backup and restore bodies keep their shape.
+// Under PORT a push stores the backup, and a restore pops the newest entry instead of one fixed slot.
+extern void gdx_course_edit_undo_push(void);
+extern s32 gdx_course_edit_undo_begin_restore(void);
+extern void gdx_course_edit_undo_end_restore(void);
+extern s32 gdx_course_edit_undo_depth(void);
+extern s32 gdx_course_edit_undo_play_restore_sound(void);
+extern void gdx_course_edit_undo_clear(void);
+#endif
+
 void func_xk2_800EF78C(void) {
     s32 i;
 
@@ -38,13 +49,23 @@ void func_xk2_800EF78C(void) {
         D_xk2_80128990[i] = D_80128690[i];
     }
 
+#ifdef PORT
+    for (i = 0; i < GDX_EK_FILE_NAME_MAX + 1; i++) {
+#else
     for (i = 0; i < 9; i++) {
+#endif
         D_8003006C[i] = D_80030060[i];
     }
     D_807B6528 = D_802CB6D0;
     D_8010CF50 = COURSE_CONTEXT()->courseData;
     D_xk2_80119800 = D_800D6CA0.unk_0C;
+#ifdef PORT
+    // The push keeps this snapshot in the history pool. The flag reports whether undo has anything to step to.
+    gdx_course_edit_undo_push();
+    D_xk2_80104BC0 = (gdx_course_edit_undo_depth() > 0);
+#else
     D_xk2_80104BC0 = 1;
+#endif
 }
 
 extern s32 D_xk2_800F703C;
@@ -57,17 +78,34 @@ void func_xk2_800EF8B0(void) {
     s32 i;
 
     if ((D_800D6CA0.unk_08 == 1) || (D_800D6CA0.unk_08 == 3) || (D_800D6CA0.unk_08 == 2) ||
-        (D_800D6CA0.unk_08 == 0x10) || (D_800D6CA0.unk_08 == 0x20) || (D_xk2_80104BC0 == 0)) {
+        (D_800D6CA0.unk_08 == 0x10) || (D_800D6CA0.unk_08 == 0x20) ||
+#ifdef PORT
+        // Under PORT, begin_restore pops the newest entry and reports whether there was one to pop.
+        (gdx_course_edit_undo_begin_restore() == 0)) {
+#else
+        (D_xk2_80104BC0 == 0)) {
+#endif
         return;
     }
+#ifdef PORT
+    D_xk2_80104BC0 = (gdx_course_edit_undo_depth() > 0);
+    if (gdx_course_edit_undo_play_restore_sound()) {
+        Audio_TriggerSystemSE(NA_SE_37);
+    }
+#else
     D_xk2_80104BC0 = 0;
     Audio_TriggerSystemSE(NA_SE_37);
+#endif
     D_xk2_800F703C = -1;
     for (i = 0; i < 64; i++) {
         D_80128690[i] = D_xk2_80128990[i];
     }
 
+#ifdef PORT
+    for (i = 0; i < GDX_EK_FILE_NAME_MAX + 1; i++) {
+#else
     for (i = 0; i < 9; i++) {
+#endif
         D_80030060[i] = D_8003006C[i];
     }
     D_802CB6D0 = D_807B6528;
@@ -81,6 +119,10 @@ void func_xk2_800EF8B0(void) {
     gSkyboxOption = COURSE_CONTEXT()->courseData.skybox;
     func_800747EC(gVenueOption);
     func_80077AD8(gVenueOption);
+#ifdef PORT
+    // Ends the restore window that begin_restore opened, so pushes from the venue reload are not recorded.
+    gdx_course_edit_undo_end_restore();
+#endif
 }
 
 void func_xk2_800EFA94(CourseSegment* arg0, CourseSegment* arg1) {
@@ -401,6 +443,13 @@ void func_xk2_800F07A4(void) {
         !(gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) || (D_800D6CA0.unk_0C == 0)) {
         return;
     }
+#ifdef PORT
+    /* No active point (-1): the stock gate only rejects point 0, and the code below would index
+       unk_0000[-1]. */
+    if (D_800D6CA0.unk_0C < 0) {
+        return;
+    }
+#endif
     if (D_802CB6D0.controlPointCount < 4) {
         return;
     }
@@ -518,6 +567,10 @@ void func_xk2_800F07A4(void) {
 }
 
 void func_xk2_800F0FE8(void) {
+#ifdef PORT
+    // Called after the backup at init and at template success. Clearing drops that backup, so history starts empty.
+    gdx_course_edit_undo_clear();
+#endif
     D_xk2_80104BC0 = 0;
 }
 

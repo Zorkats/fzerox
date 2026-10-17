@@ -699,6 +699,25 @@ extern MenuWidget gMoveWidget;
 extern MenuWidget gDesignStyleWidget;
 extern MenuWidget gPartsStyleWidget;
 
+#ifdef PORT
+/* Mouse-mode wording for help screens 25 to 28 and the top strip, indices 29 to 58 (expansion_kit_text.c). */
+char* gdx_ek_help_text(s32 index);
+/* Top-strip help for the port-only SPLIT design style; at most 34 characters. */
+static char sGdxSplitHelpText[] = "Insert a point halfway to the next";
+
+/* Top-strip help for the Point, Move, Design and Parts screens. The mouse wording follows the mouse mode setting, the
+ * same gate as help screens 25 to 28, so it does not flicker back to the stock Z text when the cursor leaves the game
+ * view. With mouse mode off the stock text is kept. */
+static s8* gdx_strip_help(s32 index, u8* stock) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+
+    if (CVarGetInteger("gEnhancements.Input.CourseEditMouse", 0) != 0) {
+        return (s8*) gdx_ek_help_text(index);
+    }
+    return (s8*) stock;
+}
+#endif
+
 void func_xk2_800F3600(Gfx** gfxP) {
     s32 pad;
     Gfx* gfx;
@@ -714,19 +733,35 @@ void func_xk2_800F3600(Gfx** gfxP) {
         switch (sp2C->highlightedIndex) {
             case 0:
                 func_xk2_800F335C(&gfx, 24, D_xk2_80104FD4);
+#ifdef PORT
+                func_xk2_800EECD4(&gfx, 0, 156, (s8*) gdx_ek_help_text(25), 25);
+#else
                 func_xk2_800EECD4(&gfx, 0, 156, D_xk1_800331F0[25], 25);
+#endif
                 break;
             case 1:
                 func_xk2_800F335C(&gfx, 24, D_xk2_80104FEC);
+#ifdef PORT
+                func_xk2_800EECD4(&gfx, 0, 156, (s8*) gdx_ek_help_text(26), 26);
+#else
                 func_xk2_800EECD4(&gfx, 0, 156, D_xk1_800331F0[26], 26);
+#endif
                 break;
             case 2:
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105008);
+#ifdef PORT
+                func_xk2_800EECD4(&gfx, 0, 156, (s8*) gdx_ek_help_text(27), 27);
+#else
                 func_xk2_800EECD4(&gfx, 0, 156, D_xk1_800331F0[27], 27);
+#endif
                 break;
             case 3:
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105024);
+#ifdef PORT
+                func_xk2_800EECD4(&gfx, 0, 156, (s8*) gdx_ek_help_text(28), 28);
+#else
                 func_xk2_800EECD4(&gfx, 0, 156, D_xk1_800331F0[28], 28);
+#endif
                 break;
             case 4:
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105048);
@@ -739,44 +774,92 @@ void func_xk2_800F3600(Gfx** gfxP) {
     if (sp2C == &gPointWidget) {
         switch (sp2C->highlightedIndex) {
             case 0:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(29, D_xk2_80105078));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105078);
+#endif
                 break;
             case 1:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(30, D_xk2_80105090));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105090);
+#endif
                 break;
             case 2:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(31, D_xk2_801050AC));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801050AC);
+#endif
                 break;
             case 3:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(32, D_xk2_801050CC));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801050CC);
+#endif
                 break;
             case 4:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(33, D_xk2_801050E8));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801050E8);
+#endif
                 break;
         }
     }
     if (sp2C == &gMoveWidget) {
         switch (sp2C->highlightedIndex) {
             case 0:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(34, D_xk2_801050FC));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801050FC);
+#endif
                 break;
             case 1:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(35, D_xk2_80105114));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105114);
+#endif
                 break;
             case 2:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(36, D_xk2_8010512C));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_8010512C);
+#endif
                 break;
             case 3:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(37, D_xk2_8010514C));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_8010514C);
+#endif
                 break;
             case 4:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(38, D_xk2_80105174));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105174);
+#endif
                 break;
             case 5:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(39, D_xk2_80105190));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105190);
+#endif
                 break;
             case 6:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(40, D_xk2_801051A8));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801051A8);
+#endif
                 break;
         }
     }
@@ -815,62 +898,139 @@ void func_xk2_800F3600(Gfx** gfxP) {
     if (sp2C == &gDesignStyleWidget) {
         switch (sp2C->highlightedIndex) {
             case 0:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(41, D_xk2_801051D0));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801051D0);
+#endif
                 break;
             case 1:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(42, D_xk2_801051F0));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801051F0);
+#endif
                 break;
             case 2:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(43, D_xk2_80105210));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105210);
+#endif
                 break;
             case 3:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(44, D_xk2_80105230));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105230);
+#endif
                 break;
             case 4:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(45, D_xk2_80105244));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105244);
+#endif
                 break;
             case 5:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(46, D_xk2_80105260));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105260);
+#endif
                 break;
             case 6:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(47, D_xk2_80105280));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105280);
+#endif
                 break;
             case 7:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(48, D_xk2_8010529C));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_8010529C);
+#endif
                 break;
             case 8:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(49, D_xk2_801052C0));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801052C0);
+#endif
                 break;
+#ifdef PORT
+            case 9:
+                func_xk2_800F335C(&gfx, 24, (s8*) sGdxSplitHelpText);
+                break;
+#endif
         }
     }
     if (sp2C == &gPartsStyleWidget) {
         switch (sp2C->highlightedIndex) {
             case 0:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(50, D_xk2_801052E0));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801052E0);
+#endif
                 break;
             case 1:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(51, D_xk2_801052FC));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801052FC);
+#endif
                 break;
             case 2:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(52, D_xk2_80105318));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105318);
+#endif
                 break;
             case 3:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(53, D_xk2_80105328));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105328);
+#endif
                 break;
             case 4:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(54, D_xk2_8010533C));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_8010533C);
+#endif
                 break;
             case 5:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(55, D_xk2_80105354));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105354);
+#endif
                 break;
             case 6:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(56, D_xk2_80105374));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105374);
+#endif
                 break;
             case 7:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(57, D_xk2_80105388));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105388);
+#endif
                 break;
             case 8:
+#ifdef PORT
+                func_xk2_800F335C(&gfx, 24, gdx_strip_help(58, D_xk2_801053A0));
+#else
                 func_xk2_800F335C(&gfx, 24, D_xk2_801053A0);
+#endif
                 break;
         }
     }

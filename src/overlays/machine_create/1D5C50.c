@@ -85,11 +85,20 @@ u8 func_xk3_8013618C(s32 arg0) {
     }
     func_xk1_8002D284(var_s3);
     func_xk1_8002D290();
+#ifdef PORT
+    /* The port widens unk_8003A5D8.name, so the element stride is no longer 0x24. */
+    if (D_xk3_80137160 != 0) {
+        func_xk1_8002CEF8(D_xk1_8003A5D8[1].name, var_s3 - 1, sizeof(unk_8003A5D8), func_xk1_8002CA98);
+    } else {
+        func_xk1_8002CEF8(D_xk1_8003A5D8[0].name, var_s3, sizeof(unk_8003A5D8), func_xk1_8002CA98);
+    }
+#else
     if (D_xk3_80137160 != 0) {
         func_xk1_8002CEF8(D_xk1_8003A5D8[1].name, var_s3 - 1, 0x24, func_xk1_8002CA98);
     } else {
         func_xk1_8002CEF8(D_xk1_8003A5D8[0].name, var_s3, 0x24, func_xk1_8002CA98);
     }
+#endif
     return var_s3;
 }
 

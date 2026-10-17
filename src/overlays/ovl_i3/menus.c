@@ -861,6 +861,11 @@ Gfx* Menus_DrawRaceTimeInterval(Gfx* gfx, s32 time, s32 left, s32 top) {
 extern s32 gTotalLapCount;
 extern s16 gCurrentTimeAttackRecordPosition;
 extern s16 gBestTimedLap;
+#ifdef PORT
+extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
+extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
+extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
+#endif
 
 Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
     s32 lap;
@@ -938,9 +943,17 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
             } else {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
             }
+#ifdef PORT
+            /* A finite Single Race can have more laps than Racer.lapTimes holds; read its own table. */
+            gfx = Hud_DrawTimerScisThousandths(
+                gfx,
+                gdx_single_race_active() ? gdx_single_race_get_lap_time(playerIndex, lap) : gRacers[playerIndex].lapTimes[lap],
+                sResultsTimesLapLeft + sResultsTimesLapLeftFromLap + sTimeAttackResultsTimer, top, 1.0f);
+#else
             gfx = Hud_DrawTimerScisThousandths(
                 gfx, gRacers[playerIndex].lapTimes[lap],
                 sResultsTimesLapLeft + sResultsTimesLapLeftFromLap + sTimeAttackResultsTimer, top, 1.0f);
+#endif
         }
     }
 
@@ -1945,6 +1958,13 @@ Gfx* Menus_DrawGameover(Gfx* gfx, s32 playerIndex) {
             if (gTitleDemoState == TITLE_DEMO_INACTIVE) {
                 func_8007E0CC();
             }
+#ifdef PORT
+            if (gTitleDemoState == TITLE_DEMO_INACTIVE) {
+                /* Save GP in progress: a GP game over ends the cup, so its saved cup is dropped. */
+                extern void gdx_gp_resume_on_game_over(void);
+                gdx_gp_resume_on_game_over();
+            }
+#endif
             sMenuIsBusy = true;
             sMenuStateFlags |= MENU_STATE_QUIT;
         }
@@ -5855,7 +5875,11 @@ Gfx* Menus_Draw(Gfx* gfx) {
             (gCameras[playerIndex].mode == CAMERA_MODE_RACE) && (sPlayerGameoverState[0] == PLAYER_GAMEOVER_NONE)) {
             gfx = Menus_DrawCannotSaveGhost(gfx);
         }
+#ifdef PORT
+        if ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_finite()) {
+#else
         if (gGameMode != GAMEMODE_PRACTICE) {
+#endif
             if ((gRacers[playerIndex].lap == gTotalLapCount) && (gTitleDemoState == TITLE_DEMO_INACTIVE) &&
                 (D_i3_80141EA8[playerIndex].lapFlashTimer > 0) && !gGamePaused) {
                 if (((D_i3_80141EA8[playerIndex].lapFlashTimer % 20) >= 5) &&
@@ -5982,7 +6006,11 @@ Gfx* Menus_Draw(Gfx* gfx) {
                         }
                     }
                 }
+#ifdef PORT
+            } else if ((gGameMode == GAMEMODE_GP_RACE) || gdx_single_race_finite()) {
+#else
             } else if (gGameMode == GAMEMODE_GP_RACE) {
+#endif
                 switch (sGpRaceResultsState) {
                     case GP_RESULTS_TOP_6_TIMING:
                         gfx = Menus_DrawCourseName(gfx, 160, 200, 0);

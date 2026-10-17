@@ -426,7 +426,14 @@ void func_i3_80115E74(void) {
     s32 temp_hi;
     s32 var_s5;
 
+#ifdef PORT
+    /* Single Race CPUs race like GP opponents. Only stock Practice keeps the pace-table AI. */
+    extern int gdx_single_race_active(void); // port/gdx_single_race.c
+    if ((gGameMode == GAMEMODE_GP_END_CS) || (gGameMode == GAMEMODE_DEATH_RACE) ||
+        ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_active())) {
+#else
     if ((gGameMode == GAMEMODE_GP_END_CS) || (gGameMode == GAMEMODE_DEATH_RACE) || (gGameMode == GAMEMODE_PRACTICE)) {
+#endif
         D_i3_80141998 = 1;
     } else {
         D_i3_80141998 = 0;
@@ -1164,6 +1171,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
     // past 100% it also drops the EXPERT-only gates. 100 is bit-identical to stock.
     extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
     f32 aiAggressionScale = CVarGetInteger("gEnhancements.Gameplay.AiAggression", 100) / 100.0f;
+    extern int gdx_single_race_active(void); // port/gdx_single_race.c
 #endif
 
     if ((racer->id & 3) != (gGameFrameCount % 4) && (gGameMode != GAMEMODE_GP_END_CS)) {
@@ -1352,8 +1360,14 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
 
             if (((gTotalLapCount == racer->lap) && (((s32) (gCurrentCourseInfo->segmentCount * 2) / 3) <
                                                     racer->segmentPositionInfo.courseSegment->segmentIndex)) ||
+#ifdef PORT
+                ((gRacers[racer->unk_352].unk_368 == 254) &&
+                 ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_active()) &&
+                 (gGameMode != GAMEMODE_DEATH_RACE))) {
+#else
                 ((gRacers[racer->unk_352].unk_368 == 254) && (gGameMode != GAMEMODE_PRACTICE) &&
                  (gGameMode != GAMEMODE_DEATH_RACE))) {
+#endif
                 racer->unk_352 = 255;
                 if (racer->lap >= 2) {
                     func_i3_80116A50(racer);

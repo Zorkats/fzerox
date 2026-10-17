@@ -2699,9 +2699,9 @@ extern s32 gRandMask1;
 extern s32 gRandSeed2;
 extern s32 gRandMask2;
 #ifdef PORT
-/* port/gdx_xcup_seed.c — M3 shareable X Cup seed codes. */
+/* port/gdx_xcup_seed.c: M3 shareable X Cup seed codes and the queue of codes to use. */
 extern int gdx_xcup_consume_pending_seed(s32* seed1, s32* mask1, s32* seed2, s32* mask2);
-extern void gdx_xcup_note_seed_captured(void);
+extern void gdx_xcup_note_seed_captured(int slot, int newCup);
 #endif
 extern s8 gTitleDemoState;
 extern s32 gGameMode;
@@ -2733,7 +2733,19 @@ void Course_GenerateRandomCourse(void) {
     ControlPoint* spB0;
     f32 var_fs0;
     f32 var_fs1;
+#ifdef PORT
+    s32 xcupRedo;
+    s32 xcupNewCup;
+#endif
 
+#ifdef PORT
+    // port/gdx_xcup_seed.c: a re-do replays the seeds captured for this course and takes no queue
+    // entry. A new cup starts at its first course, or after any course that is not an X Cup course.
+    xcupRedo = (gGameMode == GAMEMODE_GP_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE) &&
+               (gCourseIndex == gLastRandomCourseIndex);
+    xcupNewCup = !xcupRedo && ((gCourseIndex == COURSE_X_1) || (gLastRandomCourseIndex < COURSE_X_1) ||
+                               (gLastRandomCourseIndex > COURSE_X_6));
+#endif
     // Restore random generation seeding if track is re-done
     if ((gGameMode == GAMEMODE_GP_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE) &&
         (gCourseIndex == gLastRandomCourseIndex)) {
@@ -2742,15 +2754,15 @@ void Course_GenerateRandomCourse(void) {
     }
     gLastRandomCourseIndex = gCourseIndex;
 #ifdef PORT
-    /* M3 X Cup seed codes: a queued share-code seed wins over both the fresh RNG state and the
-       re-do restore above; the capture block below then saves IT, so re-doing the course
-       reproduces the coded track. One-shot — consumed by the call. */
+    /* M3 X Cup seed codes: the next queued code wins over the fresh RNG state for a new course,
+       and the capture block below saves it, so a later re-do reproduces the coded track. A re-do
+       keeps the seeds restored above and takes no queue entry. */
     {
         s32 pendingSeed1;
         s32 pendingMask1;
         s32 pendingSeed2;
         s32 pendingMask2;
-        if (gdx_xcup_consume_pending_seed(&pendingSeed1, &pendingMask1, &pendingSeed2, &pendingMask2)) {
+        if (!xcupRedo && gdx_xcup_consume_pending_seed(&pendingSeed1, &pendingMask1, &pendingSeed2, &pendingMask2)) {
             Math_Rand1Init(pendingSeed1, pendingMask1);
             Math_Rand2Init(pendingSeed2, pendingMask2);
         }
@@ -2761,7 +2773,7 @@ void Course_GenerateRandomCourse(void) {
     sRandomCourseInitSeed2 = gRandSeed2;
     sRandomCourseInitMask2 = gRandMask2;
 #ifdef PORT
-    gdx_xcup_note_seed_captured();
+    gdx_xcup_note_seed_captured(gCourseIndex - COURSE_X_1, xcupNewCup);
 #endif
     do {
     loop_start:
@@ -3431,6 +3443,10 @@ void func_800A4DF0(void) {
 
 extern s32 gNumPlayers;
 
+#ifdef PORT
+extern void gdx_racer_resolve_course_skybox(void); /* racer.c, 9D */
+#endif
+
 void Course_Init(void) {
     CourseSegment* segment;
 
@@ -3448,6 +3464,11 @@ void Course_Init(void) {
         func_800A4DF0();
 #ifdef EXPANSION_KIT
     }
+#endif
+#ifdef PORT
+    /* 9D: test run and Edit Cup slots load the stock fallback of their skybox. Runs after func_800A4DF0,
+       which points gCurrentCourseInfo at this course and loads its data. */
+    gdx_racer_resolve_course_skybox();
 #endif
     Course_SegmentsInit();
     Course_SegmentLengthsInit(gCurrentCourseInfo);

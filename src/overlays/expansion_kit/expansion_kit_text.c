@@ -198,6 +198,125 @@ char* D_xk1_800331F0[] = {
 };
 
 #ifdef PORT
+/* Mouse wording for help screens 25 to 28, the four point and segment screens. Mouse mode (the
+ * gEnhancements.Input.CourseEditMouse CVar, port/gdx_course_edit_mouse.cpp) has no Z button:
+ * left-click sends A, right-click sends B, and the segment under the cursor is the one picked.
+ * The stock screens above keep their Z wording and are used when the CVar is off. */
+static char D_xk1_mouse_80032FD8[] = "Click the track to set a point.\nNew points go into the segment\nunder the mouse.";
+static char D_xk1_mouse_80033048[] = "Click a point to select it.\nTo select several points,\nShift-drag a box around them.";
+static char D_xk1_mouse_800330B8[] = "Click a segment of track\nto change the type of road.";
+static char D_xk1_mouse_8003312C[] = "Click a segment of track\nto place an object on it.";
+
+/* Top-strip wording for the Point, Move, Design and Parts screens under the mouse drive. The strip draws one line
+ * with func_xk2_800F335C, so each string is 34 characters or fewer. GDX_EK_STRIP_FIRST + table index gives the help
+ * index: Point 0-4 is 29-33, Move 0-6 is 34-40, Design 0-8 is 41-49, Parts 0-8 is 50-58. 1A4210.c picks these when
+ * gdx_course_edit_mouse_pos is live. Each string has a compile-time length check below. */
+#define GDX_EK_STRIP_FIRST 29
+#define GDX_EK_STRIP_CHECK(name) typedef char name##_fits_strip[(sizeof(name) - 1 <= 34) ? 1 : -1]
+
+static char sGdxMouseStripPoint0[] = "Click empty space to add a point.";
+static char sGdxMouseStripPoint1[] = "Click to move the start location.";
+static char sGdxMouseStripPoint2[] = "Click to center the entire course.";
+static char sGdxMouseStripPoint3[] = "Click to switch drive direction.";
+static char sGdxMouseStripPoint4[] = "Click to delete the course.";
+GDX_EK_STRIP_CHECK(sGdxMouseStripPoint0);
+GDX_EK_STRIP_CHECK(sGdxMouseStripPoint1);
+GDX_EK_STRIP_CHECK(sGdxMouseStripPoint2);
+GDX_EK_STRIP_CHECK(sGdxMouseStripPoint3);
+GDX_EK_STRIP_CHECK(sGdxMouseStripPoint4);
+
+static char sGdxMouseStripMove0[] = "Drag a point: move in X and Z.";
+static char sGdxMouseStripMove1[] = "Drag a point: raise or lower it.";
+static char sGdxMouseStripMove2[] = "Drag left or right to set width.";
+static char sGdxMouseStripMove3[] = "Drag left or right to set bank.";
+static char sGdxMouseStripMove4[] = "Drag left or right to set offset.";
+static char sGdxMouseStripMove5[] = "Click a point to delete it.";
+static char sGdxMouseStripMove6[] = "Click points, then Enter: line up.";
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove0);
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove1);
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove2);
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove3);
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove4);
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove5);
+GDX_EK_STRIP_CHECK(sGdxMouseStripMove6);
+
+static char sGdxMouseStripDesign0[] = "Click the track: ordinary road.";
+static char sGdxMouseStripDesign1[] = "Click the track: high guardrails.";
+static char sGdxMouseStripDesign2[] = "Click the track: no guardrails.";
+static char sGdxMouseStripDesign3[] = "Click the track: tunnel.";
+static char sGdxMouseStripDesign4[] = "Click the track: pipe.";
+static char sGdxMouseStripDesign5[] = "Click the track: open halfpipe.";
+static char sGdxMouseStripDesign6[] = "Click the track: pipe outside.";
+static char sGdxMouseStripDesign7[] = "Click the track: make a gap.";
+static char sGdxMouseStripDesign8[] = "Click the track: loop.";
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign0);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign1);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign2);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign3);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign4);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign5);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign6);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign7);
+GDX_EK_STRIP_CHECK(sGdxMouseStripDesign8);
+
+static char sGdxMouseStripParts0[] = "Click the track: energy patch.";
+static char sGdxMouseStripParts1[] = "Click the track: dash plate.";
+static char sGdxMouseStripParts2[] = "Click the track: dirt patch.";
+static char sGdxMouseStripParts3[] = "Click the track: ice patch.";
+static char sGdxMouseStripParts4[] = "Click the track: jump plate.";
+static char sGdxMouseStripParts5[] = "Click the track: trap.";
+static char sGdxMouseStripParts6[] = "Click the track: gate.";
+static char sGdxMouseStripParts7[] = "Click the track: building or rock.";
+static char sGdxMouseStripParts8[] = "Click the track: sign.";
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts0);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts1);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts2);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts3);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts4);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts5);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts6);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts7);
+GDX_EK_STRIP_CHECK(sGdxMouseStripParts8);
+
+static char* const sGdxMouseStrip[] = {
+    sGdxMouseStripPoint0,  sGdxMouseStripPoint1,  sGdxMouseStripPoint2,  sGdxMouseStripPoint3,
+    sGdxMouseStripPoint4,  sGdxMouseStripMove0,   sGdxMouseStripMove1,   sGdxMouseStripMove2,
+    sGdxMouseStripMove3,   sGdxMouseStripMove4,   sGdxMouseStripMove5,   sGdxMouseStripMove6,
+    sGdxMouseStripDesign0, sGdxMouseStripDesign1, sGdxMouseStripDesign2, sGdxMouseStripDesign3,
+    sGdxMouseStripDesign4, sGdxMouseStripDesign5, sGdxMouseStripDesign6, sGdxMouseStripDesign7,
+    sGdxMouseStripDesign8, sGdxMouseStripParts0,  sGdxMouseStripParts1,  sGdxMouseStripParts2,
+    sGdxMouseStripParts3,  sGdxMouseStripParts4,  sGdxMouseStripParts5,  sGdxMouseStripParts6,
+    sGdxMouseStripParts7,  sGdxMouseStripParts8,
+};
+
+/* Help text for the Create menu highlight, screens 25 to 28 (see 1A4210.c), and for the top strip, indices 29 on. */
+char* gdx_ek_help_text(s32 index) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    int mouse = CVarGetInteger("gEnhancements.Input.CourseEditMouse", 0) != 0;
+
+    if (index >= GDX_EK_STRIP_FIRST && index < GDX_EK_STRIP_FIRST + ARRLEN(sGdxMouseStrip)) {
+        return sGdxMouseStrip[index - GDX_EK_STRIP_FIRST];
+    }
+    switch (index) {
+        case 25:
+            return mouse ? D_xk1_mouse_80032FD8 : D_xk1_80032FD8;
+        case 26:
+            return mouse ? D_xk1_mouse_80033048 : D_xk1_80033048;
+        case 27:
+            return mouse ? D_xk1_mouse_800330B8 : D_xk1_800330B8;
+        case 28:
+            return mouse ? D_xk1_mouse_8003312C : D_xk1_8003312C;
+        default:
+            if (index < 0 || index >= (s32) (sizeof(D_xk1_800331F0) / sizeof(D_xk1_800331F0[0]))) {
+                static char sNoHelp[] = "";
+                return sNoHelp;
+            }
+            return D_xk1_800331F0[index];
+    }
+}
+#endif
+
+#ifdef PORT
 char D_xk1_8003326C[] = "Cannot place a point here.";
 #else
 char D_xk1_8003326C[] = "\305\300\244\316\307\333\303\326\244\313\314\265\315\375\244\254\244\242\244\352\244\336\244\271";

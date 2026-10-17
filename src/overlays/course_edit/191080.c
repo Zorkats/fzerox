@@ -8,6 +8,13 @@
 #include ASSET_HEADER_EK(course_edit_textures.h)
 
 #ifdef PORT
+#include "fzx_font.h"
+#include "../../../../port/gdx_course_music.h"
+#include "../../../../port/gdx_course_packs.h"
+#include "../../../../port/gdx_ek_text.h"
+#endif
+
+#ifdef PORT
 /* Node-panel labels served from the loaded 64DD disk. Retail has no symbols for these
  * (pooled .rodata initializers), so the port keeps its own storage
  * (port/gen/EkTranslatedStrings.c), filled by gdx_ek_strings_apply() at disk-load time.
@@ -29,6 +36,7 @@ extern char gdx_ek_label_width[];
    GEOMETRY rather than text must test this and not a bound label string: the retail-JP disk
    has to keep the retail layout. */
 extern int gdx_ek_disk_is_translated(void);
+extern float gdx_course_edit_max_y(void);
 
 /* Retail draws each label at `left` and a right-aligned, space-padded numeric field at the
  * SAME `left` (func_xk2_800EDE68 pads, func_xk2_800EDAD0 skips a space, 19F3F0.c), so the
@@ -478,7 +486,15 @@ Gfx* func_xk2_800E04E0(Gfx* gfx) {
             if (var_a0 < 0) {
                 var_a0 = 0;
             }
+#ifdef PORT
+            /* Shade over the active ceiling and keep the color in a byte above 5,000. */
+            var_a0 = (var_a0 * 255) / Math_Round(gdx_course_edit_max_y());
+            if (var_a0 > 255) {
+                var_a0 = 255;
+            }
+#else
             var_a0 = (var_a0 * 255) / 5000;
+#endif
             gDPSetPrimColor(gfx++, 0, 0, var_a0, var_a0, 255, 255);
         }
         spA8 = D_802CB6D0.unk_0000[i].pos;
@@ -1614,6 +1630,89 @@ u8* sBGMNameTextures[] = {
 
 extern MenuWidget gBGMWidget;
 
+#ifdef PORT
+extern MenuWidget gSkyboxWidget;
+
+// 7A: label of a custom row (name in a NUL-terminated string). The stock rows draw a 64x8 I4 name image;
+// a custom name is composed into the same kind of image from the Expansion Kit font those images use
+// (port/gdx_ek_text.h) and drawn the same way. A name that fits is centered; a longer one scrolls.
+#define GDX_BGM_LABEL_MAX 64 /* GDX_COURSE_DISPLAY_MAX in port/gdx_course_registry.h */
+#define GDX_LABEL_BOX_WIDTH 64
+
+extern void gdx_invalidate_texture_address(const void* addr);
+
+static u64 sGdxLabelStorage[GDX_EK_TEXT_BYTES(GDX_EK_TEXT_MAX_WIDTH) / sizeof(u64)];
+static char sGdxLabelText[GDX_BGM_LABEL_MAX + 1];
+static s32 sGdxLabelWidth = 0;
+static s32 sGdxLabelInk = 0;
+static s32 sGdxLabelFrame = 0;
+
+// Whether name is the text the label image holds (the decomp libc has no strncmp).
+static bool gdx_label_holds(const char* name) {
+    s32 i;
+
+    for (i = 0; i < GDX_BGM_LABEL_MAX; i++) {
+        if (name[i] != sGdxLabelText[i]) {
+            return false;
+        }
+        if (name[i] == '\0') {
+            break;
+        }
+    }
+    return true;
+}
+
+static Gfx* gdx_draw_custom_label(Gfx* gfx, const char* name, s32 top) {
+    u8* tex = (u8*) sGdxLabelStorage;
+    s32 scroll;
+    s32 i;
+
+    if (name == NULL || name[0] == '\0') {
+        return gfx;
+    }
+    if ((sGdxLabelWidth == 0) || !gdx_label_holds(name)) {
+        s32 ink = gdx_ek_text_measure(aExpansionKitFontCharacterSheet1Tex, name);
+        s32 offset = 0;
+
+        if (ink <= 0) {
+            return gfx;
+        }
+        if (ink <= GDX_LABEL_BOX_WIDTH) {
+            sGdxLabelWidth = GDX_LABEL_BOX_WIDTH;
+            offset = (GDX_LABEL_BOX_WIDTH - ink) / 2;
+        } else {
+            sGdxLabelWidth = MIN((ink + 15) & ~15, GDX_EK_TEXT_MAX_WIDTH);
+        }
+        sGdxLabelInk = gdx_ek_text_compose(aExpansionKitFontCharacterSheet1Tex, name, offset, tex, sGdxLabelWidth);
+        for (i = 0; (i < GDX_BGM_LABEL_MAX) && (name[i] != '\0'); i++) {
+            sGdxLabelText[i] = name[i];
+        }
+        sGdxLabelText[i] = '\0';
+        sGdxLabelFrame = 0;
+        // The renderer caches textures by address, and this buffer is reused for every name.
+        gdx_invalidate_texture_address(tex);
+    }
+    scroll = gdx_ek_marquee_offset(sGdxLabelFrame++, (sGdxLabelWidth > GDX_LABEL_BOX_WIDTH)
+                                                         ? (sGdxLabelInk - GDX_LABEL_BOX_WIDTH)
+                                                         : 0);
+
+    gDPLoadTextureBlock_4b(gfx++, tex, G_IM_FMT_I, sGdxLabelWidth, GDX_EK_TEXT_HEIGHT, 0, G_TX_NOMIRROR | G_TX_CLAMP,
+                           G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+    gSPTextureRectangle(gfx++, 120 << 2, top << 2, (120 + GDX_LABEL_BOX_WIDTH) << 2, (top + GDX_EK_TEXT_HEIGHT) << 2,
+                        0, scroll << 5, 0, 1 << 10, 1 << 10);
+    return gfx;
+}
+
+static Gfx* gdx_draw_custom_bgm_label(Gfx* gfx, s32 extIndex, s32 top) {
+    return gdx_draw_custom_label(gfx, gdx_course_music_display_at(extIndex), top);
+}
+
+// 9D: label of a custom Background row. The row keeps the BGM row's box and font.
+static Gfx* gdx_draw_custom_skybox_label(Gfx* gfx, s32 extIndex, s32 top) {
+    return gdx_draw_custom_label(gfx, gdx_course_skybox_display_at(extIndex), top);
+}
+#endif
+
 Gfx* func_xk2_800E5214(Gfx* gfx) {
     s32 highlightedIndex;
     s32 temp_v0;
@@ -1638,12 +1737,39 @@ Gfx* func_xk2_800E5214(Gfx* gfx) {
 
         gDPSetAlphaCompare(gfx++, G_AC_NONE);
 
+#ifdef PORT
+        if (highlightedIndex >= 14) {
+            // 7A custom row: no label texture exists, so the file name is composed from the font.
+            return gdx_draw_custom_bgm_label(gfx, highlightedIndex - 14, temp_v0);
+        }
+#endif
         gDPLoadTextureBlock_4b(gfx++, sBGMNameTextures[highlightedIndex + 14], G_IM_FMT_I, 64, 8, 0,
                                G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK,
                                G_TX_NOLOD, G_TX_NOLOD);
 
         gSPTextureRectangle(gfx++, 120 << 2, temp_v0 << 2, 184 << 2, (temp_v0 + 8) << 2, 0, 0, 0, 1 << 10, 1 << 10);
     }
+#ifdef PORT
+    if (gSkyboxWidget.highlightedIndex >= 8) {
+        // 9D custom Background row (stock rows show their thumbnail instead): the same box and name as a 7A row.
+        s32 skyTop = (gSkyboxWidget.highlightedIndex * 0x10) - func_xk1_800290B4() + 0x28;
+
+        gSPDisplayList(gfx++, D_3000510);
+        gDPSetPrimColor(gfx++, 0, 0, 128, 128, 255, 255);
+
+        gSPTextureRectangle(gfx++, 119 << 2, (skyTop - 1) << 2, 185 << 2, (skyTop + 8 + 1) << 2, 0, 0, 0, 1 << 10,
+                            1 << 10);
+
+        gSPDisplayList(gfx++, D_8014940);
+
+        gDPSetRenderMode(gfx++, CVG_DST_CLAMP | ZMODE_OPA | FORCE_BL | G_RM_PASS,
+                         CVG_DST_CLAMP | ZMODE_OPA | FORCE_BL | G_RM_NOOP2);
+
+        gDPSetAlphaCompare(gfx++, G_AC_NONE);
+
+        return gdx_draw_custom_skybox_label(gfx, gSkyboxWidget.highlightedIndex - 8, skyTop);
+    }
+#endif
     return gfx;
 }
 
@@ -2772,7 +2898,26 @@ Gfx* func_xk2_800E8F7C(Gfx* gfx) {
     }
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 0);
+#ifdef PORT
+    /* A file name reaches 20 characters. The box shows 8 per row, and its 24-pixel interior holds the
+       three rows that takes, so a long title wraps instead of running off the screen. */
+    {
+        char row[9];
+        s32 start;
+        s32 i;
+
+        for (start = 0; (start < GDX_EK_FILE_NAME_MAX) && (D_80030060[start] != '\0'); start += 8) {
+            for (i = 0; (i < 8) && (D_80030060[start + i] != '\0'); i++) {
+                row[i] = D_80030060[start + i];
+            }
+            row[i] = '\0';
+            gfx = func_xk1_8002924C(gfx, 0xE8, 0xB2 + start, "%s", row);
+        }
+        return gfx;
+    }
+#else
     return func_xk1_8002924C(gfx, 0xE8, 0xB2, "%s", D_80030060);
+#endif
 }
 
 s32 func_xk2_800E9134(s32 arg0) {

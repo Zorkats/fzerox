@@ -3983,7 +3983,7 @@ static const char devrostr07[] = "U ERROR RETRY\n";
 static const char devrostr08[] = "U ERROR RETRY\n";
 #endif
 
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 extern s16 gPlayer1OverallPosition;
 extern u8 D_i2_80106F14[];
 extern OSMesgQueue* gMFSMesgQ;
@@ -4472,6 +4472,13 @@ void func_800742FC(void) {
 #endif
 #ifdef EXPANSION_KIT
     D_80030060[0] = '\0';
+#ifdef PORT
+    {
+        extern void gdx_course_state_clear_edit_file(void);
+
+        gdx_course_state_clear_edit_file();
+    }
+#endif
 #endif
     func_80074204();
     D_802CB6D0.controlPointCount = 0;

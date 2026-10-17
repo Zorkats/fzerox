@@ -4,7 +4,7 @@
 s32 D_xk2_80103F10 = 0;
 s32 D_xk2_80103F14 = 0;
 
-extern char gEditCupTrackNames[4 * 6][9];
+extern char gEditCupTrackNames[4 * 6][EDIT_CUP_TRACK_NAME_SIZE];
 extern unk_800D6CA0 D_800D6CA0;
 
 void func_xk2_800EB9E0(void) {
@@ -84,7 +84,36 @@ Gfx* func_xk2_800EBB24(Gfx* gfx) {
             if (i == temp_s4) {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 0, 0, 255);
             }
+#ifdef PORT
+            /* The panel fits 8 characters after the row number, and a slot name reaches 20. A longer
+               name shows its first 8, and on the highlighted row it scrolls through the rest, holding
+               for two steps at each end. */
+            {
+                static s32 sCupNameTick = 0;
+                char shown[9];
+                s32 len;
+                s32 start = 0;
+                s32 n;
+
+                for (len = 0; len < EDIT_CUP_TRACK_NAME_SIZE - 1 && var_s3[len] != '\0'; len++) {}
+                if (len > 8 && i == temp_s4) {
+                    sCupNameTick++;
+                    start = (sCupNameTick / 12) % (len - 8 + 5) - 2;
+                    if (start < 0) {
+                        start = 0;
+                    } else if (start > len - 8) {
+                        start = len - 8;
+                    }
+                }
+                for (n = 0; n < 8 && start + n < len; n++) {
+                    shown[n] = var_s3[start + n];
+                }
+                shown[n] = '\0';
+                gfx = func_xk1_8002924C(gfx, 0xD0, var_s2, "%d:%s", i + 1, shown);
+            }
+#else
             gfx = func_xk1_8002924C(gfx, 0xD0, var_s2, "%d:%s", i + 1, var_s3);
+#endif
         }
     }
     PRINTF("ENTRY.c\n");

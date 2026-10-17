@@ -518,12 +518,21 @@ Gfx* Hud_DrawPlayerTimer(Gfx* gfx, s32 time, s32 numPlayersIndex, s32 playerInde
 }
 
 extern Gfx D_80149D0[];
+#ifdef PORT
+extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
+extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
+extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
+#endif
 
 Gfx* Hud_DrawTimeRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 right;
     s32 left;
 
+#ifdef PORT
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_active()) {
+#else
     if (gGameMode == GAMEMODE_PRACTICE) {
+#endif
         return gfx;
     }
 
@@ -558,7 +567,12 @@ Gfx* Hud_UpdatePlayerHudInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     lap = gRacers[playerIndex].lap;
     newLap = false;
 
+#ifdef PORT
+    /* A finite Single Race counts laps like GP, so it takes the GP branch below. */
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) {
+#else
     if (gGameMode == GAMEMODE_PRACTICE) {
+#endif
         if (gRacers[playerIndex].startNewPracticeLap) {
             newLap = true;
         }
@@ -574,18 +588,38 @@ Gfx* Hud_UpdatePlayerHudInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
         if ((gRacers[playerIndex].position != 1) || (gGameMode == GAMEMODE_TIME_ATTACK)) {
             D_i3_80141EA8[playerIndex].lapIntervalCounter = 90;
         }
+#ifdef PORT
+        /* A finite Single Race plays the GP lap sounds. */
+        if ((lap == 2) && !sSecondLapStarted && gEnableRaceSfx &&
+            ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_finite())) {
+#else
         if ((lap == 2) && !sSecondLapStarted && gEnableRaceSfx && (gGameMode != GAMEMODE_PRACTICE)) {
+#endif
             Audio_TriggerSystemSE(NA_SE_17);
             sSecondLapStarted = true;
         }
+#ifdef PORT
+        if ((lap == gTotalLapCount) && !sFinalLapStarted && gEnableRaceSfx &&
+            ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_finite())) {
+#else
         if ((lap == gTotalLapCount) && !sFinalLapStarted && gEnableRaceSfx && (gGameMode != GAMEMODE_PRACTICE)) {
+#endif
             Audio_TriggerSystemSE(NA_SE_18);
             sFinalLapStarted = true;
         }
     }
 
     if (D_i3_80141EA8[playerIndex].lapFlashTimer == D_i3_8013EFFC) {
+#ifdef PORT
+        /* A finite Single Race can run past lap 4, so it reads its own lap table by lap index. */
+        if (gdx_single_race_finite()) {
+            sPreviousLapTimes[playerIndex] = gdx_single_race_get_lap_time(playerIndex, lap - 2);
+        } else {
+            sPreviousLapTimes[playerIndex] = gRacers[playerIndex].lapTimes[(lap + 1) % 3];
+        }
+#else
         sPreviousLapTimes[playerIndex] = gRacers[playerIndex].lapTimes[(lap + 1) % 3];
+#endif
     }
 
     func_i3_8012F450(&D_i3_80141EA8[playerIndex].unk_0C);
@@ -602,7 +636,12 @@ Gfx* Hud_UpdatePlayerHudInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
             gfx = Hud_DrawPlayerTimer(gfx, sPreviousLapTimes[playerIndex] + 5, numPlayersIndex, playerIndex);
         }
     } else if (numPlayersIndex < 2) {
+#ifdef PORT
+        /* A Single Race shows the running race timer, as GP does. */
+        if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_active()) {
+#else
         if (gGameMode == GAMEMODE_PRACTICE) {
+#endif
             return gfx;
         }
         if ((numPlayersIndex == 1) && (D_800E5FBC != 0)) {
@@ -852,7 +891,12 @@ Gfx* Hud_DrawPosition(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 digitMask;
     s32 position;
 
+#ifdef PORT
+    /* A Single Race shows the race position, as GP does. */
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_active()) {
+#else
     if (gGameMode == GAMEMODE_PRACTICE) {
+#endif
         return gfx;
     }
     if (gGameMode == GAMEMODE_TIME_ATTACK) {
@@ -976,7 +1020,12 @@ Gfx* Hud_DrawLapRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 top;
     s32 left;
 
+#ifdef PORT
+    /* A finite Single Race shows the lap box, as GP does. Unlimited keeps it hidden. */
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) {
+#else
     if (gGameMode == GAMEMODE_PRACTICE) {
+#endif
         return gfx;
     }
     if (gGameMode == GAMEMODE_DEATH_RACE) {
@@ -1002,7 +1051,12 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 left;
     s32 lap;
 
+#ifdef PORT
+    /* A finite Single Race shows the lap counter, as GP does. Unlimited keeps it hidden. */
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) {
+#else
     if (gGameMode == GAMEMODE_PRACTICE) {
+#endif
         return gfx;
     }
     if (gGameMode == GAMEMODE_DEATH_RACE) {
@@ -1470,7 +1524,12 @@ Gfx* Hud_DrawRacePortraits(Gfx* gfx) {
             break;
         }
 
+#ifdef PORT
+        /* A Single Race lists the racers by position, as GP does. */
+        if (((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_active()) || (gGameMode == GAMEMODE_DEATH_RACE)) {
+#else
         if ((gGameMode == GAMEMODE_PRACTICE) || (gGameMode == GAMEMODE_DEATH_RACE)) {
+#endif
             racer = gRacers;
         } else {
             racer = gRacersByPosition[position];
@@ -1503,7 +1562,12 @@ Gfx* Hud_DrawRacePortraits(Gfx* gfx) {
                             Math_Round(portraitBaseYPos + sPortraitYPosOffsets[i] + portraitHeight) << 2, 0, 0, 0,
                             Math_Round(1024.0f / scale), Math_Round(1024.0f / scale));
 
+#ifdef PORT
+        /* A Single Race keeps listing racers below the first, as GP does. */
+        if ((gGameMode != GAMEMODE_GP_RACE) && !gdx_single_race_active()) {
+#else
         if (gGameMode != GAMEMODE_GP_RACE) {
+#endif
             break;
         }
 
@@ -2000,7 +2064,12 @@ Gfx* Hud_DrawPracticeBestLap(Gfx* gfx) {
     s32 left;
     s32 top;
 
+#ifdef PORT
+    /* The Practice best lap is hidden for any Single Race. */
+    if ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_active()) {
+#else
     if (gGameMode != GAMEMODE_PRACTICE) {
+#endif
         return gfx;
     }
 
@@ -2151,7 +2220,8 @@ Gfx* Hud_DrawPracticeLapDelta(Gfx* gfx) {
     s32 refTime;
     u8 r, g, b;
 
-    if (gGameMode != GAMEMODE_PRACTICE) {
+    /* The Practice lap delta is hidden for any Single Race. */
+    if ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_active()) {
         return gfx;
     }
     if (!CVarGetInteger("gEnhancements.Practice.ShowLapDeltas", 0)) {

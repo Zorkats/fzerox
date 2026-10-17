@@ -1,4 +1,7 @@
 #include "leo/mfs.h"
+#ifdef PORT
+#include "../../../../port/gdx_edit_cup.h"
+#endif
 
 s32 Mfs_WriteNewFile(u8* buf, u32 fileSize, bool isEncoded) {
     u32 sizeRemaining = fileSize;
@@ -129,8 +132,70 @@ s32 func_i1_804073F4(u16 parentDirId, char* name, char* extension, u8* buf, u32 
 }
 #endif
 
+#ifdef PORT
+// The port's Edit Cup slots are 21 bytes wide (port/gdx_edit_cup.h). A save of that image is split into the
+// stock CRS_ENTRY.CENT and CRS_ENTRY.CENL, which holds the names over 8 characters; every other save is
+// the stock function, renamed.
+static s32 Mfs_SaveFileStock(u16 parentDirId, char* name, char* extension, u8* buf, u32 fileSize, s32 attr,
+                             s32 copyCount, bool writeChanges);
+
+// Mfs_WriteFile copies whole disk blocks out of the source buffer, not just fileSize bytes, so the packed
+// images sit in a buffer one full block long (the largest zone). The disk thread is the only caller.
+static u8 sGdxEditCupBlock[BLK_SIZE_ZONE0];
+
 s32 Mfs_SaveFile(u16 parentDirId, char* name, char* extension, u8* buf, u32 fileSize, s32 attr, s32 copyCount,
                  bool writeChanges) {
+    u8* cent = sGdxEditCupBlock;
+    u8* cenl = sGdxEditCupBlock;
+    s32 anyLong;
+    s32 err;
+
+    if (!gdx_edit_cup_is_wide_cent(name, extension, fileSize)) {
+        return Mfs_SaveFileStock(parentDirId, name, extension, buf, fileSize, attr, copyCount, writeChanges);
+    }
+    if (parentDirId == MFS_ENTRY_WORKING_DIR) {
+        parentDirId = gWorkingDirectory;
+    }
+    if (parentDirId == MFS_ENTRY_WORKING_PARENT_DIR) {
+        parentDirId = Mfs_GetParentDir(MFS_ENTRY_WORKING_DIR);
+    }
+    memset(sGdxEditCupBlock, 0, sizeof(sGdxEditCupBlock));
+    gdx_edit_cup_pack_cent((const char*) buf, cent);
+    if (Mfs_SaveFileStock(parentDirId, name, extension, cent, GDX_EDIT_CUP_CENT_SIZE, attr, copyCount, false) < 0) {
+        return -1;
+    }
+    memset(sGdxEditCupBlock, 0, sizeof(sGdxEditCupBlock));
+    anyLong = gdx_edit_cup_pack_cenl((const char*) buf, cenl);
+    if (anyLong) {
+        if (Mfs_SaveFileStock(parentDirId, name, "CENL", cenl, GDX_EDIT_CUP_CENL_SIZE, attr, copyCount, false) < 0) {
+            // CENT is written but the long names are not. A stale CENL could put old long names back into
+            // slots that are now empty, so it goes, and the error stands so the game reports the failure.
+            err = gMfsError;
+            Mfs_DeleteFileInDir(parentDirId, name, "CENL", false);
+            if (writeChanges) {
+                Mfs_BackupRamArea();
+            }
+            gMfsError = err;
+            return -1;
+        }
+    } else if (Mfs_GetFileIndex(parentDirId, name, "CENL") != MFS_ENTRY_DOES_NOT_EXIST) {
+        Mfs_DeleteFileInDir(parentDirId, name, "CENL", false);
+    }
+    gMfsError = LEO_ERROR_GOOD;
+    if (writeChanges) {
+        if (Mfs_BackupRamArea() < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static s32 Mfs_SaveFileStock(u16 parentDirId, char* name, char* extension, u8* buf, u32 fileSize, s32 attr,
+                             s32 copyCount, bool writeChanges) {
+#else
+s32 Mfs_SaveFile(u16 parentDirId, char* name, char* extension, u8* buf, u32 fileSize, s32 attr, s32 copyCount,
+                 bool writeChanges) {
+#endif
     u16 fileEntryId;
 #if MFS_VERSION == MFS_VERSION_B
     u16 parentDirEntryId;

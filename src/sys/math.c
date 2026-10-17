@@ -43,33 +43,75 @@ void func_80069F5C(FrameBuffer* fb) {
     }
 }
 
+#ifdef PORT
+/* Overscan removal. Stock frames every pane inside the CRT-safe area (scissor 12,8..308,232 for
+   the full screen, 12,8..307,231 for the split panes) and centres each split viewport on that
+   cropped pane. Borderless, the outer pane edges reach the true 320x240 frame and each split
+   viewport is re-centred on its enlarged pane. The viewport scales and z mapping are the stock
+   asset values (vscale 640/480 full and halves, 320/240 quarters; z 0x1FF), so a pane shows more
+   of the same projection instead of a stretched one, and the seams between panes keep their
+   stock coordinates. Indexed by SCISSOR_BOX_*; values in Vp units (1/4 px). */
+static Vp sGdxBorderlessVps[] = {
+    /* SCISSOR_BOX_FULL_SCREEN           */ { { { 640, 480, 0x1FF, 0 }, { 640, 480, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_TOP_HALF              */ { { { 640, 480, 0x1FF, 0 }, { 640, 480, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_BOTTOM_HALF           */ { { { 640, 480, 0x1FF, 0 }, { 640, 960, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_LEFT_HALF             */ { { { 320, 480, 0x1FF, 0 }, { 320, 480, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_RIGHT_HALF            */ { { { 320, 480, 0x1FF, 0 }, { 960, 480, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_TOP_LEFT_QUARTER      */ { { { 320, 240, 0x1FF, 0 }, { 320, 240, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_TOP_RIGHT_QUARTER     */ { { { 320, 240, 0x1FF, 0 }, { 960, 240, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_BOTTOM_LEFT_QUARTER   */ { { { 320, 240, 0x1FF, 0 }, { 320, 720, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_BOTTOM_RIGHT_QUARTER  */ { { { 320, 240, 0x1FF, 0 }, { 960, 720, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_TOP_CENTER_QUARTER    */ { { { 320, 240, 0x1FF, 0 }, { 640, 240, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_BOTTOM_CENTER_QUARTER */ { { { 320, 240, 0x1FF, 0 }, { 640, 720, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_LEFT_CENTER_QUARTER   */ { { { 320, 240, 0x1FF, 0 }, { 320, 480, 0x1FF, 0 } } },
+    /* SCISSOR_BOX_RIGHT_CENTER_QUARTER  */ { { { 320, 240, 0x1FF, 0 }, { 960, 480, 0x1FF, 0 } } },
+};
+
+static ScissorBox sGdxBorderlessScissors[] = {
+    /* SCISSOR_BOX_FULL_SCREEN           */ { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_TOP_HALF              */ { 0, 0, SCREEN_WIDTH, 119 },
+    /* SCISSOR_BOX_BOTTOM_HALF           */ { 0, 120, SCREEN_WIDTH, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_LEFT_HALF             */ { 0, 0, 159, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_RIGHT_HALF            */ { 160, 0, SCREEN_WIDTH, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_TOP_LEFT_QUARTER      */ { 0, 0, 159, 119 },
+    /* SCISSOR_BOX_TOP_RIGHT_QUARTER     */ { 160, 0, SCREEN_WIDTH, 119 },
+    /* SCISSOR_BOX_BOTTOM_LEFT_QUARTER   */ { 0, 120, 159, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_BOTTOM_RIGHT_QUARTER  */ { 160, 120, SCREEN_WIDTH, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_TOP_CENTER_QUARTER    */ { 80, 0, 240, 119 },
+    /* SCISSOR_BOX_BOTTOM_CENTER_QUARTER */ { 80, 120, 240, SCREEN_HEIGHT },
+    /* SCISSOR_BOX_LEFT_CENTER_QUARTER   */ { 0, 60, 159, 180 },
+    /* SCISSOR_BOX_RIGHT_CENTER_QUARTER  */ { 160, 60, SCREEN_WIDTH, 180 },
+};
+
+/* Returns the borderless viewport and scissor for a pane, or false when Remove Borders is off.
+   Camera_InitViewport reads the same pair, so the CPU-side mirrors match what is submitted here. */
+bool gdx_borderless_pane(s32 scissorBoxType, Vp** vp, ScissorBox** scissorBox) {
+    extern int gdx_remove_borders(void);
+
+    if (!gdx_remove_borders() || (scissorBoxType < 0) || (scissorBoxType >= ARRAY_COUNT(sGdxBorderlessVps))) {
+        return false;
+    }
+    *vp = &sGdxBorderlessVps[scissorBoxType];
+    *scissorBox = &sGdxBorderlessScissors[scissorBoxType];
+    return true;
+}
+#endif
+
 Gfx* func_8006A00C(Gfx* gfx, s32 scissorBoxType) {
     ScissorBox* scissorBox;
+#ifdef PORT
+    Vp* gdxVp;
+
+    if (gdx_borderless_pane(scissorBoxType, &gdxVp, &scissorBox)) {
+        gSPViewport(gfx++, gdxVp);
+        gDPSetScissor(gfx++, G_SC_NON_INTERLACE, scissorBox->left, scissorBox->top, scissorBox->right,
+                      scissorBox->bottom);
+        return gfx;
+    }
+#endif
 
     switch (scissorBoxType) {
         case SCISSOR_BOX_FULL_SCREEN:
-#ifdef PORT
-        {
-            /* Overscan removal: open the CRT-safe frame (viewport 296x224 + scissor 12,8..308,232)
-               to the full 320x240. The stock Vp is copied first so the z mapping stays bit-stock;
-               Camera_InitViewport applies the same numbers to the CPU-side mirrors. */
-            extern int gdx_remove_borders(void);
-            extern void* gdx_segmented_to_host_pointer(uintptr_t segmentedAddr);
-            static Vp sGdxVpFull;
-            static ScissorBox sGdxScissorFull = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
-            if (gdx_remove_borders()) {
-                Vp* stock = (Vp*) gdx_segmented_to_host_pointer((uintptr_t) &aVpFullScreen);
-                sGdxVpFull = *stock;
-                sGdxVpFull.vp.vscale[0] = 640;
-                sGdxVpFull.vp.vscale[1] = 480;
-                sGdxVpFull.vp.vtrans[0] = 640;
-                sGdxVpFull.vp.vtrans[1] = 480;
-                gSPViewport(gfx++, &sGdxVpFull);
-                scissorBox = &sGdxScissorFull;
-                break;
-            }
-        }
-#endif
             gSPViewport(gfx++, &aVpFullScreen);
             scissorBox = &gScissorBoxFullScreen;
             break;

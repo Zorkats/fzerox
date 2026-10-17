@@ -258,8 +258,14 @@ s32* D_xk1_8003A518[12];
 s32* D_xk1_8003A548;
 u16* D_xk1_8003A54C;
 
+#ifdef PORT
+// The course title and its undo backup hold a whole file name (Course Edit names reach 20 characters).
+u8 D_80030060[GDX_EK_FILE_NAME_MAX + 1] = { 0 };
+u8 D_8003006C[GDX_EK_FILE_NAME_MAX + 1] = { 0 };
+#else
 u8 D_80030060[9] = { 0 };
 u8 D_8003006C[9] = { 0 };
+#endif
 
 UNUSED s32 D_80030078 = 0;
 UNUSED s32 D_8003007C = 0;

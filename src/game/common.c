@@ -125,7 +125,7 @@ s32 D_800CD4E0[] = {
 };
 // clang-format on
 
-extern char gEditCupTrackNames[][9];
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 
 #ifdef EXPANSION_KIT
 void func_8070D220(void) {

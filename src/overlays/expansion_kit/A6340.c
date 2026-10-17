@@ -5,7 +5,12 @@
 #include ASSET_HEADER_EK(expansion_kit_textures.h)
 
 // TODO: Unsure on sizes
+#ifdef PORT
+// Course Edit names reach GDX_EK_FILE_NAME_MAX characters; the spare bytes keep the NUL inside the buffer.
+u8 gExpansionKitNameEntryStr[GDX_EK_FILE_NAME_MAX + 4];
+#else
 u8 gExpansionKitNameEntryStr[16];
+#endif
 u8 D_xk1_8003A570[40];
 unk_8003A5D8 D_xk1_8003A598;
 s32 sNameEntryCursorXPos;
@@ -17,6 +22,16 @@ s32 sInputIndicatorFlashRate = 1;
 bool D_xk1_80032AC8 = false;
 u32 D_xk1_80032ACC = -1;
 s32 D_xk1_80032AD0 = 0;
+
+#ifdef PORT
+extern s32 gGameMode;
+
+// Characters the name entry accepts. Course Edit names MFS files, which hold 20; Machine Create keeps 8,
+// since CustomMachine.machineName is u8[9].
+static s32 gdx_name_entry_max(void) {
+    return (gGameMode == GAMEMODE_COURSE_EDIT) ? GDX_EK_FILE_NAME_MAX : 8;
+}
+#endif
 
 #ifdef PORT
 /* Row 4 (space / dash / END) is deliberately absent from this literal on N64.
@@ -190,7 +205,11 @@ void func_xk1_800294AC(void) {
 
     gExpansionKitNameEntryStrLength = 0;
 
+#ifdef PORT
+    for (i = 0; i < ARRAY_COUNT(gExpansionKitNameEntryStr); i++) {
+#else
     for (i = 0; i < 9; i++) {
+#endif
         gExpansionKitNameEntryStr[i] = 0;
     }
 }
@@ -252,14 +271,22 @@ void ExpansionKit_NameEntryHandleAPress(void) {
     PRINTF("GET_FILE_NAMES_START\n");
 
     if (gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) {
+#ifdef PORT
+        if (gExpansionKitNameEntryStrLength > gdx_name_entry_max()) {
+#else
         if (gExpansionKitNameEntryStrLength >= 9) {
+#endif
             Audio_TriggerSystemSE(NA_SE_32);
             return;
         }
         xPos = sNameEntryCursorXPos;
         yPos = sNameEntryCursorYPos;
         letter = sNameEntryKeyboardStr[yPos * 10 + xPos];
+#ifdef PORT
+        if ((letter != '\0') && (gExpansionKitNameEntryStrLength >= gdx_name_entry_max())) {
+#else
         if ((letter != '\0') && (gExpansionKitNameEntryStrLength >= 8)) {
+#endif
             Audio_TriggerSystemSE(NA_SE_32);
             return;
         }
@@ -287,7 +314,11 @@ void ExpansionKit_NameEntryHandleAPress(void) {
             gExpansionKitNameEntryStrLength++;
         }
         // Mpve Cursor To End
+#ifdef PORT
+        if (gExpansionKitNameEntryStrLength >= gdx_name_entry_max()) {
+#else
         if (gExpansionKitNameEntryStrLength >= 8) {
+#endif
             sNameEntryCursorXPos = 9;
             sNameEntryCursorYPos = 4;
         }
@@ -457,7 +488,7 @@ static void gdx_name_entry_handle_event(s32 event) {
             Audio_TriggerSystemSE(NA_SE_32);
             return;
         }
-        if (gExpansionKitNameEntryStrLength >= 8) {
+        if (gExpansionKitNameEntryStrLength >= gdx_name_entry_max()) {
             Audio_TriggerSystemSE(NA_SE_32);
             return;
         }
@@ -466,7 +497,7 @@ static void gdx_name_entry_handle_event(s32 event) {
         gExpansionKitNameEntryStr[gExpansionKitNameEntryStrLength] = '\0';
         Audio_TriggerSystemSE(NA_SE_39);
         ExpansionKit_GetCharacterKeyboardPosition(letter, &sNameEntryCursorXPos, &sNameEntryCursorYPos);
-        if (gExpansionKitNameEntryStrLength >= 8) {
+        if (gExpansionKitNameEntryStrLength >= gdx_name_entry_max()) {
             sNameEntryCursorXPos = 9;
             sNameEntryCursorYPos = 4;
         }
@@ -529,6 +560,9 @@ Gfx* ExpansionKit_NameEntryDraw(Gfx* gfx, s32* arg1, s32* arg2) {
     s32 yPos;
     char letter;
     s32 i;
+#ifdef PORT
+    s32 nameStart;
+#endif
 
     xPos = sNameEntryCursorXPos;
     if (sNameEntryCursorYPos < 5) {
@@ -596,8 +630,19 @@ Gfx* ExpansionKit_NameEntryDraw(Gfx* gfx, s32* arg1, s32* arg2) {
     gDPPipeSync(gfx++);
     gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
 
+#ifdef PORT
+    /* The name row has 8 cells. A longer Course Edit name slides left so the last letters and the input
+       cell after them stay in view; a full name shows its last 8 letters. */
+    nameStart = gExpansionKitNameEntryStrLength - ((gExpansionKitNameEntryStrLength < gdx_name_entry_max()) ? 7 : 8);
+    if (nameStart < 0) {
+        nameStart = 0;
+    }
+    for (i = 0; i < 8; i++) {
+        letter = gExpansionKitNameEntryStr[nameStart + i];
+#else
     for (i = 0; i < 8; i++) {
         letter = gExpansionKitNameEntryStr[i];
+#endif
         if (letter == '\0') {
             continue;
         }
@@ -622,6 +667,19 @@ Gfx* ExpansionKit_NameEntryDraw(Gfx* gfx, s32* arg1, s32* arg2) {
     } else {
         gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
     }
+#ifdef PORT
+    // The input cell sits right after the visible letters (cell 7 at most while the name slides).
+    if (gExpansionKitNameEntryStrLength < gdx_name_entry_max()) {
+        s32 slot = gExpansionKitNameEntryStrLength - nameStart;
+
+        gDPLoadTextureTile(gfx++, aExpansionKitNameEntryTex, G_IM_FMT_CI, G_IM_SIZ_8b, 160, 120, (slot * 16) + 31, 96,
+                           ((slot + 1) * 16) + 31, 116, 0, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP,
+                           G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+
+        gSPTextureRectangle(gfx++, ((slot * 16) + 111) << 2, 176 << 2, (((slot + 1) * 16) + 111) << 2, 196 << 2, 0,
+                            ((slot * 16) + 31) << 5, 96 << 5, 1 << 10, 1 << 10);
+    }
+#else
     if (gExpansionKitNameEntryStrLength < 8) {
         gDPLoadTextureTile(gfx++, aExpansionKitNameEntryTex, G_IM_FMT_CI, G_IM_SIZ_8b, 160, 120,
                            (gExpansionKitNameEntryStrLength * 16) + 31, 96,
@@ -632,6 +690,7 @@ Gfx* ExpansionKit_NameEntryDraw(Gfx* gfx, s32* arg1, s32* arg2) {
                             (((gExpansionKitNameEntryStrLength + 1) * 16) + 111) << 2, 196 << 2, 0,
                             ((gExpansionKitNameEntryStrLength * 16) + 31) << 5, 96 << 5, 1 << 10, 1 << 10);
     }
+#endif
 
     // Flash over "END"
     gDPPipeSync(gfx++);
