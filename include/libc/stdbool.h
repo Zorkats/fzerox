@@ -1,6 +1,10 @@
 #ifndef LIBC_STDBOOL_H
 #define LIBC_STDBOOL_H
 
+/* macOS: the SDK headers conflict with these N64 libc replacements, so use the system ones. */
+#if defined(PORT) && defined(__APPLE__)
+#include <stdbool.h>
+#else
 #include "PR/ultratypes.h"
 
 #define __bool_true_false_are_defined 1
@@ -12,5 +16,6 @@ typedef int bool;
 #define true    1
 
 #endif /* __cplusplus */
+#endif
 
 #endif /* STDBOOL */

@@ -17,7 +17,17 @@
 #ifndef PORT
 #define GDX_CK(x)
 #else
+#ifdef __APPLE__
+/* macOS: size_t is unsigned long on LP64 Darwin, so the unsigned long long declaration below
+   conflicts with the SDK's. __SIZE_TYPE__ is the compiler's own size_t, so this matches the SDK
+   without including a system header (which would collide with the decomp's libc/stdint.h). When
+   the SDK's <string.h> was already included, memset may be a fortify macro and is declared. */
+#ifndef memset
+extern void *memset(void *, int, __SIZE_TYPE__);
+#endif
+#else
 extern void *memset(void *, int, unsigned long long);
+#endif
 extern void gdx_ck(const char* s);
 extern void gdx_cki(const char* s, int v);
 extern void gdx_ckp(const char* s, void* p);
