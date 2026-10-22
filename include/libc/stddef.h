@@ -7,7 +7,19 @@
 #else
 #include "PR/ultratypes.h"
 
+#ifdef __ANDROID__
+/* Bionic's <strings.h> -- which PR/os_libc.h includes on a PORT build, for the real bcopy/bzero
+ * signatures -- pulls in <sys/types.h> and through it the compiler's <stddef.h>. glibc's does
+ * not, which is why the IDO typedef below has survived on desktop: nothing there ever offers a
+ * competing definition. Here it collides, and the compiler's is the one that is right for an
+ * LP64 target, so take it.
+ *
+ * Nothing in the game uses ptrdiff_t, so this widens no interface -- it only stops the two
+ * definitions meeting. */
+#include <stddef.h>
+#else
 typedef s32 ptrdiff_t;
+#endif
 
 #ifdef __GNUC__
 #define offsetof(structure, member) __builtin_offsetof (structure, member)
