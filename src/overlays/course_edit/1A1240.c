@@ -8,6 +8,8 @@
 // so the stock editor cannot round-trip a retail course. See port/gdx_course_bounds.c.
 extern float gdx_course_edit_min_y(void);
 extern float gdx_course_edit_max_y(void);
+#include "../../../../port/gdx_course_branch_edit.h"
+#include "../../../../port/gdx_course_branch_editor.h"
 #endif
 
 f32 D_xk2_80128CB0;
@@ -60,7 +62,9 @@ void func_xk2_800EF78C(void) {
     D_8010CF50 = COURSE_CONTEXT()->courseData;
     D_xk2_80119800 = D_800D6CA0.unk_0C;
 #ifdef PORT
-    // The push keeps this snapshot in the history pool. The flag reports whether undo has anything to step to.
+    // The fork set rides in the same snapshot. The push keeps this snapshot in the history pool. The flag
+    // reports whether undo has anything to step to.
+    gdx_branch_edit_backup();
     gdx_course_edit_undo_push();
     D_xk2_80104BC0 = (gdx_course_edit_undo_depth() > 0);
 #else
@@ -120,6 +124,7 @@ void func_xk2_800EF8B0(void) {
     func_800747EC(gVenueOption);
     func_80077AD8(gVenueOption);
 #ifdef PORT
+    gdx_branch_edit_restore();
     // Ends the restore window that begin_restore opened, so pushes from the venue reload are not recorded.
     gdx_course_edit_undo_end_restore();
 #endif
@@ -629,6 +634,9 @@ void func_xk2_800F0FF4(void) {
     }
     D_802CB6D0.unk_0000[0].prev = &D_802CB6D0.unk_0000[D_802CB6D0.controlPointCount - 1];
     D_802CB6D0.unk_0000[D_802CB6D0.controlPointCount - 1].next = &D_802CB6D0.unk_0000[0];
+#ifdef PORT
+    gdx_course_branch_editor_on_reverse();
+#endif
 
     PRINTF("BACKUP\n");
     PRINTF("EFFECT c\n");

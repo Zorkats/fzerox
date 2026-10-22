@@ -9,6 +9,7 @@
 
 #ifdef PORT
 #include "fzx_font.h"
+#include "../../../../port/gdx_course_branch_editor.h"
 #include "../../../../port/gdx_course_music.h"
 #include "../../../../port/gdx_course_packs.h"
 #include "../../../../port/gdx_ek_text.h"
@@ -247,6 +248,14 @@ Gfx* func_xk2_800DF6FC(Gfx* gfx) {
         gSPDisplayList(gfx++, D_9014BA0);
         if (D_xk2_800F7404 == 0) {
             gfx = func_800A95B4(gfx);
+#ifdef PORT
+            {
+                /* The other path of each fork (port/gdx_course_branch.c). */
+                extern Gfx* gdx_course_branch_draw_editor(Gfx * gfx, Gfx * (*drawSurface)(Gfx*));
+
+                gfx = gdx_course_branch_draw_editor(gfx, func_800A95B4);
+            }
+#endif
         }
     }
     gSPMatrix(gfx++, D_2000000, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
@@ -1968,6 +1977,12 @@ void func_xk2_800E5B6C(void) {
                 D_xk2_800F71F0 = temp_v0 = func_xk2_800F2750();
                 func_xk2_800E5A38(temp_v0);
             }
+#ifdef PORT
+            /* A full rebuild (3, 2) or the one after init and a test run (4): rebuild the fork ring too. */
+            if ((D_xk2_800F7040 >= 2) && (D_xk2_800F7040 <= 4)) {
+                gdx_course_branch_editor_rebuilt();
+            }
+#endif
             func_xk2_800E6270(gCurrentCourseInfo);
             func_xk2_800E5920();
         }
@@ -2302,6 +2317,9 @@ void func_xk2_800E6CA8(s32 arg0, CourseSegment arg1) {
     D_xk2_800F7060 = Math_Rand2() % 30;
     D_xk2_800F7064 = Math_Rand2() & 3;
     func_xk2_800E6F9C();
+#ifdef PORT
+    gdx_course_branch_editor_on_insert(arg0 + 1);
+#endif
 }
 
 void func_xk2_800E6F9C(void) {

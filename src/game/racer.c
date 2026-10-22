@@ -718,6 +718,10 @@ extern int gdx_single_race_racer_count(void);
 extern int gdx_single_race_random_rival(void);
 extern void gdx_single_race_store_lap_time(int racerId, int lapIndex, int lapTime);
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex);
+/* Course Edit fork runtime (port/gdx_course_branch.c). */
+extern s32 gdx_course_branch_live(void);
+extern void gdx_course_branch_reset_racers(void);
+extern void gdx_course_branch_racer_walked(s32 racerId, RacerSegmentPositionInfo* info);
 #endif
 
 void Racer_UpdateRivalRacer(void) {
@@ -1822,6 +1826,8 @@ void Racer_Init(void) {
        keyframe. Also covers GP course-to-course, where the mode-load hook never fires but the
        grid is still re-placed. Render-only. */
     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+    /* Every racer starts on the stock ring with no fork history. */
+    gdx_course_branch_reset_racers();
     /* gEnhancements.Graphics.FancyLighting, reducing stock ambient lighting
        so new light sources can shine. */
     { extern int CVarGetInteger(const char* name, int defaultValue);
@@ -2106,6 +2112,12 @@ void Racer_Init(void) {
         }
         sGhostReplayRecordingPtr = sGhostReplayRecordingBuffer;
         gUnableToRecordGhost = sReplayRecordFrameCount = sGhostReplayRecordingSize = 0;
+#ifdef PORT
+        /* A ghost replays on the stock ring only, so a course with forks records none. */
+        if (gdx_course_branch_live()) {
+            gUnableToRecordGhost = true;
+        }
+#endif
     }
 }
 
@@ -4458,6 +4470,9 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         if (func_8009EBEC(&racer->segmentPositionInfo, racer->segmentPositionInfo.pos.x + racer->velocity.x,
                           racer->segmentPositionInfo.pos.y + racer->velocity.y,
                           racer->segmentPositionInfo.pos.z + racer->velocity.z, i, var_fa1) == 0) {
+#ifdef PORT
+            gdx_course_branch_racer_walked(racer->id, &racer->segmentPositionInfo);
+#endif
             sp128 = racer->lapDistance;
             racer->lapDistance = func_8009DFA0(&racer->segmentPositionInfo);
 

@@ -49,7 +49,9 @@ typedef enum TrackDesignStyle {
     /* 7 */ TRACK_DESIGN_STYLE_SPACE,
     /* 8 */ TRACK_DESIGN_STYLE_LOOP,
 #ifdef PORT
-    /* 9 */ TRACK_DESIGN_STYLE_SPLIT,
+    /* 9 */ TRACK_DESIGN_STYLE_INSERT,
+    /* 10 */ TRACK_DESIGN_STYLE_SPLIT,
+    /* 11 */ TRACK_DESIGN_STYLE_LINK,
 #endif
 } TrackDesignStyle;
 

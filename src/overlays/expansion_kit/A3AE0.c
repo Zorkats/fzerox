@@ -856,7 +856,9 @@ MenuWidget gMoveWidget = { 7,   INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, s
                            144, &gMoveOption };
 
 #ifdef PORT
+extern u8 aCourseEditInsertTex[];
 extern u8 aCourseEditSplitTex[];
+extern u8 aCourseEditLinkTex[];
 #endif
 
 MenuDropItem sDesignStyleMenuItems[] = {
@@ -879,14 +881,18 @@ MenuDropItem sDesignStyleMenuItems[] = {
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditLoopTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
 #ifdef PORT
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditInsertTex,
+      NULL, NULL, NULL, 48, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditSplitTex,
+      NULL, NULL, NULL, 48, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditLinkTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
 #endif
 };
 
 MenuWidget gDesignStyleWidget = {
 #ifdef PORT
-    10, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sDesignStyleMenuItems, 112, 48, 112, 192, &gDesignStyleOption
+    12, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sDesignStyleMenuItems, 112, 48, 112, 224, &gDesignStyleOption
 #else
     9, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sDesignStyleMenuItems, 112, 48, 112, 176, &gDesignStyleOption
 #endif
@@ -1556,6 +1562,8 @@ void func_xk1_80028250(void) {
         NULL,
 #ifdef PORT
         NULL,
+        NULL,
+        NULL,
 #endif
     };
     s32* sCourseDesignTypeOptions[] = {
@@ -1569,6 +1577,8 @@ void func_xk1_80028250(void) {
         NULL,
         NULL,
 #ifdef PORT
+        NULL,
+        NULL,
         NULL,
 #endif
     };
@@ -1620,7 +1630,9 @@ void func_xk1_80028250(void) {
                 case TRACK_DESIGN_STYLE_SPACE:
                 case TRACK_DESIGN_STYLE_LOOP:
 #ifdef PORT
+                case TRACK_DESIGN_STYLE_INSERT:
                 case TRACK_DESIGN_STYLE_SPLIT:
+                case TRACK_DESIGN_STYLE_LINK:
 #endif
                     gCourseEditMenuItems[2].contentsTex = NULL;
                     break;
@@ -1735,6 +1747,11 @@ void func_xk1_8002860C(void) {
     D_80030060[0] = '\0';
 #ifdef PORT
     gdx_course_state_clear_edit_file();
+    {
+        extern void gdx_course_branch_editor_new_course(void);
+
+        gdx_course_branch_editor_new_course();
+    }
 #endif
     D_xk2_80104CB8 = 0;
     D_xk2_80104CC0 = 0;
@@ -1856,7 +1873,9 @@ void func_xk1_80028818(void) {
             break;
         case TRACK_DESIGN_STYLE_LOOP:
 #ifdef PORT
+        case TRACK_DESIGN_STYLE_INSERT:
         case TRACK_DESIGN_STYLE_SPLIT:
+        case TRACK_DESIGN_STYLE_LINK:
 #endif
             gCourseEditMenuItems[2].contentsTex = NULL;
             gCourseEditMenuItems[2].widget = NULL;

@@ -702,8 +702,10 @@ extern MenuWidget gPartsStyleWidget;
 #ifdef PORT
 /* Mouse-mode wording for help screens 25 to 28 and the top strip, indices 29 to 58 (expansion_kit_text.c). */
 char* gdx_ek_help_text(s32 index);
-/* Top-strip help for the port-only SPLIT design style; at most 34 characters. */
-static char sGdxSplitHelpText[] = "Insert a point halfway to the next";
+/* Top-strip help for the port-only INSERT, SPLIT and LINK design styles; at most 34 characters. */
+static char sGdxInsertHelpText[] = "Insert a point halfway to the next";
+static char sGdxSplitHelpText[] = "Fork the track into two paths";
+static char sGdxLinkHelpText[] = "Join a fork path to a point";
 
 /* Top-strip help for the Point, Move, Design and Parts screens. The mouse wording follows the mouse mode setting, the
  * same gate as help screens 25 to 28, so it does not flicker back to the stock Z text when the cursor leaves the game
@@ -962,7 +964,13 @@ void func_xk2_800F3600(Gfx** gfxP) {
                 break;
 #ifdef PORT
             case 9:
+                func_xk2_800F335C(&gfx, 24, (s8*) sGdxInsertHelpText);
+                break;
+            case 10:
                 func_xk2_800F335C(&gfx, 24, (s8*) sGdxSplitHelpText);
+                break;
+            case 11:
+                func_xk2_800F335C(&gfx, 24, (s8*) sGdxLinkHelpText);
                 break;
 #endif
         }

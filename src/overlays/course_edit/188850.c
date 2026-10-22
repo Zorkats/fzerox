@@ -12,6 +12,7 @@
 // so the stock editor cannot round-trip a retail course. See port/gdx_course_bounds.c.
 extern float gdx_course_edit_min_y(void);
 extern float gdx_course_edit_max_y(void);
+#include "../../../../port/gdx_course_branch_editor.h"
 #include "../../../../port/gdx_course_edit_input.h"
 #include "../../../../port/gdx_course_edit_menu.h"
 #include "../../../../port/gdx_course_edit_undo.h"
@@ -881,7 +882,7 @@ void func_xk2_800D8AB8(void) {
             temp_a1 = gDesignStyleOption;
 #ifdef PORT
             if (temp_a1 >= TRACK_DESIGN_STYLE_LOOP) {
-                // LOOP and SPLIT have no track shape commit here, and sp2C only has 8 entries
+                // LOOP and the port's INSERT, SPLIT and LINK have no track shape commit here, and sp2C only has 8 entries
                 return;
             }
 #endif
@@ -1001,10 +1002,10 @@ extern MenuWidget gCourseEditWidget;
 #ifdef PORT
 extern CourseInfo* gCurrentCourseInfo;
 
-/* SPLIT design (PORT only): insert one control point at the curve midpoint between the active point and
+/* INSERT design (PORT only): insert one control point at the curve midpoint between the active point and
  * its next point. The gates follow func_xk2_800F07A4 (loop). The new point takes the average radii and bank
  * angle of its two neighbors, and its trackSegmentInfo from the active point. */
-static void gdx_course_edit_split_segment(void) {
+static void gdx_course_edit_insert_segment(void) {
     CourseSegment newSeg;
     CourseSegment* activeSeg;
     CourseSegment* nextSeg;
@@ -1015,28 +1016,28 @@ static void gdx_course_edit_split_segment(void) {
 
     if ((gCourseEditCursorYPos < 0x38) || (D_800D6CA0.unk_08 == 1) || (D_800D6CA0.unk_08 == 3) ||
         (D_800D6CA0.unk_08 == 2) || (D_800D6CA0.unk_08 == 0x10) ||
-        !((gCreateOption == CREATE_OPTION_DESIGN) && (gDesignStyleOption == TRACK_DESIGN_STYLE_SPLIT)) ||
+        !((gCreateOption == CREATE_OPTION_DESIGN) && (gDesignStyleOption == TRACK_DESIGN_STYLE_INSERT)) ||
         !(gControllers[gPlayerControlPorts[0]].buttonPressed & BTN_A) || (D_800D6CA0.unk_0C < 0) ||
         (D_800D6CA0.unk_0C >= D_802CB6D0.controlPointCount)) {
         return;
     }
     if (D_800D6CA0.unk_0C == 0) {
-        gdx_course_edit_flash_message("Split: the start segment cannot be split");
+        gdx_course_edit_flash_message("Insert: not on the start segment");
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
     if (D_802CB6D0.controlPointCount < 4) {
-        gdx_course_edit_flash_message("Split: the course needs 4 or more points");
+        gdx_course_edit_flash_message("Insert: the course needs 4 or more points");
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
     if (D_802CB6D0.controlPointCount >= 60) {
-        gdx_course_edit_flash_message("Split: the course already has 60 points");
+        gdx_course_edit_flash_message("Insert: the course already has 60 points");
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
     if (gCurrentCourseInfo->length > 300000.0f) {
-        gdx_course_edit_flash_message("Split: the course is at the length limit");
+        gdx_course_edit_flash_message("Insert: the course is at the length limit");
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
@@ -1052,7 +1053,7 @@ static void gdx_course_edit_split_segment(void) {
     mid.z = Math_Round(mid.z);
     if ((Math_VectorGetDistance(activeSeg->pos, mid) < 498.0f) ||
         (Math_VectorGetDistance(mid, nextSeg->pos) < 498.0f)) {
-        gdx_course_edit_flash_message("Split: this segment is too short to split");
+        gdx_course_edit_flash_message("Insert: this segment is too short");
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
@@ -1060,7 +1061,7 @@ static void gdx_course_edit_split_segment(void) {
     bankAverage = (COURSE_CONTEXT()->courseData.bankAngle[activeIndex] +
                    COURSE_CONTEXT()->courseData.bankAngle[nextIndex]) / 2;
 
-    gdx_course_edit_undo_set_pending_label(GDX_COURSE_EDIT_UNDO_LABEL_SPLIT);
+    gdx_course_edit_undo_set_pending_label(GDX_COURSE_EDIT_UNDO_LABEL_INSERT);
     func_xk2_800EF78C();
     Audio_TriggerSystemSE(NA_SE_39);
 
@@ -1190,7 +1191,8 @@ void func_xk2_800D8F04(void) {
         func_xk2_800DC4E4();
         func_xk2_800F07A4();
 #ifdef PORT
-        gdx_course_edit_split_segment();
+        gdx_course_edit_insert_segment();
+        gdx_course_branch_editor_tools();
 #endif
     }
     func_xk2_800DD8C8();
@@ -1980,11 +1982,17 @@ void func_xk2_800DB550(void) {
         var_s0 = &D_802CB6D0.unk_0000[i];
 
         if ((i != 0) && (Math_VectorGetDistance(var_s0->pos, var_s0->prev->pos) < 498.0f)) {
+#ifdef PORT
+            gdx_course_branch_editor_on_delete(j);
+#endif
             continue;
         }
 
         if ((i + 1 == D_802CB6D0.controlPointCount) &&
             (Math_VectorGetDistance(var_s0->pos, var_s0->next->pos) < 498.0f)) {
+#ifdef PORT
+            gdx_course_branch_editor_on_delete(j);
+#endif
             continue;
         }
 
@@ -2080,6 +2088,9 @@ void func_xk2_800DB924(void) {
     j = 0;
     for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
         if (D_80128690[i].unk_08 != 0) {
+#ifdef PORT
+            gdx_course_branch_editor_on_delete(j);
+#endif
             continue;
         }
 
@@ -3949,6 +3960,10 @@ void func_xk2_800DEE20(void) {
             Audio_TriggerSystemSE(NA_SE_32);
             return;
         }
+#ifdef PORT
+        /* The test run races path A from the ring, with path B from the fork set. */
+        gdx_course_branch_editor_force_path_a();
+#endif
         Audio_TriggerSystemSE(NA_SE_36);
         gInCourseEditTestRun = true;
 #ifdef PORT
@@ -4057,6 +4072,9 @@ s32 func_xk2_800DEFCC(void) {
 
     D_802CB6D0.unk_0000[0].trackSegmentInfo =
         (TRACK_FLAG_JOINABLE | TRACK_FLAG_8000000 | TRACK_SHAPE_ROAD | ROAD_START_LINE);
+#ifdef PORT
+    gdx_course_branch_editor_on_rotate(D_800D6CA0.unk_0C);
+#endif
     D_800D6CA0.unk_0C = 0;
 
     for (i = 0; i < D_802CB6D0.controlPointCount; i++) {

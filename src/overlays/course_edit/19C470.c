@@ -67,6 +67,7 @@ extern u8 D_8003006C[];
 extern s32 D_80119880;
 extern unk_8003A5D8 D_xk1_8003A598;
 #ifdef PORT
+#include "../../../../port/gdx_course_branch_editor.h"
 #include "../../../../port/gdx_course_state.h"
 #endif
 extern s32 D_xk2_80104378;
@@ -86,6 +87,10 @@ s32 func_xk2_800EAA1C(u8* arg0) {
         D_800D6CA0.unk_08 = 0x10;
         return -1;
     }
+#ifdef PORT
+    // The file stores path A. Path B stays in the fork set.
+    gdx_course_branch_editor_force_path_a();
+#endif
     COURSE_CONTEXT()->courseData.creatorId = CREATOR_NINTENDO;
     COURSE_CONTEXT()->courseData.controlPointCount = D_802CB6D0.controlPointCount;
 
@@ -120,6 +125,7 @@ s32 func_xk2_800EAA1C(u8* arg0) {
 #ifdef PORT
         // The edited course now lives in this file, so its custom choices go under this name.
         gdx_course_state_set_edit_file(D_xk1_8003A598.name, D_xk1_8003A598.extension);
+        gdx_course_branch_editor_saved();
 #endif
     }
     mfsStrCpy(D_80030060, arg0);
@@ -205,6 +211,9 @@ void func_xk2_800EACB0(void) {
     D_802CB6D0.unk_0000[0].prev = &D_802CB6D0.unk_0000[courseInfo->segmentCount - 1];
     D_802CB6D0.unk_0000[courseInfo->segmentCount - 1].next = &D_802CB6D0.unk_0000[0];
     func_xk2_800DC3F8();
+#ifdef PORT
+    gdx_course_branch_editor_loaded();
+#endif
     func_xk2_800EF78C();
     func_xk2_800F0FE8();
     D_xk2_800F7040 = 3;

@@ -58,6 +58,13 @@ s32 gCourseIndex;
 s32 gSegmentChunkCount;
 SegmentChunk* sLastSegmentChunk;
 Vtx* gCourseVtxPtr;
+#ifdef PORT
+/* port/gdx_course_branch.c: the race runtime of Course Edit forks. */
+extern void gdx_course_branch_on_course_init(void);
+extern f32 gdx_course_branch_lap_partial(const CourseSegment* segment, f32 partial);
+extern Gfx* gdx_course_branch_draw(Gfx* gfx, s32 cameraIndex, Gfx* (*drawRing)(Gfx*, s32));
+extern const u8* gGdxCourseChunkDrawMask;
+#endif
 s32 D_800F8524;
 SegmentChunkGroup sSegmentChunkGroups[SEGMENT_CHUNK_GROUP_COUNT];
 s32 sLastTrackShapeType;
@@ -817,7 +824,11 @@ f32 func_8009DFA0(RacerSegmentPositionInfo* arg0) {
 
     length += sqrtf(SQ(posDiff.x) + SQ(posDiff.y) + SQ(posDiff.z));
     arg0->segmentLengthProportion = length / arg0->courseSegment->length;
+#ifdef PORT
+    return arg0->courseSegment->lengthFromStart + gdx_course_branch_lap_partial(arg0->courseSegment, length);
+#else
     return arg0->courseSegment->lengthFromStart + length;
+#endif
 }
 
 // Get Length Into Course Segment
@@ -3494,7 +3505,19 @@ void Course_Init(void) {
     sCourseFarRenderDistance = sCourseRenderOriginDistance + 4500.0f;
     D_800F894C += sCourseRenderOriginDistance - 1000.0f;
     D_800F8950 += sCourseRenderOriginDistance - 1000.0f;
+#ifdef PORT
+    gdx_course_branch_on_course_init();
+#endif
 }
+
+#ifdef PORT
+/* The fork runtime swaps a second chunk ring of count chunks into gSegmentChunks to build and draw it;
+ * gSegmentChunks[count] must already hold the copy of chunk 0 that closes the ring. */
+void Course_GdxSetChunkRing(s32 count) {
+    gSegmentChunkCount = count;
+    sLastSegmentChunk = &gSegmentChunks[count];
+}
+#endif
 
 void Course_Update(void) {
 }
@@ -4606,7 +4629,17 @@ Gfx* func_800A95B4(Gfx* gfx) {
         sWorkingChunkJoinInfo =
             sWorkingSegmentChunk->trackSegmentInfo &
             (TRACK_JOIN_MASK | TRACK_CHUNK_JOIN_TRANSITION_END_MASK | TRACK_CHUNK_JOIN_TRANSITION_START_MASK);
+#ifdef PORT
+        /* While the editor draws a fork ring, only its fork path chunks are drawn. A skipped chunk drops the
+         * loaded vertices, so the next drawn chunk loads its own. */
+        if ((gGdxCourseChunkDrawMask != NULL) && !gGdxCourseChunkDrawMask[sWorkingSegmentChunk - gSegmentChunks]) {
+            D_800F8958[0].chunk = D_800F8958[1].chunk = 0;
+        } else {
+            sBackwardChunkGroupDrawFuncs[trackShape]();
+        }
+#else
         sBackwardChunkGroupDrawFuncs[trackShape]();
+#endif
 
         sWorkingSegmentChunk = sWorkingNextSegmentChunk++;
 
@@ -4615,7 +4648,17 @@ Gfx* func_800A95B4(Gfx* gfx) {
     return sCourseDisp;
 }
 
+#ifdef PORT
+static Gfx* Course_DrawRing(Gfx* gfx, s32 cameraIndex);
+
 Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
+    return gdx_course_branch_draw(Course_DrawRing(gfx, cameraIndex), cameraIndex, Course_DrawRing);
+}
+
+static Gfx* Course_DrawRing(Gfx* gfx, s32 cameraIndex) {
+#else
+Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
+#endif
     MtxF sp60;
     f32 var_fv1;
     f32 temp_fa0;
@@ -4759,6 +4802,12 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
                 }
             }
         }
+#ifdef PORT
+        /* While the fork ring is drawn, only its fork path chunks are. */
+        if ((gGdxCourseChunkDrawMask != NULL) && !gGdxCourseChunkDrawMask[chunk - gSegmentChunks]) {
+            chunk->drawState = 0;
+        }
+#endif
         chunk++;
     } while (chunk != sLastSegmentChunk);
     sLastSegmentChunk->depth = gSegmentChunks->depth;
