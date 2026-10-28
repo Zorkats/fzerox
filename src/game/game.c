@@ -49,7 +49,8 @@ void gdx_game_request_reset(void) {
 
 /* Save GP in progress (port/gdx_gp_resume.h). The record is captured where NextCourseSelect_Init
  * runs for a GP next course, restored in that same function when "Continue Cup" was taken from the
- * main menu, and cleared when a cup ends or the GP game over is quit. The codec and file live in
+ * main menu, and cleared when a new cup starts its first race, when a cup ends, or when the GP game
+ * over is quit. The codec and file live in
  * port/; this block only copies game globals in and out. */
 #define GDX_GP_RESUME_STATE_ONLY
 #include "../../../port/gdx_gp_resume.h"
@@ -162,6 +163,15 @@ void gdx_gp_resume_next_course_init(void) {
     gdx_gp_resume_capture(&s);
     if (gdx_gp_resume_save(&s) != GDX_GP_RESUME_OK) {
         /* Never leave a record from an earlier boundary behind a failed capture. */
+        gdx_gp_resume_clear();
+    }
+}
+
+/* Called from Racer_Init after it counts the race. Only the first race of a fresh cup sees 1: a
+ * retry or a resumed cup counts 2 or more. A new cup drops any earlier record here, so Continue Cup
+ * never offers an older cup; this cup's own record is written at its first next course boundary. */
+void gdx_gp_resume_on_race_start(void) {
+    if ((gGameMode == GAMEMODE_GP_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE) && (D_800E5FF0 == 1)) {
         gdx_gp_resume_clear();
     }
 }

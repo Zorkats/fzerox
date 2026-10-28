@@ -714,6 +714,8 @@ extern void gdx_single_race_begin_race(int eligible);
 extern int gdx_single_race_active(void);
 extern int gdx_single_race_finite(void);
 extern int gdx_single_race_lap_count(void);
+/* Save GP in progress (decomp/src/game/game.c): a fresh cup's first race drops an older record. */
+extern void gdx_gp_resume_on_race_start(void);
 extern int gdx_single_race_racer_count(void);
 extern int gdx_single_race_random_rival(void);
 extern void gdx_single_race_store_lap_time(int racerId, int lapIndex, int lapTime);
@@ -1854,6 +1856,7 @@ void Racer_Init(void) {
     gdx_single_race_begin_race((gGameMode == GAMEMODE_PRACTICE) && (gNumPlayers == 1) &&
                                (gTitleDemoState == TITLE_DEMO_INACTIVE));
     gTotalLapCount = gdx_single_race_lap_count();
+    gdx_gp_resume_on_race_start();
 #endif
 
     if (gNumPlayers == 1) {
