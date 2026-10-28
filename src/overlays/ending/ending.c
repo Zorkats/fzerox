@@ -48,6 +48,11 @@ s16 sThanksForPlayingFade;
 // and hangs the ceremony, with no reachable A/START exit.
 s32 sEndingThanksGateWatchdog = 0;
 bool sEndingThanksGateBypassed = false;
+
+// common.c hold-START skip, shared with the credits.
+void Skip_Reset(void);
+bool Skip_UpdateHoldStart(void);
+Gfx* Skip_DrawPrompt(Gfx* gfx);
 #endif
 s16 sTotalScrollResults;
 EndingCutsceneResults sEndingCutsceneResults[10];
@@ -312,6 +317,7 @@ void EndingCutscene_Init(void) {
 #ifdef PORT
     sEndingThanksGateWatchdog = 0;
     sEndingThanksGateBypassed = false;
+    Skip_Reset();
 #endif
 
     switch (gCupType) {
@@ -650,6 +656,13 @@ s32 EndingCutscene_UpdateState(void) {
         }
         cutsceneResults++;
     }
+#ifdef PORT
+    // Hold-START skip. The cup clear was already saved on the GP results screen, and exiting
+    // through exitState 1 keeps the stock routing below (credits or EAD demo still follow).
+    if (Skip_UpdateHoldStart()) {
+        exitState = 1;
+    }
+#endif
     if ((exitState != 0) && (gEndingFlags & ENDING_FOLLOW_WITH_CREDITS)) {
         exitState = 2;
     }
@@ -702,7 +715,12 @@ Gfx* EndingCutscene_Draw(Gfx* gfx) {
     gfx = Camera_Draw(gfx, SCISSOR_BOX_FULL_SCREEN, 0);
     gfx = Racer_Draw(gfx, 0);
     gfx = EndingCutsceneEffects_DrawPodiumRacerCharacters(gfx);
+#ifdef PORT
+    gfx = EndingCutscene_DrawScrollingResults(gfx);
+    return Skip_DrawPrompt(gfx);
+#else
     return EndingCutscene_DrawScrollingResults(gfx);
+#endif
 }
 
 Gfx* EndingCutscene_DrawScrollingResults(Gfx* gfx) {

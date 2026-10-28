@@ -4,6 +4,9 @@
 #include "fzx_course.h"
 #include "fzx_save.h"
 #include "src/overlays/ovl_i4/ovl_i4.h"
+#ifdef PORT
+#include "fzx_font.h"
+#endif
 #include ASSET_HEADER(setup_gfx.h)
 
 f32 gCharacterLastEngine[30];
@@ -190,6 +193,104 @@ void Controller_SetGlobalInputs(Controller* controller) {
     }
     gInputPressed = gInputButtonPressed | gRetriggeredButtonCurrentPressed;
 }
+
+#ifdef PORT
+// PORT hold-START skip shared by the GP ending ceremony and the credits. A skip needs a fresh
+// START press held for SKIP_HOLD_FRAMES, so a START still held from the screen before cannot
+// fire it. The prompt only shows after a button press, leaving an untouched ceremony stock.
+#define SKIP_HOLD_FRAMES 30
+#define SKIP_PROMPT_FRAMES 90
+#define SKIP_PROMPT_FADE_FRAMES 15
+
+static s32 sSkipHoldTimer;
+static bool sSkipHoldArmed;
+static s32 sSkipPromptTimer;
+
+void Skip_Reset(void) {
+    sSkipHoldTimer = 0;
+    sSkipHoldArmed = false;
+    sSkipPromptTimer = 0;
+}
+
+bool Skip_IsEnabled(void) {
+    extern int CVarGetInteger(const char* name, int defaultValue);
+
+    return CVarGetInteger("gEnhancements.Gameplay.SkippableEnding", 1) != 0;
+}
+
+// Call once per update after Controller_SetGlobalInputs(&gSharedController).
+bool Skip_UpdateHoldStart(void) {
+    if (!Skip_IsEnabled()) {
+        Skip_Reset();
+        return false;
+    }
+
+    if (gSharedController.buttonPressed != 0) {
+        sSkipPromptTimer = SKIP_PROMPT_FRAMES;
+    } else if (sSkipPromptTimer > 0) {
+        sSkipPromptTimer--;
+    }
+
+    if (gSharedController.buttonPressed & BTN_START) {
+        sSkipHoldArmed = true;
+    }
+    if (!sSkipHoldArmed || !(gSharedController.buttonCurrent & BTN_START)) {
+        sSkipHoldArmed = false;
+        sSkipHoldTimer = 0;
+        return false;
+    }
+
+    sSkipPromptTimer = SKIP_PROMPT_FRAMES;
+    if (sSkipHoldTimer < SKIP_HOLD_FRAMES) {
+        sSkipHoldTimer++;
+    }
+    return sSkipHoldTimer >= SKIP_HOLD_FRAMES;
+}
+
+extern Gfx D_8014940[];
+
+Gfx* Skip_DrawPrompt(Gfx* gfx) {
+    static char sSkipPromptStr[] = "HOLD START TO SKIP";
+    s32 alpha;
+    s32 left;
+    s32 width;
+    s32 barWidth;
+
+    if (!Skip_IsEnabled() || (sSkipPromptTimer <= 0)) {
+        return gfx;
+    }
+
+    alpha = 255;
+    if (sSkipPromptTimer < SKIP_PROMPT_FADE_FRAMES) {
+        alpha = (sSkipPromptTimer * 255) / SKIP_PROMPT_FADE_FRAMES;
+    }
+
+    width = Font_GetStringWidth(sSkipPromptStr, FONT_SET_2, 1);
+    left = (SCREEN_WIDTH - width) / 2;
+
+    gDPPipeSync(gfx++);
+    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    gSPDisplayList(gfx++, D_8014940);
+    gDPSetTextureLUT(gfx++, G_TT_NONE);
+    gDPSetCombineMode(gfx++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
+
+    gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, alpha);
+    gfx = Font_DrawString(gfx, left + 1, 219, sSkipPromptStr, 1, FONT_SET_2, 1);
+    gDPPipeSync(gfx++);
+    if (sSkipHoldTimer > 0) {
+        gDPSetPrimColor(gfx++, 0, 0, 250, 250, 0, alpha);
+    } else {
+        gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, alpha);
+    }
+    gfx = Font_DrawString(gfx, left, 218, sSkipPromptStr, 1, FONT_SET_2, 1);
+
+    if (sSkipHoldTimer > 0) {
+        barWidth = (width * sSkipHoldTimer) / SKIP_HOLD_FRAMES;
+        gfx = func_8007A440(gfx, left, 221, left + barWidth, 223, 250, 250, 0, alpha);
+    }
+    return gfx;
+}
+#endif
 
 extern u32 gGameFrameCount;
 

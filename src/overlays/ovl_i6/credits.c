@@ -1953,7 +1953,18 @@ void Credits_ObjectUpdate(void) {
 
 extern s16 D_800CCFE8;
 
+#ifdef PORT
+// common.c hold-START skip, shared with the GP ending ceremony.
+void Skip_Reset(void);
+bool Skip_IsEnabled(void);
+bool Skip_UpdateHoldStart(void);
+Gfx* Skip_DrawPrompt(Gfx* gfx);
+#endif
+
 void Credits_Init(void) {
+#ifdef PORT
+    Skip_Reset();
+#endif
     D_800CCFE8 = 3;
     Object_Init(OBJECT_FRAMEBUFFER, 0, 0, 1);
     Credits_ObjectInit(OBJECT_CREDITS_BACKGROUND, 0, 0, 1);
@@ -1965,9 +1976,21 @@ extern s32 gGameMode;
 s32 Credits_Update(void) {
 
     Controller_SetGlobalInputs(&gSharedController);
+#ifdef PORT
+    // START belongs to the hold-to-skip while it is enabled, so it no longer flips the machine
+    // set every time the player starts a hold. A still toggles it as in stock.
+    if (gInputPressed & (Skip_IsEnabled() ? BTN_A : (BTN_A | BTN_START))) {
+        sDebugCreditsOldMachines ^= 1;
+    }
+    // Stock never leaves the unskippable credits (they end on "See You Again" forever).
+    if (Skip_UpdateHoldStart()) {
+        return GAMEMODE_FLX_MAIN_MENU;
+    }
+#else
     if (gInputPressed & (BTN_A | BTN_START)) {
         sDebugCreditsOldMachines ^= 1;
     }
+#endif
     if ((gGameMode != GAMEMODE_FLX_UNSKIPPABLE_CREDITS) && (gInputPressed & BTN_B)) {
         return GAMEMODE_FLX_MAIN_MENU;
     } else {
@@ -1978,6 +2001,9 @@ s32 Credits_Update(void) {
 Gfx* Credits_Draw(Gfx* gfx) {
     Credits_ObjectUpdate();
     gfx = Credits_ObjectDraw(gfx);
+#ifdef PORT
+    gfx = Skip_DrawPrompt(gfx);
+#endif
     func_800790D4();
     return gfx;
 }
