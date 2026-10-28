@@ -22,9 +22,20 @@ typedef struct {
     /* 0x8 */ long long rem;
 } lldiv_t;
 
+#ifdef __ANDROID__
+/* Both come from Bionic here, reached through the <strings.h> that PR/os_libc.h includes on a
+ * PORT build -- and its ssize_t is a plain typedef with no guard macro to suppress, so the
+ * declarations below cannot coexist with it. See the note in libc/stddef.h.
+ *
+ * ssize_t is the only one of the two the game uses (the AudioLoad/AudioHeap size parameters),
+ * and it takes small sizes that a wider type carries unchanged. */
+#include <sys/types.h>
+#include <stddef.h>
+#else
 typedef int ssize_t;
 
 typedef long wchar_t;
+#endif
 
 ldiv_t ldiv(long num, long denom);
 lldiv_t lldiv(long long num, long long denom);
