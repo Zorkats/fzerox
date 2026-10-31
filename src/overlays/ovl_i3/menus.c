@@ -865,6 +865,16 @@ extern s16 gBestTimedLap;
 extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
+extern int gdx_single_race_result_rows(int totalLaps);              // port/gdx_single_race.c
+extern int gdx_single_race_result_first_lap(int totalLaps, int frame); // port/gdx_single_race.c
+extern int gdx_single_race_result_hold_frames(int totalLaps);       // port/gdx_single_race.c
+extern Gfx* Hud_DrawLapDigit(Gfx* gfx, s32 left, s32 top, s32 digit); // ovl_i3/hud.c
+/* A long Single Race pages its laps. gdxRows sets the layout; gdxShown can be less on the last page. */
+#define RESULTS_LAYOUT_LAPS gdxRows
+#define RESULTS_SHOWN_LAPS gdxShown
+#else
+#define RESULTS_LAYOUT_LAPS gTotalLapCount
+#define RESULTS_SHOWN_LAPS gTotalLapCount
 #endif
 
 Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
@@ -873,6 +883,13 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
     s32 top;
     s32 i;
     f32 scale = 1.0f;
+#ifdef PORT
+    s32 gdxRows = gdx_single_race_finite() ? gdx_single_race_result_rows(gTotalLapCount) : gTotalLapCount;
+    s32 gdxFirstLap = gdx_single_race_finite()
+                          ? gdx_single_race_result_first_lap(gTotalLapCount, sPlayerResultsTimer[playerIndex])
+                          : 0;
+    s32 gdxShown = ((gTotalLapCount - gdxFirstLap) < gdxRows) ? (gTotalLapCount - gdxFirstLap) : gdxRows;
+#endif
 
     gSPDisplayList(gfx++, D_80149D0);
     gDPSetCombineMode(gfx++, G_CC_MODULATEIDECALA_PRIM, G_CC_MODULATEIDECALA_PRIM);
@@ -881,8 +898,14 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
 
     left = sResultsTimesLapLeft - sTimeAttackResultsTimer;
+#ifdef PORT
+    /* Two-digit lap numbers would touch the times, so the labels move left to make room. */
+    if (gTotalLapCount >= 10) {
+        left -= 8;
+    }
+#endif
     if (left >= 0) {
-        for (i = 1; i <= gTotalLapCount; i++) {
+        for (i = 1; i <= RESULTS_SHOWN_LAPS; i++) {
             top = ((i - 1) * sResultsTimesVerticalSpacing) + sResultsTimesTop + 3;
             gSPScisTextureRectangle(gfx++, left << 2, top << 2, (s32) (left + (15.0f * scale)) << 2,
                                     (s32) (top + (11.0f * scale)) << 2, 0, 0, 0, (s32) (4096.0f / scale),
@@ -895,6 +918,23 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
 
     left += 17;
 
+#ifdef PORT
+    if ((left >= 0) && (gTotalLapCount > 5)) {
+        for (i = 1; i <= gdxShown; i++) {
+            s32 lapNumber = gdxFirstLap + i;
+
+            top = ((i - 1) * sResultsTimesVerticalSpacing) + sResultsTimesTop + 3;
+            if (gTotalLapCount >= 10) {
+                if (lapNumber >= 10) {
+                    gfx = Hud_DrawLapDigit(gfx, left, top, lapNumber / 10);
+                }
+                gfx = Hud_DrawLapDigit(gfx, left + 8, top, lapNumber % 10);
+            } else {
+                gfx = Hud_DrawLapDigit(gfx, left, top, lapNumber);
+            }
+        }
+    } else
+#endif
     if (left >= 0) {
         for (i = 1; i <= gTotalLapCount; i++) {
             top = ((i - 1) * sResultsTimesVerticalSpacing) + sResultsTimesTop + 3;
@@ -911,7 +951,7 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
 
     left = sResultsTimesLapLeft - sTimeAttackResultsTimer;
-    top = (gTotalLapCount * sResultsTimesVerticalSpacing) + (sResultsTimesVerticalSpacing / 2) + sResultsTimesTop;
+    top = (RESULTS_LAYOUT_LAPS * sResultsTimesVerticalSpacing) + (sResultsTimesVerticalSpacing / 2) + sResultsTimesTop;
     if (left > 0) {
         gSPScisTextureRectangle(gfx++, left << 2, top << 2, (s32) (left + (23.0f * scale)) << 2,
                                 (s32) (top + (15.0f * scale)) << 2, 0, 0, 0, (s32) (1024.0f / scale),
@@ -922,7 +962,7 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
     gDPLoadTextureBlock(gfx++, aTimerSymbolsTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 8, 224, 0, G_TX_NOMIRROR | G_TX_WRAP,
                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
 
-    for (lap = 0; lap < gTotalLapCount; lap++) {
+    for (lap = 0; lap < RESULTS_SHOWN_LAPS; lap++) {
         top = (lap * sResultsTimesVerticalSpacing) + sResultsTimesTop;
         if (sPlayerResultsTimer[playerIndex] < ((sResultsTimesStartLapSpacing * lap) + sResultsTimesStartTopOffset)) {
             top += (((sResultsTimesStartLapSpacing * lap) + sResultsTimesStartTopOffset) -
@@ -947,7 +987,8 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
             /* A finite Single Race can have more laps than Racer.lapTimes holds; read its own table. */
             gfx = Hud_DrawTimerScisThousandths(
                 gfx,
-                gdx_single_race_active() ? gdx_single_race_get_lap_time(playerIndex, lap) : gRacers[playerIndex].lapTimes[lap],
+                gdx_single_race_active() ? gdx_single_race_get_lap_time(playerIndex, gdxFirstLap + lap)
+                                          : gRacers[playerIndex].lapTimes[lap],
                 sResultsTimesLapLeft + sResultsTimesLapLeftFromLap + sTimeAttackResultsTimer, top, 1.0f);
 #else
             gfx = Hud_DrawTimerScisThousandths(
@@ -957,9 +998,13 @@ Gfx* Menus_DrawRaceResultsTimes(Gfx* gfx, s32 playerIndex) {
         }
     }
 
-    top = (gTotalLapCount * sResultsTimesVerticalSpacing) + (sResultsTimesVerticalSpacing / 2) + sResultsTimesTop;
+    top = (RESULTS_LAYOUT_LAPS * sResultsTimesVerticalSpacing) + (sResultsTimesVerticalSpacing / 2) + sResultsTimesTop;
+#ifdef PORT
+    if (sPlayerResultsTimer[playerIndex] < ((sResultsTimesStartLapSpacing * gdxRows) + sResultsTimesStartTopOffset)) {
+#else
     if (sPlayerResultsTimer[playerIndex] < ((sResultsTimesStartLapSpacing * lap) + sResultsTimesStartTopOffset)) {
-        top += (((sResultsTimesStartLapSpacing * gTotalLapCount) + sResultsTimesStartTopOffset) -
+#endif
+        top += (((sResultsTimesStartLapSpacing * RESULTS_LAYOUT_LAPS) + sResultsTimesStartTopOffset) -
                 sPlayerResultsTimer[playerIndex]) *
                sResultsTimesSpeed;
     }
@@ -1125,7 +1170,12 @@ Gfx* Menus_DrawGpResultsPortraitsTimes(Gfx* gfx) {
     gfx = Menu_DrawGpResultsCharacterPortraits(gfx);
     sResultsTimesLapLeft = 196;
     sResultsTimesTop = 16;
+#ifdef PORT
+    /* Tighter rows keep five laps and the total above the portraits. */
+    sResultsTimesVerticalSpacing = (gTotalLapCount > 3) ? 17 : 24;
+#else
     sResultsTimesVerticalSpacing = 24;
+#endif
     sResultsTimesLapLeftFromLap = 30;
     sResultsTimesStartTopOffset = 30;
     sResultsTimesStartLapSpacing = 10;
@@ -3942,6 +3992,14 @@ Gfx* Menus_DrawCourseName(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
     return gfx;
 }
 
+#ifdef PORT
+/* A ROM hack may reword this label. See port/gdx_game_text.h. */
+extern const char* gGdxTextTimeAttack;
+#define MENUS_TIME_ATTACK_STR gGdxTextTimeAttack
+#else
+#define MENUS_TIME_ATTACK_STR "TIME ATTACK"
+#endif
+
 Gfx* Menus_DrawTimeAttackIntroDisplay(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
     s32 timeAttackStringWidth;
     s32 ulx;
@@ -3949,7 +4007,7 @@ Gfx* Menus_DrawTimeAttackIntroDisplay(Gfx* gfx, s32 left, s32 top, s32 paddingSi
     s32 lrx;
     s32 lry;
 
-    timeAttackStringWidth = Font_GetStringWidth("TIME ATTACK", FONT_SET_3, 1);
+    timeAttackStringWidth = Font_GetStringWidth(MENUS_TIME_ATTACK_STR, FONT_SET_3, 1);
 
     gDPPipeSync(gfx++);
 
@@ -3977,11 +4035,11 @@ Gfx* Menus_DrawTimeAttackIntroDisplay(Gfx* gfx, s32 left, s32 top, s32 paddingSi
                                (timeAttackStringWidth / 2) + left + 7, top + 3, 0, 150, 0, 200);
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
-    gfx = Font_DrawString(gfx, (left - (Font_GetStringWidth("TIME ATTACK", FONT_SET_3, 1) / 2)) + 2, top + 2,
-                          "TIME ATTACK", 1, FONT_SET_3, 0);
+    gfx = Font_DrawString(gfx, (left - (Font_GetStringWidth(MENUS_TIME_ATTACK_STR, FONT_SET_3, 1) / 2)) + 2, top + 2,
+                          MENUS_TIME_ATTACK_STR, 1, FONT_SET_3, 0);
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 250, 250, 0, 255);
-    gfx = Font_DrawString(gfx, left - (Font_GetStringWidth("TIME ATTACK", FONT_SET_3, 1) / 2), top, "TIME ATTACK", 1,
+    gfx = Font_DrawString(gfx, left - (Font_GetStringWidth(MENUS_TIME_ATTACK_STR, FONT_SET_3, 1) / 2), top, MENUS_TIME_ATTACK_STR, 1,
                           FONT_SET_3, 0);
     gDPPipeSync(gfx++);
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
@@ -6016,7 +6074,12 @@ Gfx* Menus_Draw(Gfx* gfx) {
                         gfx = Menus_DrawCourseName(gfx, 160, 200, 0);
                         gfx = Menus_DrawGpResultsPortraitsTimes(gfx);
                         gfx = Menus_DrawMaxSpeed(gfx, 0);
+#ifdef PORT
+                        if ((sPlayerResultsTimer[playerIndex] >=
+                             (gdx_single_race_finite() ? gdx_single_race_result_hold_frames(gTotalLapCount) : 600)) ||
+#else
                         if ((sPlayerResultsTimer[playerIndex] >= 600) ||
+#endif
                             (gControllers[gPlayerControlPorts[0]].buttonPressed & (BTN_A | BTN_START))) {
                             sGpRaceResultsState = GP_RESULTS_RACE_RESULT;
                             sPlayerResultsTimer[playerIndex] = 0;

@@ -522,6 +522,7 @@ extern Gfx D_80149D0[];
 extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
+extern u8 aLapCounterExtraDigitsTex[];                              // port/gdx_lap_digits_tex.c
 #endif
 
 Gfx* Hud_DrawTimeRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
@@ -1046,6 +1047,29 @@ Gfx* Hud_DrawLapRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     return gfx;
 }
 
+#ifdef PORT
+/* aLapCounterSymbolsTex stops at 5, so 6, 7, 8, 9 and 0 come from a second texture, in that order.
+   The caller has aLapCounterSymbolsTex loaded, and it is loaded again on return. */
+Gfx* Hud_DrawLapDigit(Gfx* gfx, s32 left, s32 top, s32 digit) {
+    if ((digit >= 1) && (digit <= 5)) {
+        gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 11) << 2, 0, 0, (digit * 12) << 5,
+                            1 << 12, 1 << 10);
+        return gfx;
+    }
+    gDPPipeSync(gfx++);
+    gDPLoadTextureBlock(gfx++, aLapCounterExtraDigitsTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 8, 60, 0,
+                        G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+                        G_TX_NOLOD);
+    gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 11) << 2, 0, 0,
+                        (((digit == 0) ? 4 : (digit - 6)) * 12) << 5, 1 << 12, 1 << 10);
+    gDPPipeSync(gfx++);
+    gDPLoadTextureBlock(gfx++, aLapCounterSymbolsTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 8, 72, 0,
+                        G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+                        G_TX_NOLOD);
+    return gfx;
+}
+#endif
+
 Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 top;
     s32 left;
@@ -1078,6 +1102,28 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     top = sLapPositions[numPlayersIndex][playerIndex][1];
 
     top += 14;
+
+#ifdef PORT
+    /* A Single Race can run up to 99 laps. Two-digit counts keep a tens column for the lap number,
+       so the slash holds still as the race passes lap 10. */
+    if (gTotalLapCount > 5) {
+        if (gTotalLapCount >= 10) {
+            if (lap >= 10) {
+                gfx = Hud_DrawLapDigit(gfx, left, top, lap / 10);
+            }
+            left += 8;
+        }
+        gfx = Hud_DrawLapDigit(gfx, left, top, lap % 10);
+        left += 8;
+        gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 11) << 2, 0, 0, 0, 1 << 12, 1 << 10);
+        left += 8;
+        if (gTotalLapCount >= 10) {
+            gfx = Hud_DrawLapDigit(gfx, left, top, gTotalLapCount / 10);
+            left += 8;
+        }
+        return Hud_DrawLapDigit(gfx, left, top, gTotalLapCount % 10);
+    }
+#endif
 
     // Lap Number
 
@@ -1777,6 +1823,13 @@ Gfx* Hud_UpdateRaceIntervalInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex, 
             for (i = 0; i < completedLaps; i++) {
                 sLeadRivalRaceTime[playerIndex] += gFastestGhostRacer->ghost->lapTimes[i];
             }
+#ifdef PORT
+        } else if (gdx_single_race_finite()) {
+            /* Racer.lapTimes holds three laps; a finite Single Race keeps every lap in its own table. */
+            for (i = 0; i < completedLaps; i++) {
+                sLeadRivalRaceTime[playerIndex] += gdx_single_race_get_lap_time(leadRivalRacer->id, i);
+            }
+#endif
         } else {
             for (i = 0; i < completedLaps; i++) {
                 sLeadRivalRaceTime[playerIndex] += leadRivalRacer->lapTimes[i];
@@ -1784,9 +1837,21 @@ Gfx* Hud_UpdateRaceIntervalInfo(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex, 
         }
 
         raceTime = 0;
+#ifdef PORT
+        if (gdx_single_race_finite()) {
+            for (i = 0; i < completedLaps; i++) {
+                raceTime += gdx_single_race_get_lap_time(playerIndex, i);
+            }
+        } else {
+            for (i = 0; i < completedLaps; i++) {
+                raceTime += gRacers[playerIndex].lapTimes[i];
+            }
+        }
+#else
         for (i = 0; i < completedLaps; i++) {
             raceTime += gRacers[playerIndex].lapTimes[i];
         }
+#endif
 
         sPlayerLeadInterval[playerIndex] = raceTime - sLeadRivalRaceTime[playerIndex];
 

@@ -17,6 +17,13 @@
 #define SEGMENT_CHUNK_COUNT 0x300
 #endif
 
+#ifdef PORT
+// A group takes at least one chunk, so this many can never overflow. The original limit drops the
+// whole track for the frame on long Course Edit courses with many separate pieces in view.
+#undef SEGMENT_CHUNK_GROUP_COUNT
+#define SEGMENT_CHUNK_GROUP_COUNT (SEGMENT_CHUNK_COUNT + 1)
+#endif
+
 typedef struct unk_800CF528 {
     void* texture; // PORT: was s32; a pointer keeps asset symbols valid static initializers, untruncated on 64-bit
     f32 textureScale;
@@ -4899,6 +4906,17 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
 
     gSPDisplayList(sCourseDisp++, D_8014008);
     gSPDisplayList(sCourseDisp++, D_8014078);
+#ifdef PORT
+    /* D_8014008 writes Z without comparing it (render mode 0xFA006220), so the track relies on the furthest
+     * first group sort below. A track running inside a tube cannot be sorted that way: the order flips between
+     * frames and the outer tube flickers over the road. Comparing Z resolves the overlap per pixel. */
+    {
+        extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+        if (CVarGetInteger("gEnhancements.Graphics.TrackDepthTest", 1)) {
+            gDPSetRenderMode(sCourseDisp++, 0xFA006220 | Z_CMP, 0);
+        }
+    }
+#endif
     gSPFogPosition(sCourseDisp++, sCourseFogStartDistance, 1000);
 #ifdef PORT
     /* Same diagnostic toggle as the backward-chunk pass above (GDX_RAIL_COLOR_TEST). */

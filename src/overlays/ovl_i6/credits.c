@@ -837,6 +837,14 @@ Gfx* Credits_SeeYouAgainDraw(Gfx* gfx, Object* seeYouAgainObj) {
 }
 
 #ifdef NON_MATCHING
+#ifdef PORT
+/* A ROM hack may reword this header. See port/gdx_game_text.h. */
+extern const char* gGdxTextCreditsStaff;
+#define CREDITS_STAFF_STR gGdxTextCreditsStaff
+#else
+#define CREDITS_STAFF_STR "staff"
+#endif
+
 Gfx* Credits_IntroDraw(Gfx* gfx, Object* introObj) {
     s32 temp_a0;
     s32 temp_t1;
@@ -895,9 +903,9 @@ Gfx* Credits_IntroDraw(Gfx* gfx, Object* introObj) {
         gfx = Font_DrawScaledString(
             gfx, (s32) (160.0f - (((f32) Font_GetStringWidth("f-zero x", FONT_SET_1, 0) * scale) / 2)),
             D_i6_8011DFAC + D_i6_8011DFB0, "f-zero x", 0, FONT_SET_1, 1, scale, scale);
-        gfx = Font_DrawScaledString(gfx,
-                                    (s32) (160.0f - (((f32) Font_GetStringWidth("staff", FONT_SET_1, 0) * scale) / 2)),
-                                    D_i6_8011DFAC + D_i6_8011DFB4, "staff", 0, FONT_SET_1, 1, scale, scale);
+        gfx = Font_DrawScaledString(
+            gfx, (s32) (160.0f - (((f32) Font_GetStringWidth(CREDITS_STAFF_STR, FONT_SET_1, 0) * scale) / 2)),
+            D_i6_8011DFAC + D_i6_8011DFB4, CREDITS_STAFF_STR, 0, FONT_SET_1, 1, scale, scale);
     } else if (INTRO_TIMER(introObj) > 120) {
         var_t2 = (INTRO_TIMER(introObj) * 3) - 0x168;
         if (var_t2 > 255) {
@@ -915,8 +923,8 @@ Gfx* Credits_IntroDraw(Gfx* gfx, Object* introObj) {
             gfx, (s32) (160.0f - (((f32) Font_GetStringWidth("f-zero x", FONT_SET_1, 0) * scale) / 2)),
             (D_i6_8011DFAC + D_i6_8011DFB0) - (scale - 1.0) * 20.0, "f-zero x", 0, FONT_SET_1, 1, scale, scale);
         gfx = Font_DrawScaledString(
-            gfx, (s32) (160.0f - (((f32) Font_GetStringWidth("staff", FONT_SET_1, 0) * scale) / 2)),
-            (D_i6_8011DFAC + D_i6_8011DFB4) + (scale - 1.0) * 20.0, "staff", 0, FONT_SET_1, 1, scale, scale);
+            gfx, (s32) (160.0f - (((f32) Font_GetStringWidth(CREDITS_STAFF_STR, FONT_SET_1, 0) * scale) / 2)),
+            (D_i6_8011DFAC + D_i6_8011DFB4) + (scale - 1.0) * 20.0, CREDITS_STAFF_STR, 0, FONT_SET_1, 1, scale, scale);
     }
     return gfx;
 }

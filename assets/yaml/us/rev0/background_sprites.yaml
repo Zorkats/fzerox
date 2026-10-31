@@ -1,0 +1,22 @@
+# background_sprites.yaml -- the skyline sprites each course places around the horizon (US rev0).
+#
+# sBackgroundSpriteCourseInitData is ordinary compiled C, so until this recipe existed no archive
+# could carry it and a ROM hack's own skylines were unreachable: the port drew the retail skyline
+# for each course slot no matter which hack was mounted.
+#
+# The factory (torch/src/factories/fzerox/BackgroundSpritesFactory.cpp) resolves the pointer table
+# into one binary resource, which the port applies over its compiled-in tables at boot
+# (port/gdx_bg_sprites.c). A vanilla extraction decodes to exactly the tables background.c declares,
+# so mounting order alone decides the outcome: a hack archive is mounted last and wins.
+#
+# `bias` converts a stored RAM address back to a ROM offset (romOffset = ramAddress - bias).
+#
+# NOTE ON THE ENDING TABLE. sBackgroundSpriteInitEnding is reached directly by code rather than
+# through this pointer table, so it is not extracted and keeps its compiled-in values.
+
+gBackgroundSprites:
+  type: FZX:BG_SPRITES
+  offset: 0xD4128   # sBackgroundSpriteCourseInitData
+  symbol: gBackgroundSprites
+  count: 24
+  bias: 0x8006CD30

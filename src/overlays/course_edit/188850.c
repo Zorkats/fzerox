@@ -28,6 +28,9 @@ static f32 sGdxCourseEditMouseMoveOffsetX;
 static f32 sGdxCourseEditMouseMoveOffsetY;
 static f32 sGdxCourseEditMouseMoveOffsetZ;
 
+// Degrees the Bank tool snaps to, cycled by the grid icon. 0 is off.
+static s32 sGdxCourseEditBankSnapStep;
+
 static void gdx_course_edit_set_scalar_target(s32 moveOption, s32 targetOffset);
 static void gdx_course_edit_restore_mouse_drag(void);
 
@@ -1848,6 +1851,25 @@ void func_xk2_800DADEC(void) {
         return;
     }
 
+#ifdef PORT
+    if (sGdxCourseEditBankSnapStep != 0) {
+        // One step per push: repeating while held would spin through steps this large.
+        if (func_xk1_8002DAD4() == 1) {
+            for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+                if (D_80128690[i].unk_08 == 0) {
+                    continue;
+                }
+
+                COURSE_CONTEXT()->courseData.bankAngle[i] = gdx_course_edit_bank_snap_next(
+                    COURSE_CONTEXT()->courseData.bankAngle[i], sGdxCourseEditBankSnapStep, temp_s3);
+            }
+        }
+        func_80074CE4(gCurrentCourseInfo);
+        D_xk2_800F7040 = 3;
+        return;
+    }
+#endif
+
     if (func_xk1_8002DAD4() == 1) {
         if (temp_s3 < 0) {
             for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
@@ -2617,6 +2639,8 @@ static void gdx_course_edit_set_scalar_target(s32 moveOption, s32 targetOffset) 
                 (D_8010CF50.bankAngle[i] + deltaAngle + 3600) % 360;
             COURSE_CONTEXT()->courseData.bankAngle[i] =
                 (COURSE_CONTEXT()->courseData.bankAngle[i] / 3) * 3;
+            COURSE_CONTEXT()->courseData.bankAngle[i] = gdx_course_edit_bank_snap_nearest(
+                COURSE_CONTEXT()->courseData.bankAngle[i], sGdxCourseEditBankSnapStep);
         }
         func_80074CE4(gCurrentCourseInfo);
         D_xk2_800F7040 = 3;
@@ -3815,7 +3839,59 @@ void func_xk2_800DE758(void) {
 
 extern u16* gCourseEditIconTextures[];
 
+#ifdef PORT
+extern u8 aCourseEditBank45IconTex[];
+extern u8 aCourseEditBank90IconTex[];
+extern u8 aCourseEditBank180IconTex[];
+
+// While the Bank tool is active the grid icon is the bank snap button. The point grid keeps its state
+// for the other tools, and this is the only caller that touches the icon, so it is safe to refresh it.
+static bool gdx_course_edit_update_bank_snap_icon(void) {
+    if ((gCreateOption != CREATE_OPTION_POINT) || (gMoveOption != MOVE_OPTION_BANK)) {
+        gCourseEditIconTextures[2] = D_8076C968 ? aCourseEditGoldGridAlignIconTex : aCourseEditGridAlignIconTex;
+        return false;
+    }
+    if ((D_80119720->buttonPressed & BTN_A) && (D_800D6CA0.unk_00 != 1) && (gCourseEditHighlightedIconIndex == 2)) {
+        Audio_TriggerSystemSE(NA_SE_36);
+        switch (sGdxCourseEditBankSnapStep) {
+            case 0:
+                sGdxCourseEditBankSnapStep = 45;
+                break;
+            case 45:
+                sGdxCourseEditBankSnapStep = 90;
+                break;
+            case 90:
+                sGdxCourseEditBankSnapStep = 180;
+                break;
+            default:
+                sGdxCourseEditBankSnapStep = 0;
+                break;
+        }
+    }
+    switch (sGdxCourseEditBankSnapStep) {
+        case 45:
+            gCourseEditIconTextures[2] = (u16*) aCourseEditBank45IconTex;
+            break;
+        case 90:
+            gCourseEditIconTextures[2] = (u16*) aCourseEditBank90IconTex;
+            break;
+        case 180:
+            gCourseEditIconTextures[2] = (u16*) aCourseEditBank180IconTex;
+            break;
+        default:
+            gCourseEditIconTextures[2] = aCourseEditGridAlignIconTex;
+            break;
+    }
+    return true;
+}
+#endif
+
 void func_xk2_800DE8D0(void) {
+#ifdef PORT
+    if (gdx_course_edit_update_bank_snap_icon()) {
+        return;
+    }
+#endif
 
     if (D_80119720->buttonPressed & BTN_A) {
         if ((D_800D6CA0.unk_00 == 1) || (gCourseEditHighlightedIconIndex != 2)) {

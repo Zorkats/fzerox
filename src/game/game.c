@@ -333,6 +333,11 @@ void Game_Init(void) {
      * retail one matches -- this replaces the first 24 names, subtitles and BGM ids with the
      * ones the ROM actually shipped. See port/gdx_course_strings.h. */
     { extern void gdx_course_strings_apply(void); gdx_course_strings_apply(); }
+    /* Same idea for the skyline sprites each course places on its horizon. See
+     * port/gdx_bg_sprites.h. */
+    { extern void gdx_bg_sprites_apply(void); gdx_bg_sprites_apply(); }
+    /* And for the menu, ending and credits text. See port/gdx_game_text.h. */
+    { extern void gdx_game_text_apply(void); gdx_game_text_apply(); }
 #endif
 #ifdef EXPANSION_KIT
     DDSave_LoadBaseCourses();

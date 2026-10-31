@@ -1,0 +1,42 @@
+# game_text.yaml -- menu, ending and credits text compiled into the game's code (US rev0).
+#
+# This text is ordinary compiled C, so until this recipe existed no archive could carry it and a ROM
+# hack's own wording was unreachable: the port drew the retail text no matter which hack was mounted.
+#
+# The factory (torch/src/factories/fzerox/GameTextFactory.cpp) resolves everything below into one
+# binary resource, which the port applies over its compiled-in text at boot (port/gdx_game_text.c).
+# A vanilla extraction decodes to exactly the text the decomp declares, so mounting order alone
+# decides the outcome: a hack archive is mounted last and wins.
+#
+# Tables are arrays of pointers. `bias` converts a stored RAM address back to a ROM offset
+# (romOffset = ramAddress - bias).
+#
+# Single strings have no pointer table. The compiler emitted one copy of a literal per use, so
+# TIME ATTACK has five ROM slots and "staff" has four. The port draws one string for all of them, so
+# only the first slot of each is read here.
+
+gGameText:
+  type: FZX:GAME_TEXT
+  symbol: gGameText
+  difficulty_names:
+    offset: 0xD2188   # gDifficultyNames
+    count: 4
+    bias: 0x8006CD30
+  cup_names:
+    offset: 0xF0070   # sCupNames, the ending screen's. The cup select menu uses textures.
+    count: 6
+    bias: 0x80059FA0
+  credits_roles:
+    offset: 0xE8D90   # gCreditsAttributions
+    count: 31
+    bias: 0x80035EE0
+  credits_names:
+    offset: 0xE8E0C   # gCreditsNames
+    count: 36
+    bias: 0x80035EE0
+  ending_message:
+    offset: 0xF0088   # sThanksForPlayingStr
+  time_attack:
+    offset: 0xD448C   # Menus_DrawTimeAttackIntroDisplay
+  credits_staff:
+    offset: 0xE971C   # Credits_IntroDraw
