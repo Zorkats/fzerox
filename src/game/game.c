@@ -338,6 +338,8 @@ void Game_Init(void) {
     { extern void gdx_bg_sprites_apply(void); gdx_bg_sprites_apply(); }
     /* And for the menu, ending and credits text. See port/gdx_game_text.h. */
     { extern void gdx_game_text_apply(void); gdx_game_text_apply(); }
+    /* The lap digits past 5 are composed from the mounted atlas. See port/gdx_lap_digits.h. */
+    { extern void gdx_lap_digits_apply(void); gdx_lap_digits_apply(); }
 #endif
 #ifdef EXPANSION_KIT
     DDSave_LoadBaseCourses();

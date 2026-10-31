@@ -522,7 +522,7 @@ extern Gfx D_80149D0[];
 extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
-extern u8 aLapCounterExtraDigitsTex[];                              // port/gdx_lap_digits_tex.c
+extern u8 aLapCounterExtraDigitsTex[];                              // port/gdx_lap_digits.c
 #endif
 
 Gfx* Hud_DrawTimeRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
