@@ -92,6 +92,8 @@ typedef enum LevelSfxId {
     /* 11 */ NA_LEVEL_SE_11,
 #ifdef EXPANSION_KIT
     /* 12 */ NA_LEVEL_SE_LAVA, // reuses the NA_LEVEL_SE_4 sample; distinct freqScale gives it a different voice
+    // Same sample again. Numbered past the range the audio code reserves for 2P and MP variants (id + 10, id + 20).
+    /* 40 */ NA_LEVEL_SE_MAGNET = 40,
 #endif
 } LevelSfxId;
 
@@ -299,5 +301,7 @@ typedef enum AudioPauseState {
 
 #define LEVEL_SE_2P(sfxId) ((sfxId) + 10)
 #define LEVEL_SE_MP(sfxId) ((sfxId) + 20)
+// A channel IO port the level SE scripts never touch. Set to 1, the channel's layers skip portamento.
+#define LEVEL_SE_IO_HOLD_PITCH 7
 
 #endif // SFX_H

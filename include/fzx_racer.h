@@ -21,10 +21,19 @@ typedef enum CourseEffects {
     COURSE_EFFECT_ICE,
 #ifdef EXPANSION_KIT
     COURSE_EFFECT_LAVA,
+    COURSE_EFFECT_MAGNET_LEFT,
+    COURSE_EFFECT_MAGNET_RIGHT,
 #endif
 } CourseEffects;
 
 #define COURSE_EFFECT_MASK 0xF
+
+#ifdef EXPANSION_KIT
+#define COURSE_EFFECT_IS_MAGNET(effect) \
+    (((effect) == COURSE_EFFECT_MAGNET_LEFT) || ((effect) == COURSE_EFFECT_MAGNET_RIGHT))
+// How far from the road edge the rails sit.
+#define MAGNET_STRIP_WIDTH 40.0f
+#endif
 
 #define RACER_STATE_COLLISION_RECOIL (1 << 13)
 #define RACER_STATE_SPINNING_OUT (1 << 14)
@@ -46,6 +55,7 @@ typedef enum CourseEffects {
 #define RACER_STATE_ACTIVE (1 << 30)
 #define RACER_STATE_FLAGS_80000000 (1 << 31)
 
+#define RACER_SE_FLAGS_MAGNET (1 << 3)
 #define RACER_SE_FLAGS_LAVA (1 << 4)
 #define RACER_SE_FLAGS_ICE (1 << 5)
 #define RACER_SE_FLAGS_DRIFT_SLIDE (1 << 6)

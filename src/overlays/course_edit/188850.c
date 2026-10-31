@@ -88,15 +88,15 @@ s32 D_xk2_800F684C = 0;
 
 s32 D_xk2_800F6850[] = { 0, 1, 2, 4 };
 
-// Pit/lava side masks: bit 1 = middle, bit 2 = left, bit 4 = right, bit 8 = lava.
-s32 D_xk2_800F6860[] = { 0, 6, 2, 4, 1, 0x0E, 0x0A, 0x0C, 0x09 };
+// Pit strip side masks: bit 1 = middle, bit 2 = left, bit 4 = right, bit 8 = lava, bit 0x10 = magnet.
+s32 D_xk2_800F6860[] = { 0, 6, 2, 4, 1, 0x0E, 0x0A, 0x0C, 0x09, 0x12, 0x14 };
 
 s32 D_xk2_800F6874[] = { 0, 6, 2, 4, 1 };
 
 s32 D_xk2_800F6888[] = { 0, 6, 2, 4, 1 };
 
-// Reverse of D_xk2_800F6860: masks without bit 8 are heal, masks with bit 8 are lava.
-s32 D_xk2_800F689C[] = { -1, 3, 1, -1, 2, -1, 0, -1, -1, 7, 5, -1, 6, -1, 4 };
+// Reverse of D_xk2_800F6860: no type bit is heal, bit 8 is lava, bit 0x10 is magnet.
+s32 D_xk2_800F689C[] = { -1, 3, 1, -1, 2, -1, 0, -1, -1, 7, 5, -1, 6, -1, 4, -1, -1, -1, 8, -1, 9 };
 
 s32 D_xk2_800F68B8[] = { -1, 0, 1, -1, 2, -1, -1 };
 

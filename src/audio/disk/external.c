@@ -1942,12 +1942,15 @@ void Audio_LevelSEStart(u8 playerIndex, u8 sfxId) {
 
     seSampleId = sfxId;
 #ifdef EXPANSION_KIT
-    // Lava must share the NA_LEVEL_SE_4 instrument because the cart/disk soundfont tables are frozen
-    // (a new sample would shift ROM bank offsets / break decomp asset parity). The per-tick scaler
-    // below still gives it a lower, harsher voice than the pit-heal loop.
-    if (sfxId == NA_LEVEL_SE_LAVA) {
+    // Lava and magnets must share the NA_LEVEL_SE_4 instrument because the cart/disk soundfont tables are
+    // frozen (a new sample would shift ROM bank offsets / break decomp asset parity). The per-tick scaler
+    // below still gives each its own voice, apart from the pit-heal loop.
+    if ((sfxId == NA_LEVEL_SE_LAVA) || (sfxId == NA_LEVEL_SE_MAGNET)) {
         seSampleId = NA_LEVEL_SE_4;
     }
+    // That script drops 9 semitones and sweeps back up about every 2 seconds. A pit stay rarely lasts long
+    // enough to hear it repeat, but a magnet does, so a magnet holds the note instead.
+    AUDIOCMD_CHANNEL_SET_IO(0, playerIndex + 6, LEVEL_SE_IO_HOLD_PITCH, sfxId == NA_LEVEL_SE_MAGNET);
 #endif
 
     if (sActivePlayerLevelSE[playerIndex][0] == NA_LEVEL_SE_NONE) {
@@ -2467,6 +2470,12 @@ void func_807447CC(u8 playerId) {
     sChannelVolume[playerId + 2] = volumeScale;
 }
 
+#ifdef EXPANSION_KIT
+#define MAGNET_HUM_PERIOD 16
+
+static u8 sMagnetHumTick[4];
+#endif
+
 void func_80744BDC(u8 playerIndex) {
     f32 freqScale;
     f32 volumeScale;
@@ -2517,6 +2526,16 @@ void func_80744BDC(u8 playerIndex) {
             volumeScale = 1.0f;
             freqScale = 0.78f; // Lava: same instrument as the pit loop, pitched down for a heavier drain
             break;
+#ifdef EXPANSION_KIT
+        case NA_LEVEL_SE_MAGNET:
+            // Same instrument again, pitched up and wobbling, so a pull can't be mistaken for pit or lava.
+            sMagnetHumTick[playerIndex] = (sMagnetHumTick[playerIndex] + 1) % MAGNET_HUM_PERIOD;
+            volumeScale = 1.0f;
+            freqScale = (sMagnetHumTick[playerIndex] < (MAGNET_HUM_PERIOD / 2))
+                            ? (1.25f + (sMagnetHumTick[playerIndex] * (0.5f / MAGNET_HUM_PERIOD)))
+                            : (1.75f - (sMagnetHumTick[playerIndex] * (0.5f / MAGNET_HUM_PERIOD)));
+            break;
+#endif
         case 5:
         case 15:
         case 25:

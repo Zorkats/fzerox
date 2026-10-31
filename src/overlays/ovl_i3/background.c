@@ -1246,6 +1246,13 @@ Gfx* Background_Draw(Gfx* gfx, s32 cameraIndex, s32 scissorBoxType) {
 
 extern s16 gPlayer1OverallPosition;
 extern s32 gCupType;
+#ifdef PORT
+// port/gdx_xcup_random.c: an X Cup slot racing a real course uses that course's background sprites.
+extern int gdx_xcup_real_course(int courseIndex);
+#define BACKGROUND_COURSE() gdx_xcup_real_course(gCourseIndex)
+#else
+#define BACKGROUND_COURSE() gCourseIndex
+#endif
 extern GfxPool D_8024DCE0[];
 extern bool gInCourseEditTestRun;
 
@@ -1275,10 +1282,10 @@ void Background_InitBackgroundSprites(void) {
     inCourseEditTestRun = false;
 #endif
 
-    switch (Background_SelectSpriteSelection(gCourseIndex, gVenueType, inCourseEditTestRun,
+    switch (Background_SelectSpriteSelection(BACKGROUND_COURSE(), gVenueType, inCourseEditTestRun,
                                              gPlayer1OverallPosition)) {
         case BACKGROUND_SPRITE_SELECTION_COURSE:
-            bgSpriteInitData = sBackgroundSpriteCourseInitData[gCourseIndex];
+            bgSpriteInitData = sBackgroundSpriteCourseInitData[BACKGROUND_COURSE()];
             break;
         case BACKGROUND_SPRITE_SELECTION_RANDOM:
             j = Math_Rand1() % 7;

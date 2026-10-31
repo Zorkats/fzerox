@@ -756,6 +756,13 @@ s32 AudioSeq_SeqLayerProcessScriptStep2(SequenceLayer* layer) {
 
                 if (PORTAMENTO_IS_SPECIAL(layer->portamento)) {
                     layer->portamentoTime = *(state->pc++);
+#ifdef PORT
+                    /* See Audio_LevelSEStart. The NA_LEVEL_SE_4 script only uses this form of portamento. */
+                    if ((seqPlayer == &gAudioCtx.seqPlayers[0]) &&
+                        (channel->seqScriptIO[LEVEL_SE_IO_HOLD_PITCH] == 1)) {
+                        layer->portamento.mode = PORTAMENTO_MODE_OFF;
+                    }
+#endif
                     break;
                 }
 

@@ -250,6 +250,161 @@ extern s32 D_800DCCFC;
 #define VERTEX_MODIFIED_ST(s, t) ((((s) << 15) & 0xFFFF0000) | ((t) &0xFFFF))
 #define VERTEX_MODIFIED_ST2(s, t) ((((s) << 16) & 0xFFFF0000) | ((t) &0xFFFF))
 
+#ifdef PORT
+// A magnet strip draws as two thin rails lying on the road at its inner edge, in place of the strip's
+// own surface. Each rail adds one quad per strip section, with four vertices of its own.
+#define MAGNET_RAIL_LINE_WIDTH 4.0f
+#define MAGNET_RAIL_GAP 6.0f
+#define MAGNET_RAIL_TOTAL_WIDTH ((MAGNET_RAIL_LINE_WIDTH * 2.0f) + MAGNET_RAIL_GAP)
+#define MAGNET_RAIL_COUNT 2
+// The rail texture runs along a rail in S and across it in T. S wraps, so its bright band repeats.
+#define MAGNET_RAIL_TEX_LENGTH 16
+#define MAGNET_RAIL_TEX_WIDTH 4
+// World units per texel along a rail, which puts a pulse every 200 units.
+#define MAGNET_RAIL_UNITS_PER_TEXEL 12.5f
+// terrainEffectVtx holds 0x800 vertices at two per section, so this fits every section a course can have.
+#define MAGNET_RAIL_MAX_VTX ((0x800 / 2) * MAGNET_RAIL_COUNT * 4)
+#define MAGNET_RAIL_BATCH_VTX 32
+
+static Vtx sMagnetRailVtx[2][MAGNET_RAIL_MAX_VTX];
+static s32 sMagnetRailVtxCount[2];
+static ALIGNED8 u16 sMagnetRailTex[MAGNET_RAIL_TEX_WIDTH * MAGNET_RAIL_TEX_LENGTH];
+static bool sMagnetRailTexReady = false;
+static Vec3f sMagnetRailLastPos[MAGNET_RAIL_COUNT * 2];
+static f32 sMagnetRailPulseS;
+
+extern u32 gGameFrameCount;
+
+// Pink, yellow, yellow, pink across a rail, with a band along it that fades to white and back. Scrolling that
+// band makes the pulse. Generated here so the repo carries no extra art.
+static void Course_MagnetRailTexInit(void) {
+    static const s32 sPulse[MAGNET_RAIL_TEX_LENGTH] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 20, 31, 20, 8, 0 };
+    s32 x;
+    s32 y;
+    s32 green;
+    s32 blue;
+    u16 color;
+
+    if (sMagnetRailTexReady) {
+        return;
+    }
+    for (y = 0; y < MAGNET_RAIL_TEX_WIDTH; y++) {
+        for (x = 0; x < MAGNET_RAIL_TEX_LENGTH; x++) {
+            green = ((y == 0) || (y == (MAGNET_RAIL_TEX_WIDTH - 1))) ? 8 : 27;
+            blue = ((y == 0) || (y == (MAGNET_RAIL_TEX_WIDTH - 1))) ? 22 : 2;
+            green += ((31 - green) * sPulse[x]) / 31;
+            blue += ((31 - blue) * sPulse[x]) / 31;
+            // RGBA5551
+            color = (31 << 11) | (green << 6) | (blue << 1) | 1;
+            sMagnetRailTex[(y * MAGNET_RAIL_TEX_LENGTH) + x] = (u16) ((color >> 8) | (color << 8));
+        }
+    }
+    sMagnetRailTexReady = true;
+}
+
+static void Course_MagnetRailSetVtx(Vtx* vtx, Vec3f* pos, s32 s, s32 t) {
+    vtx->v.ob[0] = Math_Round(pos->x);
+    vtx->v.ob[1] = Math_Round(pos->y);
+    vtx->v.ob[2] = Math_Round(pos->z);
+    vtx->v.flag = 0;
+    vtx->v.tc[0] = s;
+    vtx->v.tc[1] = t;
+    vtx->v.cn[0] = vtx->v.cn[1] = vtx->v.cn[2] = vtx->v.cn[3] = 255;
+}
+
+static void Course_MagnetRailAddSection(CourseEffect* effect, Vec3f* edgeRightPos, Vec3f* edgeLeftPos,
+                                        bool isFirstSection) {
+    static const f32 sLineEdges[MAGNET_RAIL_COUNT * 2] = {
+        0.0f,
+        MAGNET_RAIL_LINE_WIDTH,
+        MAGNET_RAIL_LINE_WIDTH + MAGNET_RAIL_GAP,
+        MAGNET_RAIL_TOTAL_WIDTH,
+    };
+    // The strip runs from its inner edge, the side facing the road, out to the track edge.
+    Vec3f inner = (effect->effectType == COURSE_EFFECT_MAGNET_LEFT) ? *edgeRightPos : *edgeLeftPos;
+    Vec3f outer = (effect->effectType == COURSE_EFFECT_MAGNET_LEFT) ? *edgeLeftPos : *edgeRightPos;
+    f32 stripWidth = Math_VectorGetDistance(inner, outer);
+    // A strip narrower than the rails squeezes them, so they stay on the road.
+    f32 fractionPerUnit = 1.0f / ((stripWidth > MAGNET_RAIL_TOTAL_WIDTH) ? stripWidth : MAGNET_RAIL_TOTAL_WIDTH);
+    s32* vtxCount = &sMagnetRailVtxCount[D_8079F93C];
+    Vec3f pos[MAGNET_RAIL_COUNT * 2];
+    Vtx* vtx;
+    f32 endS;
+    s32 startFixedS;
+    s32 endFixedS;
+    s32 i;
+
+    for (i = 0; i < MAGNET_RAIL_COUNT * 2; i++) {
+        pos[i].x = inner.x + ((outer.x - inner.x) * sLineEdges[i] * fractionPerUnit);
+        pos[i].y = inner.y + ((outer.y - inner.y) * sLineEdges[i] * fractionPerUnit);
+        pos[i].z = inner.z + ((outer.z - inner.z) * sLineEdges[i] * fractionPerUnit);
+    }
+
+    if (!isFirstSection) {
+        // S carries on from the last section, even across segments, so a pulse doesn't jump where quads meet.
+        endS = sMagnetRailPulseS +
+               (Math_VectorGetDistance(sMagnetRailLastPos[0], pos[0]) / MAGNET_RAIL_UNITS_PER_TEXEL);
+        if ((*vtxCount + (MAGNET_RAIL_COUNT * 4)) <= MAGNET_RAIL_MAX_VTX) {
+            startFixedS = (s32) (sMagnetRailPulseS * 32.0f);
+            endFixedS = (s32) (endS * 32.0f);
+            vtx = &sMagnetRailVtx[D_8079F93C][*vtxCount];
+            for (i = 0; i < MAGNET_RAIL_COUNT; i++) {
+                Course_MagnetRailSetVtx(&vtx[0], &sMagnetRailLastPos[i * 2], startFixedS, 0);
+                Course_MagnetRailSetVtx(&vtx[1], &sMagnetRailLastPos[(i * 2) + 1], startFixedS,
+                                        MAGNET_RAIL_TEX_WIDTH << 5);
+                Course_MagnetRailSetVtx(&vtx[2], &pos[i * 2], endFixedS, 0);
+                Course_MagnetRailSetVtx(&vtx[3], &pos[(i * 2) + 1], endFixedS, MAGNET_RAIL_TEX_WIDTH << 5);
+                vtx += 4;
+            }
+            *vtxCount += MAGNET_RAIL_COUNT * 4;
+        }
+        // Wrapped to one period, since a vertex holds only about 1000 texels of S.
+        sMagnetRailPulseS = endS - (MAGNET_RAIL_TEX_LENGTH * (s32) (endS / MAGNET_RAIL_TEX_LENGTH));
+    }
+    for (i = 0; i < MAGNET_RAIL_COUNT * 2; i++) {
+        sMagnetRailLastPos[i] = pos[i];
+    }
+}
+
+static Gfx* Course_MagnetRailsDraw(Gfx* gfx) {
+    s32 railSet = IN_COURSE_EDITOR ? D_800DCCFC : 0;
+    s32 vtxCount = sMagnetRailVtxCount[railSet];
+    // Half a texel per frame in 10.2 fixed point, toward the start of the course, so pulses come at the driver.
+    s32 pulseScroll = (0u - (gGameFrameCount * 2)) & ((MAGNET_RAIL_TEX_LENGTH << 2) - 1);
+    s32 batchCount;
+    s32 i;
+    s32 j;
+
+    if (vtxCount == 0) {
+        return gfx;
+    }
+    Course_MagnetRailTexInit();
+
+    gDPPipeSync(gfx++);
+    gSPClearGeometryMode(gfx++, G_CULL_BACK);
+    gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
+    gDPSetRenderMode(gfx++, G_RM_ZB_OPA_SURF, G_RM_ZB_OPA_SURF2);
+    gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
+    gDPLoadTextureBlock(gfx++, sMagnetRailTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, MAGNET_RAIL_TEX_LENGTH,
+                        MAGNET_RAIL_TEX_WIDTH, 0, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_CLAMP, 4, 2,
+                        G_TX_NOLOD, G_TX_NOLOD);
+    gDPSetTileSize(gfx++, G_TX_RENDERTILE, pulseScroll, 0, pulseScroll + ((MAGNET_RAIL_TEX_LENGTH - 1) << 2),
+                   (MAGNET_RAIL_TEX_WIDTH - 1) << 2);
+
+    for (i = 0; i < vtxCount; i += MAGNET_RAIL_BATCH_VTX) {
+        batchCount = vtxCount - i;
+        if (batchCount > MAGNET_RAIL_BATCH_VTX) {
+            batchCount = MAGNET_RAIL_BATCH_VTX;
+        }
+        gSPVertex(gfx++, &sMagnetRailVtx[railSet][i], batchCount, 0);
+        for (j = 0; j < batchCount; j += 4) {
+            gSP2Triangles(gfx++, j, j + 1, j + 2, 0, j + 1, j + 3, j + 2, 0);
+        }
+    }
+    return gfx;
+}
+#endif
+
 #if !defined(EXPANSION_KIT) || defined(NON_MATCHING)
 // Draw Course Effects and Features
 Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
@@ -389,6 +544,11 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
             for (i = 0; i < effectsInfo->count; i++) {
                 effectDrawData = &gEffectsDrawData[D_800DCCFC][i];
 
+                // Magnets draw as rails, see Course_MagnetRailsDraw.
+                if (COURSE_EFFECT_IS_MAGNET(effectDrawData->effectType)) {
+                    continue;
+                }
+
                 if (D_800D6CA0.unk_0C == gCourseEffects[i].segmentIndex && gCreateOption == CREATE_OPTION_PARTS) {
                     if (sp1D4 != 1) {
                         sp1D4 = 1;
@@ -484,6 +644,10 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
 #else
             effectDrawDataEnd = gEffectsDrawData[0] + effectsInfo->count;
             for (effectDrawData = gEffectsDrawData[0]; effectDrawData < effectDrawDataEnd; effectDrawData++) {
+                // Magnets draw as rails, see Course_MagnetRailsDraw.
+                if (COURSE_EFFECT_IS_MAGNET(effectDrawData->effectType)) {
+                    continue;
+                }
                 if (effectDrawData->effectType == COURSE_EFFECT_LAVA) {
                     gDPSetCombineMode(gfx++, G_CC_MODULATERGBA_PRIM, G_CC_MODULATERGBA_PRIM);
                     gDPSetPrimColor(gfx++, 0, 0, 255, 200, 0, 255);
@@ -556,7 +720,10 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 }
             }
         }
-        // Lava strips leave the orange tint prim active; restore white so later prim-modulated
+#ifdef PORT
+        gfx = Course_MagnetRailsDraw(gfx);
+#endif
+        // Lava strips leave their tint prim active; restore white so later prim-modulated
         // geometry (road, decorations) is not tinted.
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
@@ -1638,6 +1805,11 @@ Vtx* Course_TerrainEffectVerticesInit(CourseSegment* segment, f32 t, CourseEffec
         edgeLeftPos.x = Math_Round((segmentBasis.z.x * leftEdgeDistance) + pos.x);
         edgeLeftPos.y = Math_Round((segmentBasis.z.y * leftEdgeDistance) + pos.y);
         edgeLeftPos.z = Math_Round((segmentBasis.z.z * leftEdgeDistance) + pos.z);
+#ifdef PORT
+        if (COURSE_EFFECT_IS_MAGNET(effect->effectType)) {
+            Course_MagnetRailAddSection(effect, &edgeRightPos, &edgeLeftPos, !startPositionSet);
+        }
+#endif
         if (!startPositionSet) {
             lastEdgeRightPos = edgeRightPos;
             lastEdgeLeftPos = edgeLeftPos;
@@ -1785,6 +1957,11 @@ Vtx* Course_TerrainEffectVerticesInitFromStorage(CourseSegment* segment, CourseE
         leftEdgePos.x = Math_Round((basis.z.x * leftEdgeDistance) + pos.x);
         leftEdgePos.y = Math_Round((basis.z.y * leftEdgeDistance) + pos.y);
         leftEdgePos.z = Math_Round((basis.z.z * leftEdgeDistance) + pos.z);
+#ifdef PORT
+        if (COURSE_EFFECT_IS_MAGNET(effect->effectType)) {
+            Course_MagnetRailAddSection(effect, &rightEdgePos, &leftEdgePos, !startPositionSet);
+        }
+#endif
         if (!startPositionSet) {
             lastRightEdgePos = rightEdgePos;
             lastLeftEdgePos = leftEdgePos;
@@ -1893,6 +2070,11 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
 #endif
         effectsInfo = &gCourseEffectsInfo;
     }
+
+#ifdef PORT
+    sMagnetRailVtxCount[D_8079F93C] = 0;
+    sMagnetRailPulseS = 0.0f;
+#endif
 
     for (i = 0; i < effectsInfo->count; i++) {
         effect = &effectsInfo->effects[i];
@@ -2019,6 +2201,19 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
 }
 
 extern CourseInfo gCourseInfos[56];
+
+#ifdef EXPANSION_KIT
+// Where a magnet strip starts, measured from the track center. The rails mark this line, so it follows
+// the road edge, and the pull is measured from it. A narrow road keeps its middle half free.
+static f32 Course_MagnetStripDistance(CourseSegment* segment) {
+    f32 width = segment->radiusLeft + segment->radiusRight;
+    f32 nextWidth = segment->next->radiusLeft + segment->next->radiusRight;
+    f32 halfWidth = ((width < nextWidth) ? width : nextWidth) / 2.0f;
+    f32 distance = halfWidth - MAGNET_STRIP_WIDTH;
+
+    return (distance > (halfWidth / 2.0f)) ? distance : (halfWidth / 2.0f);
+}
+#endif
 
 void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
     s32 effectCount = gCourseEffectsInfo.count;
@@ -2164,6 +2359,24 @@ void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
             effect->segmentTValueEnd = 1.0f;
             effect->rightEdgeDistance = -1.0f * effectDistanceFromCenter; \
             effect->leftEdgeDistance = effectDistanceFromCenter;
+            effectCount++;
+            break;
+        case PIT_MAGNET_LEFT:
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_MAGNET_LEFT;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = Course_MagnetStripDistance(segment); \
+            effect->leftEdgeDistance = 5000.0f;
+            effectCount++;
+            break;
+        case PIT_MAGNET_RIGHT:
+            effect->segmentIndex = segmentIndex; \
+            effect->effectType = COURSE_EFFECT_MAGNET_RIGHT;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = -5000.0f; \
+            effect->leftEdgeDistance = -1.0f * Course_MagnetStripDistance(segment);
             effectCount++;
             break;
 #endif

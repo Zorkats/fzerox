@@ -2720,6 +2720,15 @@ extern s32 gRandMask2;
 /* port/gdx_xcup_seed.c: M3 shareable X Cup seed codes and the queue of codes to use. */
 extern int gdx_xcup_consume_pending_seed(s32* seed1, s32* mask1, s32* seed2, s32* mask2);
 extern void gdx_xcup_note_seed_captured(int slot, int newCup);
+/* port/gdx_xcup_random.c: the X Cup random course toggle and the saved copy of a generated course. */
+extern int gdx_xcup_random_enabled(void);
+extern int gdx_xcup_random_pick(int slot, int newCup, u32 roll, int ddAvailable);
+extern void gdx_xcup_random_clear_active(void);
+extern int gdx_xcup_real_course(int courseIndex);
+extern void gdx_xcup_generated_capture(const void* courseData, size_t size);
+#ifdef EXPANSION_KIT
+extern unsigned char* gdx_disk_buffer; /* port/disk_buffer.cpp: NULL without the Expansion Kit disk. */
+#endif
 #endif
 extern s8 gTitleDemoState;
 extern s32 gGameMode;
@@ -2754,6 +2763,7 @@ void Course_GenerateRandomCourse(void) {
 #ifdef PORT
     s32 xcupRedo;
     s32 xcupNewCup;
+    s32 xcupRandom;
 #endif
 
 #ifdef PORT
@@ -2763,6 +2773,8 @@ void Course_GenerateRandomCourse(void) {
                (gCourseIndex == gLastRandomCourseIndex);
     xcupNewCup = !xcupRedo && ((gCourseIndex == COURSE_X_1) || (gLastRandomCourseIndex < COURSE_X_1) ||
                                (gLastRandomCourseIndex > COURSE_X_6));
+    xcupRandom = (gGameMode == GAMEMODE_GP_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE) &&
+                 gdx_xcup_random_enabled();
 #endif
     // Restore random generation seeding if track is re-done
     if ((gGameMode == GAMEMODE_GP_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE) &&
@@ -2780,7 +2792,7 @@ void Course_GenerateRandomCourse(void) {
         s32 pendingMask1;
         s32 pendingSeed2;
         s32 pendingMask2;
-        if (!xcupRedo && gdx_xcup_consume_pending_seed(&pendingSeed1, &pendingMask1, &pendingSeed2, &pendingMask2)) {
+        if (!xcupRedo && !xcupRandom && gdx_xcup_consume_pending_seed(&pendingSeed1, &pendingMask1, &pendingSeed2, &pendingMask2)) {
             Math_Rand1Init(pendingSeed1, pendingMask1);
             Math_Rand2Init(pendingSeed2, pendingMask2);
         }
@@ -2791,6 +2803,25 @@ void Course_GenerateRandomCourse(void) {
     sRandomCourseInitSeed2 = gRandSeed2;
     sRandomCourseInitMask2 = gRandMask2;
 #ifdef PORT
+    /* The random course toggle: the slot keeps its number and loads a real course. The pick draws
+       after the capture above, so Continue Cup restores the same RNG state for it. */
+    if (xcupRandom) {
+#ifdef EXPANSION_KIT
+        s32 realCourse = gdx_xcup_random_pick(gCourseIndex - COURSE_X_1, xcupNewCup, Math_Rand1() & 0x1FFFF,
+                                              gdx_disk_buffer != NULL);
+#else
+        s32 realCourse = gdx_xcup_random_pick(gCourseIndex - COURSE_X_1, xcupNewCup, Math_Rand1() & 0x1FFFF, false);
+#endif
+        if (realCourse >= 0) {
+            Course_Load(realCourse);
+            // Course_Load built the real course's slot. The race reads the X Cup slot.
+            func_80074428(gCourseIndex);
+            gCurrentCourseInfo->maxSpeed = 0.0f;
+            gCurrentCourseInfo->bestTime = 600000 - 1;
+            return;
+        }
+    }
+    gdx_xcup_random_clear_active();
     gdx_xcup_note_seed_captured(gCourseIndex - COURSE_X_1, xcupNewCup);
 #endif
     do {
@@ -3457,6 +3488,16 @@ void func_800A4DF0(void) {
         gCurrentCourseInfo->encodedCourseIndex = gCurrentCourseInfo->courseIndex;
     }
     gCurrentCourseInfo->encodedCourseIndex |= Course_CalculateChecksum() << 5;
+#ifdef PORT
+    /* Keep a generated Grand Prix course for the X Cup menu's save button. The generator leaves the
+       checksum unset, and a saved track needs it. */
+    if ((gGameMode == GAMEMODE_GP_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE) &&
+        (gCourseIndex >= COURSE_X_1) && (gCourseIndex <= COURSE_X_6) &&
+        (gdx_xcup_real_course(gCourseIndex) == gCourseIndex)) {
+        COURSE_CONTEXT()->courseData.checksum = Course_CalculateChecksum();
+        gdx_xcup_generated_capture(&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+    }
+#endif
 }
 
 extern s32 gNumPlayers;

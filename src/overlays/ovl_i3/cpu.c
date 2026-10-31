@@ -406,6 +406,16 @@ extern s32 gGameMode;
 extern s32 gDifficulty;
 extern s32 gNumPlayers;
 extern s32 gCourseIndex;
+#ifdef PORT
+// port/gdx_xcup_random.c: an X Cup slot racing a real course uses that course's CPU tuning.
+extern int gdx_xcup_real_course(int courseIndex);
+extern int gdx_xcup_real_cup(int cupType, int courseIndex);
+#define CPU_TUNING_COURSE() gdx_xcup_real_course(gCourseIndex)
+#define CPU_TUNING_CUP() gdx_xcup_real_cup(gCupType, gCourseIndex)
+#else
+#define CPU_TUNING_COURSE() gCourseIndex
+#define CPU_TUNING_CUP() gCupType
+#endif
 extern s8 gTitleDemoState;
 extern s32 gTotalRacers;
 extern s32 D_800E5FF0;
@@ -632,7 +642,7 @@ void func_i3_80115E74(void) {
         }
     }
 
-    if (((gGameMode == GAMEMODE_GP_RACE) && (D_i3_8013E94C[gCourseIndex] == 1)) ||
+    if (((gGameMode == GAMEMODE_GP_RACE) && (D_i3_8013E94C[CPU_TUNING_COURSE()] == 1)) ||
         (gTitleDemoState == TITLE_DEMO_ACTIVE)) {
         var_a1 = 4;
         for (var_a3 = 0; var_a3 < gTotalRacers; var_a3++) {
@@ -675,19 +685,24 @@ void func_i3_80116974(void) {
 #endif
 
 #ifndef EXPANSION_KIT
-    if (gCourseIndex < COURSE_EDIT_1) {
-        if (Save_LoadStaffGhostRecord(&sp1C, gCourseIndex) == 0) {
+    if (CPU_TUNING_COURSE() < COURSE_EDIT_1) {
+        if (Save_LoadStaffGhostRecord(&sp1C, CPU_TUNING_COURSE()) == 0) {
 #else
-    if ((gCupType < X_CUP) || (gCupType == DD_1_CUP) || (gCupType == DD_2_CUP)) {
-        s32 staffTime = Save_GetDDStaffGhostRecordTime(gCourseIndex);
+    if ((CPU_TUNING_CUP() < X_CUP) || (CPU_TUNING_CUP() == DD_1_CUP) || (CPU_TUNING_CUP() == DD_2_CUP)) {
+        s32 staffTime = Save_GetDDStaffGhostRecordTime(CPU_TUNING_COURSE());
         if (staffTime != -1) {
             sp1C.raceTime = staffTime;
 #endif
-            D_i3_80141990 = D_i3_8013E328[gCourseIndex * 4 + gDifficulty];
+            D_i3_80141990 = D_i3_8013E328[CPU_TUNING_COURSE() * 4 + gDifficulty];
         } else {
             D_i3_80141990 = MAX_TIMER;
         }
+#ifdef PORT
+        // An X Cup slot keeps no record of the real course, so there is nothing to refine against.
+        if ((gDifficulty >= EXPERT) && (CPU_TUNING_COURSE() == gCourseIndex)) {
+#else
         if (gDifficulty >= EXPERT) {
+#endif
             timeRecord = gCurrentCourseInfo->timeRecord[0];
             if (timeRecord < sp1C.raceTime) {
                 D_i3_80141990 = timeRecord + (D_i3_80141990 - sp1C.raceTime);
@@ -776,13 +791,13 @@ void Cpu_InitRacer(Racer* racer) {
 #endif
     if (racer->id == 0) {
         func_i3_80116974();
-        if (gCourseIndex < COURSE_EDIT_1) {
-            func_80077CF0(D_i3_8013DB80[gCourseIndex], 0x200 * sizeof(s16), D_i3_8013DBE8);
+        if (CPU_TUNING_COURSE() < COURSE_EDIT_1) {
+            func_80077CF0(D_i3_8013DB80[CPU_TUNING_COURSE()], 0x200 * sizeof(s16), D_i3_8013DBE8);
 #ifdef EXPANSION_KIT
-        } else if (gCourseIndex >= COURSE_SILENCE_3 && gCourseIndex <= COURSE_BIG_FOOT) {
+        } else if (CPU_TUNING_COURSE() >= COURSE_SILENCE_3 && CPU_TUNING_COURSE() <= COURSE_BIG_FOOT) {
             for (i = 0; i < 0x200; i += 2) {
-                D_i3_8013DBE8[i + 0] = D_i3_80069E38[gCourseIndex - COURSE_SILENCE_3][i + 0];
-                D_i3_8013DBE8[i + 1] = D_i3_80069E38[gCourseIndex - COURSE_SILENCE_3][i + 1];
+                D_i3_8013DBE8[i + 0] = D_i3_80069E38[CPU_TUNING_COURSE() - COURSE_SILENCE_3][i + 0];
+                D_i3_8013DBE8[i + 1] = D_i3_80069E38[CPU_TUNING_COURSE() - COURSE_SILENCE_3][i + 1];
             }
 #endif
         } else {
@@ -796,7 +811,7 @@ void Cpu_InitRacer(Racer* racer) {
             racer->unk_1A8 = 0.5f;
         }
 
-        if ((gCupType == X_CUP) || (gCupType == EDIT_CUP)) {
+        if ((CPU_TUNING_CUP() == X_CUP) || (CPU_TUNING_CUP() == EDIT_CUP)) {
             D_i3_80141904 = 0;
         } else {
             D_i3_80141904 = 1;
@@ -898,13 +913,13 @@ void Cpu_InitRacer(Racer* racer) {
     // If CPU racer
     if (racer->id >= gNumPlayers) {
 #ifndef EXPANSION_KIT
-        if (gCourseIndex < COURSE_EDIT_1) {
+        if (CPU_TUNING_COURSE() < COURSE_EDIT_1) {
 #else
-        if ((gCupType < X_CUP) || (gCupType == DD_1_CUP) || (gCupType == DD_2_CUP)) {
+        if ((CPU_TUNING_CUP() < X_CUP) || (CPU_TUNING_CUP() == DD_1_CUP) || (CPU_TUNING_CUP() == DD_2_CUP)) {
 #endif
             if (gTotalRacers >= racer->unk_368) {
-                racer->unk_39C = D_i3_8013E4A8[gCourseIndex * 4 + gDifficulty] +
-                                 D_i3_8013E628[gCourseIndex * 4 + gDifficulty] * (racer->unk_368 - 1);
+                racer->unk_39C = D_i3_8013E4A8[CPU_TUNING_COURSE() * 4 + gDifficulty] +
+                                 D_i3_8013E628[CPU_TUNING_COURSE() * 4 + gDifficulty] * (racer->unk_368 - 1);
             }
         }
         if ((sPlayerRacer->position == racer->position - 4) || (sPlayerRacer->position == (racer->position + 4)) ||
@@ -918,9 +933,9 @@ void Cpu_InitRacer(Racer* racer) {
             }
             racer->unk_1A8 = var_fa0;
 #ifndef EXPANSION_KIT
-        } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[gCourseIndex] != 0)) {
+        } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[CPU_TUNING_COURSE()] != 0)) {
 #else
-        } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[gCourseIndex] != 0) || (gCupType == EDIT_CUP)) {
+        } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[CPU_TUNING_COURSE()] != 0) || (gCupType == EDIT_CUP)) {
 #endif
             var_fa0 = (Math_Rand1() % 256 / 255.0f + 10.0f) / 14.0f;
             if (var_fa0 > 0.95f) {
@@ -941,7 +956,7 @@ void Cpu_InitRacer(Racer* racer) {
             }
             racer->unk_1A8 = var_fa0;
         }
-        if (gCourseIndex == COURSE_FIRE_FIELD) {
+        if (CPU_TUNING_COURSE() == COURSE_FIRE_FIELD) {
             if (racer->unk_1A8 > 0.8f) {
                 racer->unk_1A8 = 0.8f;
             }
@@ -1045,11 +1060,11 @@ void func_i3_801175A4(void) {
 }
 
 f32 func_i3_801179DC(Racer* arg0) {
-    return D_i3_8013DC18[gCourseIndex * 4 + gDifficulty] * (2500.0f / 27.0f);
+    return D_i3_8013DC18[CPU_TUNING_COURSE() * 4 + gDifficulty] * (2500.0f / 27.0f);
 }
 
 f32 func_i3_80117A1C(Racer* arg0) {
-    return D_i3_8013DFA0[gCourseIndex * 4 + gDifficulty];
+    return D_i3_8013DFA0[CPU_TUNING_COURSE() * 4 + gDifficulty];
 }
 
 void func_i3_80117A4C(Racer* racer, s32 racerId) {
@@ -1452,7 +1467,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
             }
         }
     }
-    if (gCourseIndex == COURSE_FIRE_FIELD) {
+    if (CPU_TUNING_COURSE() == COURSE_FIRE_FIELD) {
         i = racer->segmentPositionInfo.courseSegment->segmentIndex;
         if ((i >= 4) && (i < 0x10)) {
             racer->unk_1EC = (2500.0f / 27.0f);
@@ -1539,7 +1554,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
         if (racer->stateFlags & RACER_STATE_AIRBORNE) {
             var_a1 = Math_Round(-racer->unk_334 * 0.1f * DOT_XYZ(&racer->trueBasis.y, &sp4C.x));
 
-            if (gCourseIndex == COURSE_FIRE_FIELD) {
+            if (CPU_TUNING_COURSE() == COURSE_FIRE_FIELD) {
                 if ((racer->segmentPositionInfo.courseSegment->segmentIndex >= 7) &&
                     (racer->segmentPositionInfo.courseSegment->segmentIndex <= 14)) {
                     if (racer->heightAboveGround > 400.0f) {
@@ -1549,8 +1564,8 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                     var_a3 *= 5;
                 }
 #ifdef EXPANSION_KIT
-            } else if ((gCourseIndex == COURSE_PORT_TOWN_3) || (gCourseIndex == COURSE_BIG_BLUE_3) ||
-                       (gCourseIndex == COURSE_SPACE_PLANT_2) || (gCourseIndex == COURSE_WHITE_LAND_3)) {
+            } else if ((CPU_TUNING_COURSE() == COURSE_PORT_TOWN_3) || (CPU_TUNING_COURSE() == COURSE_BIG_BLUE_3) ||
+                       (CPU_TUNING_COURSE() == COURSE_SPACE_PLANT_2) || (CPU_TUNING_COURSE() == COURSE_WHITE_LAND_3)) {
                 var_a1 = 0;
 #endif
             }
@@ -1724,7 +1739,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                         racer->obstaclePriorityState = 2;
                     }
                 }
-            } else if (gCourseIndex != COURSE_SPACE_PLANT_2) {
+            } else if (CPU_TUNING_COURSE() != COURSE_SPACE_PLANT_2) {
                 if (racer->segmentJump == JUMP_LEFT) {
                     racer->obstaclePriorityState = 2;
                 }
@@ -1803,9 +1818,9 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
 #endif
             } else {
 #ifndef EXPANSION_KIT
-                if ((gCourseIndex < COURSE_EDIT_1) &&
+                if ((CPU_TUNING_COURSE() < COURSE_EDIT_1) &&
 #else
-                if ((gCourseIndex < COURSE_EDIT_1 || gCupType >= DD_1_CUP) &&
+                if ((CPU_TUNING_COURSE() < COURSE_EDIT_1 || CPU_TUNING_CUP() >= DD_1_CUP) &&
 #endif
                     (((racer->raceTime > 2000) &&
                       (((racer->unk_368 % 6) < 2) ||
@@ -1857,7 +1872,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                     var_fv0 = racer->energy / racer->maxEnergy;
                     switch (racer->obstaclePriorityState) {
                         case 1:
-                            if (gCourseIndex != COURSE_MUTE_CITY_3) {
+                            if (CPU_TUNING_COURSE() != COURSE_MUTE_CITY_3) {
                                 if (racer->unk_33C < sp9C + 92.0f) {
                                     racer->unk_33C = sp9C + 92.0f;
                                 }
@@ -1868,7 +1883,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                             }
                             break;
                         case 2:
-                            if (gCourseIndex != COURSE_MUTE_CITY_3) {
+                            if (CPU_TUNING_COURSE() != COURSE_MUTE_CITY_3) {
                                 if (racer->unk_33C > sp9C - 230.0f) {
                                     racer->unk_33C = sp9C - 230.0f;
                                 }
@@ -1880,7 +1895,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                             break;
                         case 3:
 #ifdef EXPANSION_KIT
-                            // Lava strips: steer AWAY from the hazardous side(s).
+                            // Lava and magnet strips: steer AWAY from the hazardous side(s).
                             if (racer->segmentPit >= PIT_LAVA_BOTH) {
                                 if (racer->segmentPit == PIT_LAVA_BOTH) {
                                     // Center is safe.
@@ -1888,7 +1903,8 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                                     break;
                                 }
 
-                                if ((racer->segmentPit == PIT_LAVA_LEFT) && (var_fv0 < 0.99f)) {
+                                if (((racer->segmentPit == PIT_LAVA_LEFT) && (var_fv0 < 0.99f)) ||
+                                    (racer->segmentPit == PIT_MAGNET_LEFT)) {
                                     racer->unk_33C = sp94;
                                     if (racer->unk_33C < ((sp9C - 100.0f) + 46.0f)) {
                                         racer->unk_33C += racer->unk_354 * 10.0f;
@@ -1896,8 +1912,9 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                                     break;
                                 }
 
-                                if ((racer->segmentPit == PIT_LAVA_RIGHT) &&
-                                    ((racer->lap == 1) || (var_fv0 < 0.99f))) {
+                                if (((racer->segmentPit == PIT_LAVA_RIGHT) &&
+                                     ((racer->lap == 1) || (var_fv0 < 0.99f))) ||
+                                    (racer->segmentPit == PIT_MAGNET_RIGHT)) {
                                     racer->unk_33C = sp94;
                                     if (racer->unk_33C > ((sp9C + 100.0f) - 46.0f)) {
                                         racer->unk_33C -= racer->unk_354 * 10.0f;

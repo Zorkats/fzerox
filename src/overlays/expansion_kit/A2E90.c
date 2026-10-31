@@ -461,7 +461,15 @@ void func_xk1_80025F98(void) {
 #else
     D_xk1_8003A488 = Arena_Allocate(ALLOC_FRONT, (D_xk1_8003A494 << 7) + 0xE00);
 #endif
+#ifdef PORT
+    /* The console reloads this overlay on every mode change, which zeroes the cursor. Here the
+       static survives, and any glyph drawn after the last rewind leaves it above zero. The fill
+       below would then start past the first cell while func_xk1_80025ED4 still points each string
+       at the unshifted cells, so every prefilled string reads as the wrong letters. */
+    D_xk1_8003A490 = 0xE00;
+#else
     D_xk1_8003A490 += 0xE00;
+#endif
     func_xk1_800267C4(D_xk1_8003A54C);
     D_xk1_80030080 = 0;
 

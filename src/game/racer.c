@@ -16,6 +16,8 @@
 
 #ifdef PORT
 extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+extern float CVarGetFloat(const char* name, float defaultValue); // libultraship consolevariablebridge.h
+extern float gdx_steering_curve_for_port(int port, float steering);
 
 // Emits the menu's packed 0xRRGGBB effect-color override when set (>= 0), else stock.
 #define GDX_ENV_COLOR_OVERRIDE(cVar, stockR, stockG, stockB, stockA)                                       \
@@ -866,6 +868,10 @@ void Racer_StopRacerSfx(Racer* racer) {
             racer->soundEffectFlags &= ~RACER_SE_FLAGS_LAVA;
             Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_LAVA);
         }
+        if (racer->soundEffectFlags & RACER_SE_FLAGS_MAGNET) {
+            racer->soundEffectFlags &= ~RACER_SE_FLAGS_MAGNET;
+            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_MAGNET);
+        }
 #endif
         if (racer->soundEffectFlags & RACER_SE_FLAGS_DIRT) {
             racer->soundEffectFlags &= ~RACER_SE_FLAGS_DIRT;
@@ -899,8 +905,8 @@ void Racer_StopRacerSfx(Racer* racer) {
     } else {
 #ifdef EXPANSION_KIT
         racer->soundEffectFlags &=
-            ~(RACER_SE_FLAGS_PIT | RACER_SE_FLAGS_LAVA | RACER_SE_FLAGS_DIRT | RACER_SE_FLAGS_ICE |
-              RACER_SE_FLAGS_200 | RACER_SE_FLAGS_DRIFT_SLIDE | RACER_SE_FLAGS_AIRBORNE |
+            ~(RACER_SE_FLAGS_PIT | RACER_SE_FLAGS_LAVA | RACER_SE_FLAGS_MAGNET | RACER_SE_FLAGS_DIRT |
+              RACER_SE_FLAGS_ICE | RACER_SE_FLAGS_200 | RACER_SE_FLAGS_DRIFT_SLIDE | RACER_SE_FLAGS_AIRBORNE |
               RACER_SE_FLAGS_ENGINE_ECHO | RACER_SE_FLAGS_BRAKE);
 #else
         racer->soundEffectFlags &=
@@ -3570,6 +3576,76 @@ void func_80090AFC(Racer* racer) {
 
 extern u32 gGameFrameCount;
 
+#ifdef EXPANSION_KIT
+// At the default strength this about matches a held drift (driftAttackForce tops out at 1.0f), so drifting
+// alone only holds a machine in place and driving away is what gets it clear.
+#define MAGNET_PULL_FORCE 0.6f
+// Sideways speed where the pull has faded out, the same falloff the drift force uses.
+#define MAGNET_PULL_MAX_SIDE_SPEED 6.0f
+#define MAGNET_PULL_STRENGTH_MIN 0.25f
+#define MAGNET_PULL_STRENGTH_MAX 3.0f
+#define MAGNET_PULL_STRENGTH_DEFAULT 1.7f
+#define MAGNET_PULL_RANGE_DEFAULT 80.0f
+#define MAGNET_PULL_RANGE_MIN 10.0f
+#define MAGNET_PULL_RANGE_MAX 200.0f
+
+// A Gameplay menu slider, clamped again here so a hand-edited config can't break a race.
+static f32 Racer_MagnetSetting(const char* cVarName, f32 defaultValue, f32 min, f32 max) {
+    f32 value = CVarGetFloat(cVarName, defaultValue);
+
+    if (value != value) {
+        return defaultValue;
+    }
+    if (value < min) {
+        return min;
+    }
+    if (value > max) {
+        return max;
+    }
+    return value;
+}
+
+// sidePosition is the racer's distance from the track center, positive to the left. The range slider moves
+// the pull line away from the rails, which stay put, and the middle half of the road always stays free.
+static bool Racer_InMagnetPullRange(Racer* racer, Effect* effect, f32 sidePosition) {
+    bool isLeft = effect->effectType == COURSE_EFFECT_MAGNET_LEFT;
+    f32 range = Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullRange", MAGNET_PULL_RANGE_DEFAULT,
+                                    MAGNET_PULL_RANGE_MIN, MAGNET_PULL_RANGE_MAX);
+    f32 railLine = isLeft ? effect->unk_0C.x : -effect->unk_18.x;
+    f32 pullLine = railLine + MAGNET_STRIP_WIDTH - range;
+    f32 minPullLine = (racer->currentRadiusLeft + racer->currentRadiusRight) / 4.0f;
+
+    if (pullLine < minPullLine) {
+        pullLine = minPullLine;
+    }
+    return isLeft ? (sidePosition >= pullLine) : (sidePosition <= -pullLine);
+}
+
+// segmentBasis.z points to the left of the track, as the strip edge distances in Course_SegmentPitInit assume.
+static void Racer_ApplyMagnetPull(Racer* racer, s32 effectType) {
+    f32 direction = (effectType == COURSE_EFFECT_MAGNET_LEFT) ? 1.0f : -1.0f;
+    f32 pullX = direction * racer->segmentBasis.z.x;
+    f32 pullY = direction * racer->segmentBasis.z.y;
+    f32 pullZ = direction * racer->segmentBasis.z.z;
+    f32 sideSpeed = (pullX * racer->velocity.x) + (pullY * racer->velocity.y) + (pullZ * racer->velocity.z);
+    f32 force = MAGNET_PULL_FORCE * Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullStrength",
+                                                        MAGNET_PULL_STRENGTH_DEFAULT, MAGNET_PULL_STRENGTH_MIN,
+                                                        MAGNET_PULL_STRENGTH_MAX);
+    f32 upward;
+
+    if (sideSpeed >= MAGNET_PULL_MAX_SIDE_SPEED) {
+        return;
+    }
+    if (sideSpeed > 0.0f) {
+        force *= 1.0f - (sideSpeed / MAGNET_PULL_MAX_SIDE_SPEED);
+    }
+    upward = (pullX * racer->gravityUp.x) + (pullY * racer->gravityUp.y) + (pullZ * racer->gravityUp.z);
+    racer->acceleration.x += force * (pullX - (upward * racer->gravityUp.x));
+    racer->acceleration.y += force * (pullY - (upward * racer->gravityUp.y));
+    racer->acceleration.z += force * (pullZ - (upward * racer->gravityUp.z));
+}
+#endif
+
 void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
     bool isDrifting;
     s32 i;
@@ -3622,6 +3698,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         } else if (sp12C > 1.0f) {
             sp12C = 1.0f;
         }
+#ifdef PORT
+        // CPU racers steer through a dummy controller, which has no port and no curve.
+        if (!(racer->stateFlags & RACER_STATE_CPU_CONTROLLED)) {
+            sp12C = gdx_steering_curve_for_port(gPlayerControlPorts[racer->id], sp12C);
+        }
+#endif
     }
 
     spE8 = racer->trueBasis;
@@ -3641,11 +3723,20 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                       (0.5f * (racer->currentRadiusRight - racer->currentRadiusLeft));
 
             do {
-                if (var_fa1 < effect->unk_0C.x) {
-                    continue;
-                }
-                if (effect->unk_18.x < var_fa1) {
-                    continue;
+#ifdef EXPANSION_KIT
+                if (COURSE_EFFECT_IS_MAGNET(effect->effectType)) {
+                    if (!Racer_InMagnetPullRange(racer, effect, var_fa1)) {
+                        continue;
+                    }
+                } else
+#endif
+                {
+                    if (var_fa1 < effect->unk_0C.x) {
+                        continue;
+                    }
+                    if (effect->unk_18.x < var_fa1) {
+                        continue;
+                    }
                 }
                 if (racer->segmentPositionInfo.segmentTValue < effect->segmentTValueStart) {
                     continue;
@@ -4396,6 +4487,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
     } else {
         racer->accelerationForce = 0.0f;
     }
+#ifdef EXPANSION_KIT
+    if (COURSE_EFFECT_IS_MAGNET(racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_AIRBORNE |
+                                                     RACER_STATE_SPINNING_OUT | COURSE_EFFECT_MASK))) {
+        Racer_ApplyMagnetPull(racer, racer->stateFlags & COURSE_EFFECT_MASK);
+    }
+#endif
     racer->velocity.x += racer->acceleration.x;
     racer->velocity.y += racer->acceleration.y;
     racer->velocity.z += racer->acceleration.z;
@@ -4805,6 +4902,22 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                 racer->energy = 0.1f;
             }
         }
+    } else if (COURSE_EFFECT_IS_MAGNET(racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_AIRBORNE |
+                                                            RACER_STATE_SPINNING_OUT | COURSE_EFFECT_MASK))) {
+        // A loop of its own is the pull cue. No energy drain, and the force field draw skips magnets.
+        // The pull itself is Racer_ApplyMagnetPull.
+        if (racer->pitForceFieldSize < 1.0f) {
+            racer->pitForceFieldSize += 0.1f;
+            if (racer->pitForceFieldSize >= 1.0f) {
+                racer->pitForceFieldSize = 1.0f;
+            } else if ((racer->id < gNumPlayers) && (racer->pitForceFieldSize == 0.1f)) {
+                racer->soundEffectFlags |= RACER_SE_FLAGS_MAGNET;
+                if (gEnableRaceSfx) {
+                    Audio_PlayerLevelSEStart(racer->id, NA_LEVEL_SE_MAGNET);
+                }
+            }
+        }
+        racer->forceFieldType = racer->stateFlags & COURSE_EFFECT_MASK;
 #endif
     } else {
         if (racer->pitForceFieldSize > 0.0f) {
@@ -4823,6 +4936,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                         racer->soundEffectFlags &= ~RACER_SE_FLAGS_LAVA;
                         if (gEnableRaceSfx) {
                             Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_LAVA);
+                        }
+                    }
+                    if (racer->soundEffectFlags & RACER_SE_FLAGS_MAGNET) {
+                        racer->soundEffectFlags &= ~RACER_SE_FLAGS_MAGNET;
+                        if (gEnableRaceSfx) {
+                            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_MAGNET);
                         }
                     }
 #endif
@@ -7061,11 +7180,14 @@ block_115:
             continue;
         }
 #ifdef EXPANSION_KIT
+        if (COURSE_EFFECT_IS_MAGNET(racer->forceFieldType)) {
+            continue;
+        }
         if (racer->forceFieldType == COURSE_EFFECT_LAVA) {
             if (!prevForceFieldLava) {
                 gDPSetCombineMode(gfx++, G_CC_MODULATERGBA_PRIM, G_CC_MODULATERGBA_PRIM);
-                gDPSetPrimColor(gfx++, 0, 0, 255, 60, 0, 255);
             }
+            gDPSetPrimColor(gfx++, 0, 0, 255, 60, 0, 255);
             prevForceFieldLava = true;
         } else {
             if (prevForceFieldLava) {

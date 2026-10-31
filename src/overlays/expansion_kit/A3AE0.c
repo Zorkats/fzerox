@@ -107,8 +107,8 @@ s32* gCourseEditMenuOptions[] = {
     &gCreateOption, &gPointOption, NULL, &gCourseEditFileOption, &gCourseEditEntryOption,
 };
 
-// Lava entries reuse the pit icon geometry. Under PORT they are runtime
-// red/orange recolors stored in sLavaIconPit*Tex; otherwise they reuse the
+// Lava and magnet entries reuse the pit icon geometry. Under PORT they are runtime
+// recolors stored in sLavaIconPit*Tex and sMagnetIconPit*Tex; otherwise they reuse the
 // original pit icon symbols as a fallback. Heal icons stay untouched.
 MenuDropItem sPitTypeMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
@@ -127,19 +127,25 @@ MenuDropItem sPitTypeMenuItems[] = {
       aExpansionKitMenu7Tex, aCourseEditPitRightTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu8Tex, aCourseEditPitMiddleTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu9Tex, aCourseEditPitLeftTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu10Tex, aCourseEditPitRightTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditClearTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
 };
 
-// Nine items (4 heal + 4 lava + Clear); cursor range matches 16 px per row.
-MenuWidget sPitTypeWidget = { 9,   INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sPitTypeMenuItems, 160, 48, 160,
-                              176, &gPitTypeOption };
+// Eleven items (4 heal + 4 lava + 2 magnet + Clear); cursor range matches 16 px per row.
+MenuWidget sPitTypeWidget = { 11,  INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sPitTypeMenuItems, 160, 48, 160,
+                              208, &gPitTypeOption };
 
 #ifdef PORT
 static ALIGNED8 u16 sLavaIconPitBothTex[24 * 12];
 static ALIGNED8 u16 sLavaIconPitLeftTex[24 * 12];
 static ALIGNED8 u16 sLavaIconPitRightTex[24 * 12];
 static ALIGNED8 u16 sLavaIconPitMiddleTex[24 * 12];
+static ALIGNED8 u16 sMagnetIconPitLeftTex[24 * 12];
+static ALIGNED8 u16 sMagnetIconPitRightTex[24 * 12];
 static bool sLavaIconsReady = false;
 
 static inline u16 CourseEdit_RGBA16Swap(u16 v) {
@@ -171,6 +177,17 @@ static void CourseEdit_CopyRecoloredIcon(u16* dst, u16* src, s32 count) {
     }
 }
 
+// The lava recolor with its red copied into green, the yellow of the rails on the track.
+static void CourseEdit_CopyMagnetIcon(u16* dst, u16* src, s32 count) {
+    s32 i;
+    u16 lava;
+
+    for (i = 0; i < count; i++) {
+        lava = CourseEdit_RecolorPixel(CourseEdit_RGBA16Swap(src[i]));
+        dst[i] = CourseEdit_RGBA16Swap((u16) ((lava & 0xF801) | ((lava >> 5) & 0x07C0)));
+    }
+}
+
 static void CourseEdit_InitLavaIcons(void) {
     if (sLavaIconsReady) {
         return;
@@ -183,6 +200,10 @@ static void CourseEdit_InitLavaIcons(void) {
     sPitTypeMenuItems[5].subContentsRGBATex = sLavaIconPitLeftTex;
     sPitTypeMenuItems[6].subContentsRGBATex = sLavaIconPitRightTex;
     sPitTypeMenuItems[7].subContentsRGBATex = sLavaIconPitMiddleTex;
+    CourseEdit_CopyMagnetIcon(sMagnetIconPitLeftTex, aCourseEditPitLeftTex, 24 * 12);
+    CourseEdit_CopyMagnetIcon(sMagnetIconPitRightTex, aCourseEditPitRightTex, 24 * 12);
+    sPitTypeMenuItems[8].subContentsRGBATex = sMagnetIconPitLeftTex;
+    sPitTypeMenuItems[9].subContentsRGBATex = sMagnetIconPitRightTex;
     sLavaIconsReady = true;
 }
 #endif
