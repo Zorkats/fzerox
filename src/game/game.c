@@ -773,8 +773,16 @@ void func_800690FC(void) {
                     break;
 #ifdef EXPANSION_KIT
                 case GAMEMODE_COURSE_EDIT:
+#ifdef PORT
+                    { extern void gdx_course_edit_reset_exit(void); gdx_course_edit_reset_exit(); }
+#endif
                     func_8070D220();
                     break;
+#ifdef PORT
+                case GAMEMODE_CREATE_MACHINE:
+                    { extern void gdx_machine_create_reset_exit(void); gdx_machine_create_reset_exit(); }
+                    break;
+#endif
 #endif
             }
             gGameMode = gQueuedGameMode;

@@ -4635,6 +4635,12 @@ Gfx* Menus_DrawPoints(Gfx* gfx, s32 highlightType, s32 left, s32 top) {
     return Font_DrawString(gfx, left - Font_GetStringWidth("    $", FONT_SET_4, 1), top, "    $", 1, FONT_SET_4, 0);
 }
 
+#ifdef PORT
+#define DEATH_RACE_RESULTS_TITLE "death race results"
+#else
+#define DEATH_RACE_RESULTS_TITLE "death race  results"
+#endif
+
 Gfx* Menus_DrawDeathRaceResults(Gfx* gfx) {
     s32 halfStringWidth;
     f32 scale = 1.0f;
@@ -4642,17 +4648,17 @@ Gfx* Menus_DrawDeathRaceResults(Gfx* gfx) {
     s32 top;
     s32 pad[5];
 
-    halfStringWidth = Font_GetStringWidth("death race  results", FONT_SET_3, 1) / 2;
+    halfStringWidth = Font_GetStringWidth(DEATH_RACE_RESULTS_TITLE, FONT_SET_3, 1) / 2;
     gfx = Menus_DrawBeveledBox(gfx, 155 - halfStringWidth, 25, halfStringWidth + 169, 43, 0, 0, 200, 127);
 
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
-    gfx = Font_DrawString(gfx, 162 - (Font_GetStringWidth("death race  results", FONT_SET_3, 1) / 2), 44,
-                          "death race  results", 1, FONT_SET_3, 0);
+    gfx = Font_DrawString(gfx, 162 - (Font_GetStringWidth(DEATH_RACE_RESULTS_TITLE, FONT_SET_3, 1) / 2), 44,
+                          DEATH_RACE_RESULTS_TITLE, 1, FONT_SET_3, 0);
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 0, 255);
-    gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth("death race  results", FONT_SET_3, 1) / 2), 42,
-                          "death race  results", 1, FONT_SET_3, 0);
+    gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(DEATH_RACE_RESULTS_TITLE, FONT_SET_3, 1) / 2), 42,
+                          DEATH_RACE_RESULTS_TITLE, 1, FONT_SET_3, 0);
     gSPDisplayList(gfx++, D_8014940);
     gDPLoadTextureBlock(gfx++, aHudTimeTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 24, 16, 0, G_TX_NOMIRROR | G_TX_WRAP,
                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);

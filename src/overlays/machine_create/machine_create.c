@@ -105,6 +105,27 @@ s32 MachineCreate_Update(void) {
     return GAMEMODE_CREATE_MACHINE;
 }
 
+#ifdef PORT
+/* A reset goes straight to the title and never reaches the exit in MachineCreate_Update, so game.c
+ * runs this at the mode change. With gInCourseEditor still set, the attract demo's race would skip
+ * loading its course (Course_Init in course.c). */
+void gdx_machine_create_reset_exit(void) {
+    if (!gInCourseEditor) {
+        return;
+    }
+    func_80705E18();
+    Audio_EditorExit();
+    D_80794E10 = 0;
+    gInCourseEditor = false;
+    gWorksMachineMode = MACHINE_MODE_0;
+    func_xk1_8002FBB0();
+    func_8008D33C();
+    ExpansionKit_SetMenuHighlightDrawFlag(true);
+    func_80704810(true);
+    osViSetSpecialFeatures(OS_VI_DITHER_FILTER_OFF);
+}
+#endif
+
 extern Gfx D_xk3_80137300[];
 extern Gfx D_xk3_80137460[];
 extern FrameBuffer* gFrameBuffers[];

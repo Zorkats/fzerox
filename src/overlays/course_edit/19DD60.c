@@ -290,6 +290,19 @@ void func_xk2_800EC91C(void) {
 }
 
 #ifdef PORT
+/* A reset goes straight to the title and never reaches the editor's exit, so game.c runs this at the
+ * mode change. With gInCourseEditor still set, the attract demo's race would skip loading its course
+ * (Course_Init in course.c). */
+void gdx_course_edit_reset_exit(void) {
+    if (!gInCourseEditor) {
+        return;
+    }
+    if (gInCourseEditTestRun) {
+        func_xk2_800EC91C();
+    }
+    func_xk2_800EC3AC();
+}
+
 static void gdx_course_edit_test_run_handle_esc(void) {
     if (gGamePaused) {
         func_xk2_800EC91C();
