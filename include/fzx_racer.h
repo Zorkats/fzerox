@@ -23,6 +23,7 @@ typedef enum CourseEffects {
     COURSE_EFFECT_LAVA,
     COURSE_EFFECT_MAGNET_LEFT,
     COURSE_EFFECT_MAGNET_RIGHT,
+    COURSE_EFFECT_MAGNET_MIDDLE,
 #endif
 } CourseEffects;
 
@@ -30,7 +31,8 @@ typedef enum CourseEffects {
 
 #ifdef EXPANSION_KIT
 #define COURSE_EFFECT_IS_MAGNET(effect) \
-    (((effect) == COURSE_EFFECT_MAGNET_LEFT) || ((effect) == COURSE_EFFECT_MAGNET_RIGHT))
+    (((effect) == COURSE_EFFECT_MAGNET_LEFT) || ((effect) == COURSE_EFFECT_MAGNET_RIGHT) || \
+     ((effect) == COURSE_EFFECT_MAGNET_MIDDLE))
 // How far from the road edge the rails sit.
 #define MAGNET_STRIP_WIDTH 40.0f
 #endif

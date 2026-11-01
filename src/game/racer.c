@@ -18,6 +18,7 @@
 extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
 extern float CVarGetFloat(const char* name, float defaultValue); // libultraship consolevariablebridge.h
 extern float gdx_steering_curve_for_port(int port, float steering);
+#include "../../../port/gdx_course_settings_view.h"
 
 // Emits the menu's packed 0xRRGGBB effect-color override when set (>= 0), else stock.
 #define GDX_ENV_COLOR_OVERRIDE(cVar, stockR, stockG, stockB, stockA)                                       \
@@ -726,6 +727,7 @@ extern int gdx_single_race_get_lap_time(int racerId, int lapIndex);
 extern s32 gdx_course_branch_live(void);
 extern void gdx_course_branch_reset_racers(void);
 extern void gdx_course_branch_racer_walked(s32 racerId, RacerSegmentPositionInfo* info);
+extern s32 gdx_course_branch_control_point(s32 segmentIndex);
 #endif
 
 void Racer_UpdateRivalRacer(void) {
@@ -3588,6 +3590,9 @@ extern u32 gGameFrameCount;
 #define MAGNET_PULL_RANGE_DEFAULT 80.0f
 #define MAGNET_PULL_RANGE_MIN 10.0f
 #define MAGNET_PULL_RANGE_MAX 200.0f
+// A middle magnet's pull fades to nothing over this distance from the center line, so a machine settles
+// on the line instead of flicking from side to side across it.
+#define MAGNET_MIDDLE_CENTER_FADE 40.0f
 
 // A Gameplay menu slider, clamped again here so a hand-edited config can't break a race.
 static f32 Racer_MagnetSetting(const char* cVarName, f32 defaultValue, f32 min, f32 max) {
@@ -3605,16 +3610,71 @@ static f32 Racer_MagnetSetting(const char* cVarName, f32 defaultValue, f32 min, 
     return value;
 }
 
+// The player can race every course on the menu's values. Part widths are the course's shape and always apply.
+static bool Racer_UsesCourseSettings(void) {
+    return CVarGetInteger("gEnhancements.Gameplay.IgnoreTrackSettings", 0) == 0;
+}
+
+// The control point under the racer, which the values Course Edit stores are keyed by.
+static s32 Racer_ControlPoint(Racer* racer) {
+    return gdx_course_branch_control_point(racer->segmentPositionInfo.courseSegment->segmentIndex);
+}
+
+// The magnet's own value, else the course's, else the menu's.
+static f32 Racer_MagnetPullRange(Racer* racer) {
+    f32 own = Racer_UsesCourseSettings() ? gdx_settings_view_magnet_range(Racer_ControlPoint(racer)) : 0.0f;
+
+    return (own > 0.0f) ? own
+                        : Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullRange", MAGNET_PULL_RANGE_DEFAULT,
+                                              MAGNET_PULL_RANGE_MIN, MAGNET_PULL_RANGE_MAX);
+}
+
+static f32 Racer_MagnetPullStrength(Racer* racer) {
+    f32 own = Racer_UsesCourseSettings() ? gdx_settings_view_magnet_strength(Racer_ControlPoint(racer)) : 0.0f;
+
+    return (own > 0.0f) ? own
+                        : Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullStrength", MAGNET_PULL_STRENGTH_DEFAULT,
+                                              MAGNET_PULL_STRENGTH_MIN, MAGNET_PULL_STRENGTH_MAX);
+}
+
+static bool Racer_LavaNeverKills(void) {
+    bool menuValue = CVarGetInteger("gEnhancements.Gameplay.LavaNoKill", 0) != 0;
+
+    if (!Racer_UsesCourseSettings()) {
+        return menuValue;
+    }
+    switch (gdx_settings_view_lava_mode()) {
+        case GDX_SETTINGS_VIEW_LAVA_KILLS:
+            return false;
+        case GDX_SETTINGS_VIEW_LAVA_NEVER_KILLS:
+            return true;
+        default:
+            return menuValue;
+    }
+}
+
+// The racer's distance from the track center, positive to the left.
+static f32 Racer_MagnetSidePosition(Racer* racer) {
+    return (racer->segmentPositionInfo.segmentDisplacement.x * racer->segmentBasis.z.x) +
+           (racer->segmentPositionInfo.segmentDisplacement.y * racer->segmentBasis.z.y) +
+           (racer->segmentPositionInfo.segmentDisplacement.z * racer->segmentBasis.z.z) +
+           (0.5f * (racer->currentRadiusRight - racer->currentRadiusLeft));
+}
+
 // sidePosition is the racer's distance from the track center, positive to the left. The range slider moves
 // the pull line away from the rails, which stay put, and the middle half of the road always stays free.
+// A middle magnet is the other way around: it pulls inside the range and leaves the outer quarters free.
 static bool Racer_InMagnetPullRange(Racer* racer, Effect* effect, f32 sidePosition) {
     bool isLeft = effect->effectType == COURSE_EFFECT_MAGNET_LEFT;
-    f32 range = Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullRange", MAGNET_PULL_RANGE_DEFAULT,
-                                    MAGNET_PULL_RANGE_MIN, MAGNET_PULL_RANGE_MAX);
+    f32 range = Racer_MagnetPullRange(racer);
     f32 railLine = isLeft ? effect->unk_0C.x : -effect->unk_18.x;
     f32 pullLine = railLine + MAGNET_STRIP_WIDTH - range;
     f32 minPullLine = (racer->currentRadiusLeft + racer->currentRadiusRight) / 4.0f;
 
+    if (effect->effectType == COURSE_EFFECT_MAGNET_MIDDLE) {
+        pullLine = (range < minPullLine) ? range : minPullLine;
+        return (sidePosition >= -pullLine) && (sidePosition <= pullLine);
+    }
     if (pullLine < minPullLine) {
         pullLine = minPullLine;
     }
@@ -3623,16 +3683,27 @@ static bool Racer_InMagnetPullRange(Racer* racer, Effect* effect, f32 sidePositi
 
 // segmentBasis.z points to the left of the track, as the strip edge distances in Course_SegmentPitInit assume.
 static void Racer_ApplyMagnetPull(Racer* racer, s32 effectType) {
+    f32 sidePosition = Racer_MagnetSidePosition(racer);
     f32 direction = (effectType == COURSE_EFFECT_MAGNET_LEFT) ? 1.0f : -1.0f;
-    f32 pullX = direction * racer->segmentBasis.z.x;
-    f32 pullY = direction * racer->segmentBasis.z.y;
-    f32 pullZ = direction * racer->segmentBasis.z.z;
-    f32 sideSpeed = (pullX * racer->velocity.x) + (pullY * racer->velocity.y) + (pullZ * racer->velocity.z);
-    f32 force = MAGNET_PULL_FORCE * Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullStrength",
-                                                        MAGNET_PULL_STRENGTH_DEFAULT, MAGNET_PULL_STRENGTH_MIN,
-                                                        MAGNET_PULL_STRENGTH_MAX);
+    f32 pullX;
+    f32 pullY;
+    f32 pullZ;
+    f32 sideSpeed;
+    f32 force = MAGNET_PULL_FORCE * Racer_MagnetPullStrength(racer);
     f32 upward;
 
+    if (effectType == COURSE_EFFECT_MAGNET_MIDDLE) {
+        f32 distance = (sidePosition > 0.0f) ? sidePosition : -sidePosition;
+
+        direction = (sidePosition > 0.0f) ? -1.0f : 1.0f;
+        if (distance < MAGNET_MIDDLE_CENTER_FADE) {
+            force *= distance / MAGNET_MIDDLE_CENTER_FADE;
+        }
+    }
+    pullX = direction * racer->segmentBasis.z.x;
+    pullY = direction * racer->segmentBasis.z.y;
+    pullZ = direction * racer->segmentBasis.z.z;
+    sideSpeed = (pullX * racer->velocity.x) + (pullY * racer->velocity.y) + (pullZ * racer->velocity.z);
     if (sideSpeed >= MAGNET_PULL_MAX_SIDE_SPEED) {
         return;
     }
@@ -4891,7 +4962,7 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         // strips under the EK's test-run invulnerability; the CVar opts races out of the kill too.
         // 0.1f floor matches the energy floor convention in Racer_ReceiveDamage.
 #ifdef PORT
-        if ((D_800CE780 != 0) && !CVarGetInteger("gEnhancements.Gameplay.LavaNoKill", 0)) {
+        if ((D_800CE780 != 0) && !Racer_LavaNeverKills()) {
 #else
         if (D_800CE780 != 0) {
 #endif

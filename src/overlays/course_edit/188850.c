@@ -89,14 +89,14 @@ s32 D_xk2_800F684C = 0;
 s32 D_xk2_800F6850[] = { 0, 1, 2, 4 };
 
 // Pit strip side masks: bit 1 = middle, bit 2 = left, bit 4 = right, bit 8 = lava, bit 0x10 = magnet.
-s32 D_xk2_800F6860[] = { 0, 6, 2, 4, 1, 0x0E, 0x0A, 0x0C, 0x09, 0x12, 0x14 };
+s32 D_xk2_800F6860[] = { 0, 6, 2, 4, 1, 0x0E, 0x0A, 0x0C, 0x09, 0x12, 0x14, 0x11 };
 
 s32 D_xk2_800F6874[] = { 0, 6, 2, 4, 1 };
 
 s32 D_xk2_800F6888[] = { 0, 6, 2, 4, 1 };
 
 // Reverse of D_xk2_800F6860: no type bit is heal, bit 8 is lava, bit 0x10 is magnet.
-s32 D_xk2_800F689C[] = { -1, 3, 1, -1, 2, -1, 0, -1, -1, 7, 5, -1, 6, -1, 4, -1, -1, -1, 8, -1, 9 };
+s32 D_xk2_800F689C[] = { -1, 3, 1, -1, 2, -1, 0, -1, -1, 7, 5, -1, 6, -1, 4, -1, -1, 10, 8, -1, 9 };
 
 s32 D_xk2_800F68B8[] = { -1, 0, 1, -1, 2, -1, -1 };
 
@@ -2650,6 +2650,29 @@ static void gdx_course_edit_set_scalar_target(s32 moveOption, s32 targetOffset) 
     }
 }
 
+// Tick side of a typed bank value. Every selected point takes it, as one undo step.
+static void gdx_course_edit_apply_typed_bank(void) {
+    s32 bank;
+    s32 i;
+
+    if (!gdx_course_edit_input_take_bank_value(&bank)) {
+        return;
+    }
+    if (gdx_course_edit_native_selection_mask() == 0) {
+        gdx_course_edit_native_play_refusal();
+        return;
+    }
+    func_xk2_800EF78C();
+    for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+        if (D_80128690[i].unk_08 != 0) {
+            COURSE_CONTEXT()->courseData.bankAngle[i] = bank;
+        }
+    }
+    func_80074CE4(gCurrentCourseInfo);
+    D_xk2_800F7040 = 3;
+    Audio_TriggerSystemSE(NA_SE_39);
+}
+
 s32 gdx_course_edit_native_mouse_owned(void) {
     return sGdxCourseEditMouseOwner ? 1 : 0;
 }
@@ -2727,6 +2750,9 @@ void gdx_course_edit_native_update(void) {
     s32 targetOffset;
     GdxCourseEditVec3 target;
 
+    /* Before the tool gates below: the settings panel works in every create option. */
+    gdx_course_branch_editor_apply_extra();
+
     /* Undo, redo and History panel steps requested from the UI run here, on the game thread. */
     gdx_course_edit_undo_tick();
     if (sGdxCourseEditMouseOwner) {
@@ -2769,6 +2795,7 @@ void gdx_course_edit_native_update(void) {
     }
     /* Line up (tool 6, Enter). The port has pre-checked the run. This applies it with the undo backup. */
     gdx_course_edit_native_apply_line_up();
+    gdx_course_edit_apply_typed_bank();
     if (gdx_course_edit_input_take_drag_start(&pointIndex)) {
         gdx_course_edit_begin_mouse_drag(pointIndex);
         return;
@@ -3850,6 +3877,33 @@ extern u8 aCourseEditBank45IconTex[];
 extern u8 aCourseEditBank90IconTex[];
 extern u8 aCourseEditBank180IconTex[];
 
+static ALIGNED8 u16 sGdxBankSnapIconTex[3][16 * 16];
+static bool sGdxBankSnapIconsReady = false;
+
+// The bank art in the repo is only the center panel. The button around it is the player's own gold grid icon,
+// so no game pixels are stored. Textures keep ROM byte order, so a pixel's alpha bit is in its second byte.
+static void gdx_course_edit_build_bank_snap_icons(void) {
+    const u8* panels[3] = { aCourseEditBank45IconTex, aCourseEditBank90IconTex, aCourseEditBank180IconTex };
+    s32 icon;
+    s32 i;
+
+    if (sGdxBankSnapIconsReady) {
+        return;
+    }
+    for (icon = 0; icon < 3; icon++) {
+        u8* pixels = (u8*) sGdxBankSnapIconTex[icon];
+
+        memcpy(pixels, aCourseEditGoldGridAlignIconTex, sizeof(sGdxBankSnapIconTex[icon]));
+        for (i = 0; i < (16 * 16); i++) {
+            if (panels[icon][(i * 2) + 1] & 1) {
+                pixels[i * 2] = panels[icon][i * 2];
+                pixels[(i * 2) + 1] = panels[icon][(i * 2) + 1];
+            }
+        }
+    }
+    sGdxBankSnapIconsReady = true;
+}
+
 // While the Bank tool is active the grid icon is the bank snap button. The point grid keeps its state
 // for the other tools, and this is the only caller that touches the icon, so it is safe to refresh it.
 static bool gdx_course_edit_update_bank_snap_icon(void) {
@@ -3874,15 +3928,16 @@ static bool gdx_course_edit_update_bank_snap_icon(void) {
                 break;
         }
     }
+    gdx_course_edit_build_bank_snap_icons();
     switch (sGdxCourseEditBankSnapStep) {
         case 45:
-            gCourseEditIconTextures[2] = (u16*) aCourseEditBank45IconTex;
+            gCourseEditIconTextures[2] = sGdxBankSnapIconTex[0];
             break;
         case 90:
-            gCourseEditIconTextures[2] = (u16*) aCourseEditBank90IconTex;
+            gCourseEditIconTextures[2] = sGdxBankSnapIconTex[1];
             break;
         case 180:
-            gCourseEditIconTextures[2] = (u16*) aCourseEditBank180IconTex;
+            gCourseEditIconTextures[2] = sGdxBankSnapIconTex[2];
             break;
         default:
             gCourseEditIconTextures[2] = aCourseEditGridAlignIconTex;

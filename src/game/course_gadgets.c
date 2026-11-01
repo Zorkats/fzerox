@@ -251,8 +251,9 @@ extern s32 D_800DCCFC;
 #define VERTEX_MODIFIED_ST2(s, t) ((((s) << 16) & 0xFFFF0000) | ((t) &0xFFFF))
 
 #ifdef PORT
-// A magnet strip draws as two thin rails lying on the road at its inner edge, in place of the strip's
-// own surface. Each rail adds one quad per strip section, with four vertices of its own.
+// A magnet strip draws as two thin rails lying on the road at its inner edge, or down its center for a
+// middle magnet, in place of the strip's own surface. Each rail adds one quad per strip section, with four
+// vertices of its own.
 #define MAGNET_RAIL_LINE_WIDTH 4.0f
 #define MAGNET_RAIL_GAP 6.0f
 #define MAGNET_RAIL_TOTAL_WIDTH ((MAGNET_RAIL_LINE_WIDTH * 2.0f) + MAGNET_RAIL_GAP)
@@ -326,6 +327,10 @@ static void Course_MagnetRailAddSection(CourseEffect* effect, Vec3f* edgeRightPo
     f32 stripWidth = Math_VectorGetDistance(inner, outer);
     // A strip narrower than the rails squeezes them, so they stay on the road.
     f32 fractionPerUnit = 1.0f / ((stripWidth > MAGNET_RAIL_TOTAL_WIDTH) ? stripWidth : MAGNET_RAIL_TOTAL_WIDTH);
+    // A middle strip is centered on the road, so its rails start partway across it.
+    f32 railStart = ((effect->effectType == COURSE_EFFECT_MAGNET_MIDDLE) && (stripWidth > MAGNET_RAIL_TOTAL_WIDTH))
+                        ? ((stripWidth - MAGNET_RAIL_TOTAL_WIDTH) / 2.0f)
+                        : 0.0f;
     s32* vtxCount = &sMagnetRailVtxCount[D_8079F93C];
     Vec3f pos[MAGNET_RAIL_COUNT * 2];
     Vtx* vtx;
@@ -335,9 +340,9 @@ static void Course_MagnetRailAddSection(CourseEffect* effect, Vec3f* edgeRightPo
     s32 i;
 
     for (i = 0; i < MAGNET_RAIL_COUNT * 2; i++) {
-        pos[i].x = inner.x + ((outer.x - inner.x) * sLineEdges[i] * fractionPerUnit);
-        pos[i].y = inner.y + ((outer.y - inner.y) * sLineEdges[i] * fractionPerUnit);
-        pos[i].z = inner.z + ((outer.z - inner.z) * sLineEdges[i] * fractionPerUnit);
+        pos[i].x = inner.x + ((outer.x - inner.x) * (railStart + sLineEdges[i]) * fractionPerUnit);
+        pos[i].y = inner.y + ((outer.y - inner.y) * (railStart + sLineEdges[i]) * fractionPerUnit);
+        pos[i].z = inner.z + ((outer.z - inner.z) * (railStart + sLineEdges[i]) * fractionPerUnit);
     }
 
     if (!isFirstSection) {
@@ -2213,6 +2218,21 @@ static f32 Course_MagnetStripDistance(CourseSegment* segment) {
 
     return (distance > (halfWidth / 2.0f)) ? distance : (halfWidth / 2.0f);
 }
+
+// How far a middle strip reaches from the track center: the middle half of the road.
+static f32 Course_MagnetMiddleDistance(CourseSegment* segment) {
+    f32 width = segment->radiusLeft + segment->radiusRight;
+    f32 nextWidth = segment->next->radiusLeft + segment->next->radiusRight;
+
+    return ((width < nextWidth) ? width : nextWidth) / 4.0f;
+}
+#endif
+
+#ifdef PORT
+#include "../../../port/gdx_course_settings_view.h"
+
+extern s32 gdx_course_branch_control_point(s32 segmentIndex);
+extern void gdx_course_branch_on_segments_init(const CourseSegment* ring, s32 count);
 #endif
 
 void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
@@ -2247,6 +2267,19 @@ void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
         if (minimumDistanceFromCenter < 101.0f) {
             effectDistanceFromCenter = minimumDistanceFromCenter - 10.0f;
         }
+    }
+#endif
+
+#ifdef PORT
+    {
+        s32 pit = COURSE_CONTEXT()->courseData.pit[segmentIndex];
+        s32 shape = ((pit == PIT_BOTH) || (pit == PIT_LAVA_BOTH))       ? GDX_SETTINGS_VIEW_SHAPE_BOTH
+                    : ((pit == PIT_MIDDLE) || (pit == PIT_LAVA_MIDDLE)) ? GDX_SETTINGS_VIEW_SHAPE_MIDDLE
+                                                                        : GDX_SETTINGS_VIEW_SHAPE_SIDE;
+
+        effectDistanceFromCenter = gdx_settings_view_part_edge(
+            effectDistanceFromCenter, gdx_settings_view_pit_width(gdx_course_branch_control_point(segmentIndex)), shape,
+            segmentWidth, nextSegmentWidth);
     }
 #endif
 
@@ -2379,6 +2412,15 @@ void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
             effect->leftEdgeDistance = -1.0f * Course_MagnetStripDistance(segment);
             effectCount++;
             break;
+        case PIT_MAGNET_MIDDLE:
+            effect->segmentIndex = segmentIndex;
+            effect->effectType = COURSE_EFFECT_MAGNET_MIDDLE;
+            effect->segmentTValueStart = 0.0f;
+            effect->segmentTValueEnd = 1.0f;
+            effect->rightEdgeDistance = -1.0f * Course_MagnetMiddleDistance(segment);
+            effect->leftEdgeDistance = Course_MagnetMiddleDistance(segment);
+            effectCount++;
+            break;
 #endif
     }
     // clang-format on
@@ -2426,6 +2468,19 @@ void Course_SegmentDirtInit(s32 courseIndex, s32 segmentIndex) {
     minimumDistanceFromCenter = minimumSegmentWidth / 2.0f;
     if (minimumDistanceFromCenter < 101.0f) {
         effectDistanceFromCenter = minimumDistanceFromCenter - 10.0f;
+    }
+#endif
+
+#ifdef PORT
+    {
+        s32 dirt = COURSE_CONTEXT()->courseData.dirt[segmentIndex];
+
+        effectDistanceFromCenter = gdx_settings_view_part_edge(
+            effectDistanceFromCenter, gdx_settings_view_dirt_width(gdx_course_branch_control_point(segmentIndex)),
+            (dirt == DIRT_BOTH)     ? GDX_SETTINGS_VIEW_SHAPE_BOTH
+            : (dirt == DIRT_MIDDLE) ? GDX_SETTINGS_VIEW_SHAPE_MIDDLE
+                                    : GDX_SETTINGS_VIEW_SHAPE_SIDE,
+            segmentWidth, nextSegmentWidth);
     }
 #endif
 
@@ -2541,6 +2596,19 @@ void Course_SegmentIceInit(s32 courseIndex, s32 segmentIndex) {
     minimumDistanceFromCenter = minimumSegmentWidth / 2.0f;
     if (minimumDistanceFromCenter < 101.0f) {
         effectDistanceFromCenter = minimumDistanceFromCenter - 10.0f;
+    }
+#endif
+
+#ifdef PORT
+    {
+        s32 ice = COURSE_CONTEXT()->courseData.ice[segmentIndex];
+
+        effectDistanceFromCenter = gdx_settings_view_part_edge(
+            effectDistanceFromCenter, gdx_settings_view_ice_width(gdx_course_branch_control_point(segmentIndex)),
+            (ice == ICE_BOTH)     ? GDX_SETTINGS_VIEW_SHAPE_BOTH
+            : (ice == ICE_MIDDLE) ? GDX_SETTINGS_VIEW_SHAPE_MIDDLE
+                                  : GDX_SETTINGS_VIEW_SHAPE_SIDE,
+            segmentWidth, nextSegmentWidth);
     }
 #endif
 
@@ -4079,6 +4147,9 @@ void Course_SegmentsInit(void) {
     }
     courseInfo->courseSegments[0].prev = &courseInfo->courseSegments[courseInfo->segmentCount - 1];
     courseInfo->courseSegments[courseInfo->segmentCount - 1].next = courseInfo->courseSegments;
+#ifdef PORT
+    gdx_course_branch_on_segments_init(courseInfo->courseSegments, courseInfo->segmentCount);
+#endif
 }
 
 extern OSMesgQueue gDmaMesgQueue;

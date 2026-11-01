@@ -131,13 +131,15 @@ MenuDropItem sPitTypeMenuItems[] = {
       aExpansionKitMenu9Tex, aCourseEditPitLeftTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu10Tex, aCourseEditPitRightTex, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu11Tex, aCourseEditPitMiddleTex, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditClearTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
 };
 
-// Eleven items (4 heal + 4 lava + 2 magnet + Clear); cursor range matches 16 px per row.
-MenuWidget sPitTypeWidget = { 11,  INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sPitTypeMenuItems, 160, 48, 160,
-                              208, &gPitTypeOption };
+// Twelve items (4 heal + 4 lava + 3 magnet + Clear); cursor range matches 16 px per row.
+MenuWidget sPitTypeWidget = { 12,  INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sPitTypeMenuItems, 160, 48, 160,
+                              224, &gPitTypeOption };
 
 #ifdef PORT
 static ALIGNED8 u16 sLavaIconPitBothTex[24 * 12];
@@ -146,6 +148,7 @@ static ALIGNED8 u16 sLavaIconPitRightTex[24 * 12];
 static ALIGNED8 u16 sLavaIconPitMiddleTex[24 * 12];
 static ALIGNED8 u16 sMagnetIconPitLeftTex[24 * 12];
 static ALIGNED8 u16 sMagnetIconPitRightTex[24 * 12];
+static ALIGNED8 u16 sMagnetIconPitMiddleTex[24 * 12];
 static bool sLavaIconsReady = false;
 
 static inline u16 CourseEdit_RGBA16Swap(u16 v) {
@@ -202,8 +205,10 @@ static void CourseEdit_InitLavaIcons(void) {
     sPitTypeMenuItems[7].subContentsRGBATex = sLavaIconPitMiddleTex;
     CourseEdit_CopyMagnetIcon(sMagnetIconPitLeftTex, aCourseEditPitLeftTex, 24 * 12);
     CourseEdit_CopyMagnetIcon(sMagnetIconPitRightTex, aCourseEditPitRightTex, 24 * 12);
+    CourseEdit_CopyMagnetIcon(sMagnetIconPitMiddleTex, aCourseEditPitMiddleTex, 24 * 12);
     sPitTypeMenuItems[8].subContentsRGBATex = sMagnetIconPitLeftTex;
     sPitTypeMenuItems[9].subContentsRGBATex = sMagnetIconPitRightTex;
+    sPitTypeMenuItems[10].subContentsRGBATex = sMagnetIconPitMiddleTex;
     sLavaIconsReady = true;
 }
 #endif

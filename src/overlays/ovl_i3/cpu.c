@@ -1922,7 +1922,8 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                                     break;
                                 }
 
-                                if (racer->segmentPit == PIT_LAVA_MIDDLE) {
+                                if ((racer->segmentPit == PIT_LAVA_MIDDLE) ||
+                                    (racer->segmentPit == PIT_MAGNET_MIDDLE)) {
                                     // Pick a side deterministically so all CPUs do not pile up.
                                     if (racer->id & 1) {
                                         racer->unk_33C = sp94;

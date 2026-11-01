@@ -169,6 +169,7 @@ typedef enum PitZone {
     /*  7 */ PIT_LAVA_MIDDLE,
     /*  8 */ PIT_MAGNET_LEFT,
     /*  9 */ PIT_MAGNET_RIGHT,
+    /* 10 */ PIT_MAGNET_MIDDLE,
 #endif
     PIT_MAX,
 } PitZone;
