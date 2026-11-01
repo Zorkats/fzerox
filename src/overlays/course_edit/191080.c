@@ -2441,6 +2441,9 @@ void func_xk2_800E72BC(void) {
         D_802CB6D0.unk_0000[i].pos.x -= (var_fv0 + var_fv1) / 2;
         D_802CB6D0.unk_0000[i].pos.z -= (var_fa0 + var_fa1) / 2;
     }
+#ifdef PORT
+    gdx_course_branch_editor_on_translate(-(var_fv0 + var_fv1) / 2, -(var_fa0 + var_fa1) / 2);
+#endif
     D_xk2_800F7040 = 3;
 }
 

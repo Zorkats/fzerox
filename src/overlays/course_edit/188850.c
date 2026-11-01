@@ -2405,6 +2405,9 @@ void func_xk2_800DC2D0(void) {
     }
     if ((temp_v0 == 0) && (D_xk2_800F6838 == D_xk2_800F6840) && (D_xk2_800F683C == D_xk2_800F6844)) {
         func_xk2_800DC3F8();
+#ifdef PORT
+        gdx_course_branch_editor_press_at_cursor();
+#endif
         temp_v0_2 = func_xk2_800EFDE4(4000.0f);
         if (temp_v0_2 != -1) {
             D_800D6CA0.unk_0C = temp_v0_2;
@@ -2776,6 +2779,9 @@ void gdx_course_edit_native_update(void) {
         } else {
             gdx_course_edit_select_point(pointIndex, moveOption);
         }
+    }
+    if (gdx_course_edit_input_take_node_pick(&pointIndex, &moveOption)) {
+        gdx_course_branch_editor_show_node(pointIndex, moveOption);
     }
 
     // Movement and drag edges are meaningful only after the native owner accepts a begin.
