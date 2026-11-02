@@ -70,6 +70,7 @@ Vtx* gCourseVtxPtr;
 extern void gdx_course_branch_on_course_init(void);
 extern f32 gdx_course_branch_lap_partial(const CourseSegment* segment, f32 partial);
 extern Gfx* gdx_course_branch_draw(Gfx* gfx, s32 cameraIndex, Gfx* (*drawRing)(Gfx*, s32));
+extern Gfx* gdx_course_branch_chunk_mesh(const SegmentChunk* chunk, const SegmentChunk* next);
 extern const u8* gGdxCourseChunkDrawMask;
 #endif
 s32 D_800F8524;
@@ -209,6 +210,22 @@ static unk_800CF528* Course_GetTrackTypeRow(s32 trackShape, s32 trackType) {
         trackType = rowCount - 1;
     }
     return &D_800CF8C8[trackShape][trackType];
+}
+
+s32 Course_GdxRoadTextureCoords(s32 trackInfo, s16* coords) {
+    s32 shape = trackInfo & TRACK_SHAPE_MASK;
+    s32 type = trackInfo & TRACK_TYPE_MASK;
+    unk_800CF528* row;
+    if ((shape != TRACK_SHAPE_ROAD && shape != TRACK_SHAPE_BORDERLESS_ROAD) || type == TRACK_TYPE_NONE) {
+        return 0;
+    }
+    row = Course_GetTrackTypeRow(TRACK_SHAPE_INDEX(shape), type);
+    coords[0] = row->unk_16;
+    coords[1] = row->unk_18;
+    coords[2] = row->unk_1A;
+    coords[3] = row->unk_1C;
+    coords[4] = row->unk_1E;
+    return 1;
 }
 
 #define TRACK_TYPE_ROW(shape, type) Course_GetTrackTypeRow(shape, type)
@@ -3787,6 +3804,16 @@ void Course_SetupRoadChunkGroupPairVtx(void) {
 }
 
 void Course_DrawBackwardRoadChunkGroup(void) {
+#ifdef PORT
+    Gfx* mesh = gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk);
+    if (mesh != NULL) {
+        gSPDisplayList(sCourseDisp++, mesh);
+        // Retained triangles replace both native vertex-cache entries.
+        D_800F8958[0].chunk = D_800F8958[1].chunk = NULL;
+        return;
+    }
+#endif
+
 
     D_800F89B8 = &D_800F8958[D_800F89C0];
 
@@ -3829,6 +3856,16 @@ void Course_DrawBackwardRoadChunkGroup(void) {
 }
 
 void Course_DrawForwardRoadChunkGroup(void) {
+#ifdef PORT
+    Gfx* mesh = gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk);
+    if (mesh != NULL) {
+        gSPDisplayList(sCourseDisp++, mesh);
+        // Retained triangles replace both native vertex-cache entries.
+        D_800F8958[0].chunk = D_800F8958[1].chunk = NULL;
+        return;
+    }
+#endif
+
     D_800F89B8 = &D_800F8958[D_800F89C0];
 
     if (sWorkingNextSegmentChunk == D_800F89B8->chunk) {
@@ -4452,7 +4489,11 @@ void Course_DrawBackwardChunkGroup(SegmentChunkGroup* chunkGroup) {
         }
 
 #ifdef EXPANSION_KIT
-        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]) {
+        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]
+#ifdef PORT
+            && gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL
+#endif
+        ) {
             break;
         }
 #endif
@@ -4536,7 +4577,11 @@ void Course_DrawForwardChunkGroup(SegmentChunkGroup* chunkGroup) {
         }
 
 #ifdef EXPANSION_KIT
-        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]) {
+        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]
+#ifdef PORT
+            && gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL
+#endif
+        ) {
             break;
         }
 #endif
@@ -4644,7 +4689,11 @@ Gfx* func_800A95B4(Gfx* gfx) {
     do {
 #ifdef EXPANSION_KIT
         // Unsure why this check is like this
-        if (gCourseVtxPtr >= &gGfxPool->effectsVtxBuffer[0x7E5]) {
+        if (gCourseVtxPtr >= &gGfxPool->effectsVtxBuffer[0x7E5]
+#ifdef PORT
+            && gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL
+#endif
+        ) {
             return sCourseDisp;
         }
 #endif

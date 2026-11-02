@@ -2232,11 +2232,30 @@ void func_8008D3C4(s32 character, s32 arg1) {
     Gfx* gfx;
     s32 i;
     Machine* machine = &gMachines[character];
+#ifdef PORT
+    s32 captureCharacter = character;
+    size_t captureTextureCount;
+    u8 captureRed = machine->red[0];
+    u8 captureGreen = machine->green[0];
+    u8 captureBlue = machine->blue[0];
+    extern void GdxMachineCapture_Prepared(int character, const void* setup, const void* textures,
+                                           size_t textureCount, const void* model, size_t modelCount,
+                                           unsigned char red, unsigned char green, unsigned char blue);
+#endif
 
+#if defined(PORT) && defined(EXPANSION_KIT)
+    if (gGreyscaleMachinePart && (machine->customType == CUSTOM_MACHINE_DEFAULT)) {
+        captureRed = captureGreen = captureBlue =
+            ((machine->red[0] * 77) + (machine->green[0] * 151) + (machine->blue[0] * 28)) >> 8;
+    }
+#endif
     if (machine->customType == CUSTOM_MACHINE_EDITED) {
         gfx = Machine_DrawLoadCustomTextures(D_800CDD38[arg1], sCustomMachineInfo[character].logo, machine->number - 1,
                                              sCustomMachineInfo[character].decal);
         gSPEndDisplayList(gfx);
+#ifdef PORT
+        captureTextureCount = (size_t)(gfx - D_800CDD38[arg1]) + 1;
+#endif
 
 #ifdef PORT
         /* F4a: restore stock LOD buffers for custom machines; model packs are stock-only
@@ -2252,6 +2271,13 @@ void func_8008D3C4(s32 character, s32 arg1) {
                                      255, 255, sCustomMachineInfo[character].cockpitR,
                                      sCustomMachineInfo[character].cockpitG, sCustomMachineInfo[character].cockpitB);
             gSPEndDisplayList(gfx);
+#ifdef PORT
+            if (i == 0) {
+                GdxMachineCapture_Prepared(captureCharacter, D_303A5F8, D_800CDD38[arg1], captureTextureCount,
+                                           D_800CDDB0[arg1 * 6], (size_t)(gfx - D_800CDDB0[arg1 * 6]) + 1,
+                                           captureRed, captureGreen, captureBlue);
+            }
+#endif
         }
 
         return;
@@ -2264,6 +2290,9 @@ void func_8008D3C4(s32 character, s32 arg1) {
 
     gfx = sMachineLoadTexturesFuncs[character](D_800CDD38[arg1]);
     gSPEndDisplayList(gfx);
+#ifdef PORT
+    captureTextureCount = (size_t)(gfx - D_800CDD38[arg1]) + 1;
+#endif
 
 #ifdef PORT
     /* F4a: keep the stock LOD buffers live while the machine-draw functions write
@@ -2273,6 +2302,14 @@ void func_8008D3C4(s32 character, s32 arg1) {
     for (i = 4; i >= 0; i--) {
         gfx = sMachineDrawFuncs[character][i](D_800CDDB0[arg1 * 6 + i]);
         gSPEndDisplayList(gfx);
+#ifdef PORT
+        if (i == 0) {
+            // Capture before a model pack can replace the native list pointers.
+            GdxMachineCapture_Prepared(captureCharacter, D_303A5F8, D_800CDD38[arg1], captureTextureCount,
+                                       D_800CDDB0[arg1 * 6], (size_t)(gfx - D_800CDDB0[arg1 * 6]) + 1,
+                                       captureRed, captureGreen, captureBlue);
+        }
+#endif
     }
 #ifdef PORT
     /* F4a: repoint stock LOD lists at workshop pack models when enabled; declared inline

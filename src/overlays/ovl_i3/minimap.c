@@ -2,6 +2,12 @@
 #include "minimap.h"
 #include "fzx_game.h"
 #include "fzx_racer.h"
+#ifdef PORT
+extern void gdx_course_branch_minimap(u8*, f32, s32);
+extern s32 CVarGetInteger(const char*, s32);
+static s32 sMinimapForks;
+static bool sMinimapRefresh;
+#endif
 #include ASSET_HEADER(course_track_gfx.h)
 
 #ifndef EXPANSION_KIT
@@ -59,7 +65,11 @@ void Minimap_InitCourseMinimap(void) {
     CourseInfo* courseInfo;
 
 #ifdef EXPANSION_KIT
-    if (!gInCourseEditor) {
+    if (!gInCourseEditor
+#ifdef PORT
+        && !sMinimapRefresh
+#endif
+    ) {
         sCourseMinimapTex = Arena_Allocate(ALLOC_FRONT, MINIMAP_MAX_SIZE);
     }
 #endif
@@ -81,6 +91,12 @@ void Minimap_InitCourseMinimap(void) {
     for (i = 0; i < MINIMAP_MAX_SIZE; i++) {
         sCourseMinimapTex[i] = MINIMAP_PALETTE_CLEAR;
     }
+#ifdef PORT
+    sMinimapForks = CVarGetInteger("gEnhancements.CourseEdit.ForkMinimap", 0) != 0;
+    if (sMinimapForks) {
+        gdx_course_branch_minimap(sCourseMinimapTex, scale, 0);
+    }
+#endif
 #ifdef PORT
     { extern void gdx_ck(const char*); gdx_ck("[mmap] B_pre_segments"); }
 #endif
@@ -140,6 +156,11 @@ void Minimap_InitCourseMinimap(void) {
         }
     }
 
+#ifdef PORT
+    if (sMinimapForks) {
+        gdx_course_branch_minimap(sCourseMinimapTex, scale, 1);
+    }
+#endif
     segment = courseInfo->courseSegments;
     t = 0.0f;
     startSegment = segment;
@@ -225,6 +246,15 @@ Gfx* Minimap_DrawCourseMinimap(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     f32 minimapScale;
     s32 playerMarkerX;
     s32 playerMarkerY;
+
+#ifdef PORT
+    if (sCourseMinimapTex && sMinimapForks != (CVarGetInteger("gEnhancements.CourseEdit.ForkMinimap", 0) != 0)) {
+        // Repainting a live preference must reuse the race's arena allocation.
+        sMinimapRefresh = true;
+        Minimap_InitCourseMinimap();
+        sMinimapRefresh = false;
+    }
+#endif
 
     if ((controller->buttonPressed & BTN_CLEFT) && (numPlayersIndex >= 2)) {
         if (gTitleDemoState == TITLE_DEMO_INACTIVE) {

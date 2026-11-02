@@ -53,6 +53,8 @@ void GdxContentImport_RunOnDiskThread(void);
  * 32 = cup-bundle install (per-track CRSD saves + CENT write). Staging and completion live in
  * port/gdx_content_import.c. */
 void GdxContentCup_RunOnDiskThread(void);
+void GdxContentRecovery_RunOnDiskThread(void);
+void gdx_recovery_disk_ready(void);
 void GdxContentBundle_RunOnDiskThread(void);
 #endif
 
@@ -102,6 +104,9 @@ void func_80767958(void* entry) {
     unk_807C6F10* temp_v1;
 
     osCreateMesgQueue(&D_807C6E90, D_807C7030, ARRAY_COUNT(D_807C7030));
+#ifdef PORT
+    gdx_recovery_disk_ready();
+#endif
     osCreateMesgQueue(&D_807C7058, &D_807C7070, 1);
     func_80767940();
 
@@ -209,6 +214,12 @@ void func_80767958(void* entry) {
 #ifdef PORT
         /* E2 .gdxc content import. Same completion shape as the unk_00 == 5 path (prompt slot
          * cleared, busy flags dropped); the import itself never raises a prompt id. */
+        if (D_807C6EA8.unk_00 == 33) {
+            GdxContentRecovery_RunOnDiskThread();
+            func_80767940();
+            D_80794E14 = D_80794E18 = 0;
+            continue;
+        }
         if (D_807C6EA8.unk_00 == 30) {
             GdxContentImport_RunOnDiskThread();
             func_80767940();
@@ -698,3 +709,15 @@ void func_80768D30(void) {
 
     PRINTF("[ERROR] RING-BUFFER EMPTY\n");
 }
+
+#ifdef PORT
+s32 GdxContentRecovery_EnqueueDiskOp(void) {
+    if (D_80794E18 != 0 || D_80794E14 != 0) {
+        return -1;
+    }
+    D_807C6EA8.unk_00 = 33;
+    D_807C6EA8.unk_04 = D_807C6EA8.unk_08 = D_807C6EA8.unk_0C = 0;
+    osSendMesg(&D_807C6E90, NULL, OS_MESG_BLOCK);
+    return 0;
+}
+#endif

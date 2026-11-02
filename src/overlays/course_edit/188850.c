@@ -2650,6 +2650,30 @@ static void gdx_course_edit_set_scalar_target(s32 moveOption, s32 targetOffset) 
     }
 }
 
+static void gdx_course_edit_apply_typed_scalar(void) {
+    s32 option;
+    s32 value;
+    s32 i;
+
+    if (!gdx_course_edit_input_take_scalar_value(&option, &value)) {
+        return;
+    }
+    if (option != gMoveOption || gdx_course_edit_native_selection_mask() == 0) {
+        gdx_course_edit_native_play_refusal();
+        return;
+    }
+    func_xk2_800EF78C();
+    for (i = 0; i < gdx_course_edit_native_point_count(); i++) {
+        CourseSegment* segment = &D_802CB6D0.unk_0000[i];
+
+        if (D_80128690[i].unk_08 != 0) {
+            gdx_course_edit_scalar_value_apply(option, value, &segment->radiusLeft, &segment->radiusRight);
+        }
+    }
+    D_xk2_800F7040 = 3;
+    Audio_TriggerSystemSE(NA_SE_39);
+}
+
 // Tick side of a typed bank value. Every selected point takes it, as one undo step.
 static void gdx_course_edit_apply_typed_bank(void) {
     s32 bank;
@@ -2795,6 +2819,7 @@ void gdx_course_edit_native_update(void) {
     }
     /* Line up (tool 6, Enter). The port has pre-checked the run. This applies it with the undo backup. */
     gdx_course_edit_native_apply_line_up();
+    gdx_course_edit_apply_typed_scalar();
     gdx_course_edit_apply_typed_bank();
     if (gdx_course_edit_input_take_drag_start(&pointIndex)) {
         gdx_course_edit_begin_mouse_drag(pointIndex);

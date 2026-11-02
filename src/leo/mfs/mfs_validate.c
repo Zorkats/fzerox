@@ -10,6 +10,12 @@ s32 Mfs_ValidateFileSystemOperation(s32 validationFlags, u16 entryIndex, u16 sub
 
     dirEntryIndex = MFS_ENTRY_DOES_NOT_EXIST;
     if (validationFlags & MFS_VALIDATION_CHECK_WRITE) {
+#ifdef PORT
+        extern int gdx_recovery_blocks_writes(void);
+        if (gdx_recovery_blocks_writes()) {
+            return -1;
+        }
+#endif
         if (gMfsRamArea.id.attr & MFS_VOLUME_ATTR_WPROTECT) {
             return -1;
         }
