@@ -18,6 +18,34 @@
 #define IN_COURSE_EDITOR (gInCourseEditor && !gInCourseEditTestRun)
 #endif
 
+#ifdef PORT
+#include "../../../port/gdx_course_branch.h"
+#include "../../../port/gdx_course_disk.h"
+#include "../../../port/gdx_course_gadget_budget.h"
+
+#define GDX_GADGET_COUNT(course) gdx_course_branch_gadget_count(course)
+#define GDX_GADGET_SEGMENT(course, index) gdx_course_branch_gadget_segment(course, index)
+#define GDX_GADGET_PART(kind, index, part) \
+    gdx_course_branch_gadget_part(index, part, COURSE_CONTEXT()->courseData.kind[gdx_course_branch_gadget_source(index)])
+extern void gdx_dbg_logf(const char* fmt, ...);
+#else
+#define GDX_GADGET_COUNT(course) gCourseInfos[course].segmentCount
+#define GDX_GADGET_SEGMENT(course, index) (&gCourseInfos[course].courseSegments[index])
+#define GDX_GADGET_PART(kind, index, part) COURSE_CONTEXT()->courseData.kind[index]
+#endif
+
+extern s32 gCourseIndex;
+extern CourseInfo gCourseInfos[];
+
+#ifdef GDX_GADGET_GENERATION_TEST
+bool gInCourseEditor = false;
+bool gInCourseEditTestRun = false;
+extern CourseFeaturesInfo gCourseFeaturesInfo;
+extern CourseEffectsInfo gCourseEffectsInfo;
+extern CourseFeature gCourseFeatures[];
+extern CourseEffect gCourseEffects[];
+extern unk_807B3C20 D_802CB6D0;
+#else
 OSMesg D_800E12B0;
 UNUSED s8 D_800E12B8[0x8];
 CourseEffectsInfo* D_800E12C0;
@@ -147,7 +175,7 @@ void Course_LandminesViewInteractDataInit(void) {
             continue;
         }
 
-        segment = &gCurrentCourseInfo->courseSegments[feature->segmentIndex];
+        segment = GDX_GADGET_SEGMENT(gCourseIndex, feature->segmentIndex);
         lengthProportionAlongSegment = Course_SplineGetLengthInfo(segment, feature->segmentTValue, &lengthFromStart);
         Course_SplineGetBasis(segment, feature->segmentTValue, &segmentBasis, lengthProportionAlongSegment);
         Course_SplineGetPosition(segment, feature->segmentTValue, &pos);
@@ -195,12 +223,12 @@ void Course_LandminesViewInteractDataInit(void) {
         courseFeaturesInfo->landmineCount++;
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
-        gCurrentCourseInfo->courseSegments[i].landminesStart = NULL;
-        gCurrentCourseInfo->courseSegments[i].landminesEnd = NULL;
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
+        GDX_GADGET_SEGMENT(gCourseIndex, i)->landminesStart = NULL;
+        GDX_GADGET_SEGMENT(gCourseIndex, i)->landminesEnd = NULL;
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
         for (j = 0, k = 0; k < courseFeaturesInfo->featureCount; k++) {
             feature = &courseFeaturesInfo->features[k];
             if (feature->featureType != COURSE_FEATURE_LANDMINE) {
@@ -208,7 +236,7 @@ void Course_LandminesViewInteractDataInit(void) {
             }
 
             if (i == feature->segmentIndex) {
-                gCurrentCourseInfo->courseSegments[i].landminesEnd = &gLandmines[j + 1];
+                GDX_GADGET_SEGMENT(gCourseIndex, i)->landminesEnd = &gLandmines[j + 1];
             }
             j++;
         }
@@ -217,7 +245,7 @@ void Course_LandminesViewInteractDataInit(void) {
     //! @bug j is potentially uninitialised here
     courseFeaturesInfo->landmineCount = j;
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
         for (j = courseFeaturesInfo->landmineCount, k = courseFeaturesInfo->featureCount - 1; k >= 0; k--) {
             feature = &courseFeaturesInfo->features[k];
             if (feature->featureType != COURSE_FEATURE_LANDMINE) {
@@ -225,11 +253,15 @@ void Course_LandminesViewInteractDataInit(void) {
             }
 
             if (i == feature->segmentIndex) {
-                gCurrentCourseInfo->courseSegments[i].landminesStart = &gLandmines[j - 1];
+                GDX_GADGET_SEGMENT(gCourseIndex, i)->landminesStart = &gLandmines[j - 1];
             }
             j--;
         }
     }
+#ifdef PORT
+    gdx_course_branch_sync_gadgets();
+#endif
+
 }
 
 extern CourseDecoration gCourseDecorations[];
@@ -687,7 +719,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                     for (k = 0; k < 15; k++) {
                         temp_t0 = k << 1;
                         tempVtx = &vtx[(k << 1)];
-                        if (gSegmentChunks[D_800E12C8[k + var_v1]].drawState == 0) {
+                        if (
+#ifdef PORT
+                            !gdx_course_branch_gadget_chunk_visible(D_800E12C8[k + var_v1])
+#else
+                            gSegmentChunks[D_800E12C8[k + var_v1]].drawState == 0
+#endif
+                        ) {
                             continue;
                         }
                         if ((tempVtx[2].v.tc[1] < tempVtx[0].v.tc[1]) || (tempVtx[3].v.tc[1] < tempVtx[1].v.tc[1])) {
@@ -709,7 +747,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 for (k = 0; k < temp_s3; k++) {
                     temp_t0 = k << 1;
                     tempVtx = &vtx[(k << 1)];
-                    if (gSegmentChunks[D_800E12C8[k + var_v1]].drawState == 0) {
+                    if (
+#ifdef PORT
+                            !gdx_course_branch_gadget_chunk_visible(D_800E12C8[k + var_v1])
+#else
+                            gSegmentChunks[D_800E12C8[k + var_v1]].drawState == 0
+#endif
+                        ) {
                         continue;
                     }
                     if ((tempVtx[2].v.tc[1] < tempVtx[0].v.tc[1]) || (tempVtx[3].v.tc[1] < tempVtx[1].v.tc[1])) {
@@ -961,7 +1005,7 @@ void Course_JumpsViewInteractDataInit(void) {
         if (feature->featureType != COURSE_FEATURE_JUMP) {
             continue;
         }
-        segment = &gCurrentCourseInfo->courseSegments[feature->segmentIndex];
+        segment = GDX_GADGET_SEGMENT(gCourseIndex, feature->segmentIndex);
         lengthProportionAlongSegment = Course_SplineGetLengthInfo(segment, feature->segmentTValue, &lengthFromStart);
         Course_SplineGetBasis(segment, feature->segmentTValue, &segmentBasis, lengthProportionAlongSegment);
         Course_SplineGetPosition(segment, feature->segmentTValue, &pos);
@@ -1025,12 +1069,12 @@ void Course_JumpsViewInteractDataInit(void) {
         featuresInfo->jumpCount++;
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
-        gCurrentCourseInfo->courseSegments[i].jumpsStart = NULL;
-        gCurrentCourseInfo->courseSegments[i].jumpsEnd = NULL;
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
+        GDX_GADGET_SEGMENT(gCourseIndex, i)->jumpsStart = NULL;
+        GDX_GADGET_SEGMENT(gCourseIndex, i)->jumpsEnd = NULL;
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
         for (j = 0, k = 0; k < featuresInfo->featureCount; k++) {
             feature = &featuresInfo->features[k];
             if (feature->featureType != COURSE_FEATURE_JUMP) {
@@ -1038,7 +1082,7 @@ void Course_JumpsViewInteractDataInit(void) {
             }
 
             if (i == feature->segmentIndex) {
-                gCurrentCourseInfo->courseSegments[i].jumpsEnd = &gJumps[j + 1];
+                GDX_GADGET_SEGMENT(gCourseIndex, i)->jumpsEnd = &gJumps[j + 1];
             }
             j++;
         }
@@ -1046,7 +1090,7 @@ void Course_JumpsViewInteractDataInit(void) {
     //! @bug j is potentially uninitialised here
     featuresInfo->jumpCount = j;
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
         for (j = featuresInfo->jumpCount, k = featuresInfo->featureCount - 1; k >= 0; k--) {
             feature = &featuresInfo->features[k];
             if (feature->featureType != COURSE_FEATURE_JUMP) {
@@ -1054,11 +1098,15 @@ void Course_JumpsViewInteractDataInit(void) {
             }
 
             if (i == feature->segmentIndex) {
-                gCurrentCourseInfo->courseSegments[i].jumpsStart = &gJumps[j - 1];
+                GDX_GADGET_SEGMENT(gCourseIndex, i)->jumpsStart = &gJumps[j - 1];
             }
             j--;
         }
     }
+#ifdef PORT
+    gdx_course_branch_sync_gadgets();
+#endif
+
 }
 
 extern s32 gSegmentChunkCount;
@@ -1100,7 +1148,7 @@ void Course_DecorationsViewInteractDataInit(void) {
         if (!Course_FeatureIsDecorational(feature->featureType)) {
             continue;
         }
-        segment = &gCurrentCourseInfo->courseSegments[feature->segmentIndex];
+        segment = GDX_GADGET_SEGMENT(gCourseIndex, feature->segmentIndex);
 
         lengthProportionAlongSegment = Course_SplineGetLengthInfo(segment, feature->segmentTValue, &lengthFromStart);
         Course_SplineGetBasis(segment, feature->segmentTValue, &segmentBasis, lengthProportionAlongSegment);
@@ -1235,6 +1283,9 @@ void Course_DecorationsViewInteractDataInit(void) {
             }
             chunk++;
         }
+#ifdef PORT
+        decoration->loadChunk = gdx_course_branch_gadget_load_chunk(segment, &decoration->pos);
+#endif
         decoration++;
     }
 }
@@ -1545,7 +1596,7 @@ void Course_FlatDashVerticesInit(s32 effectIndex, CourseEffect* effect, Vtx** vt
     CourseSegment* segment;
 
     t = effect->segmentTValueStart;
-    segment = &gCurrentCourseInfo->courseSegments[effect->segmentIndex];
+    segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
     vtx = *vtxs;
 
     forwardMagnitude = Course_SplineGetTangent(segment, t, &forward);
@@ -1634,7 +1685,7 @@ void Course_CurvedDashVerticesInit(s32 effectIndex, CourseEffect* effect, Vtx** 
     MtxF rotationMtxF;
 
     t = effect->segmentTValueStart;
-    segment = &gCurrentCourseInfo->courseSegments[effect->segmentIndex];
+    segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
     vtx = *vtxs;
 
     forwardMagnitude = Course_SplineGetTangent(segment, t, &vec);
@@ -1769,10 +1820,19 @@ Vtx* Course_TerrainEffectVerticesInit(CourseSegment* segment, f32 t, CourseEffec
     textureUnit = 0;
 
     while (true) {
+#ifdef PORT
+        if (D_800CD1E8 + 2 > D_800E32CC) {
+            return vtx;
+        }
+#endif
 #ifdef EXPANSION_KIT
         if (!IN_COURSE_EDITOR) {
 #endif
+#ifdef PORT
+            D_800E12C8[(vtx - sTerrainEffectVtxStart) / 2] = gdx_course_branch_gadget_chunk(segment, t);
+#else
             func_8006FD7C((s32) (vtx - sTerrainEffectVtxStart) / 2, segment->segmentIndex, t);
+#endif
 #ifdef EXPANSION_KIT
         }
 #endif
@@ -1871,7 +1931,11 @@ Vtx* Course_TerrainEffectVerticesInit(CourseSegment* segment, f32 t, CourseEffec
             }
 
         } else {
+#ifdef PORT
+            t = gdx_course_branch_gadget_next_t(segment, t);
+#else
             t = func_8006FE90(segment->segmentIndex, t);
+#endif
 
             if (effect->segmentTValueEnd <= t) {
                 if (1) {}
@@ -2029,6 +2093,45 @@ Vtx* Course_TerrainEffectVerticesInitFromStorage(CourseSegment* segment, CourseE
 }
 #endif
 
+#ifdef PORT
+static s32 Course_GdxTerrainPreflight(CourseEffectsInfo* info, s32 budget) {
+    s32 i;
+    s32 samples;
+    s32 vertices;
+    f32 t;
+    f32 next;
+    CourseEffect* effect;
+    CourseSegment* segment;
+
+    for (i = 0; i < info->count; i++) {
+        effect = &info->effects[i];
+        if (effect->effectType == COURSE_EFFECT_DASH) {
+            continue;
+        }
+        segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
+        t = effect->segmentTValueStart;
+        samples = 1;
+        if (!(t >= 0.0f && t < effect->segmentTValueEnd && effect->segmentTValueEnd <= 1.0f)) {
+            return 0;
+        }
+        while (t < effect->segmentTValueEnd && samples <= 2048) {
+            next = gdx_course_branch_gadget_next_t(segment, t);
+            if (!(next > t && next <= 1.0f)) {
+                return 0;
+            }
+            t = next < effect->segmentTValueEnd ? next : effect->segmentTValueEnd;
+            samples++;
+        }
+        vertices = gdx_gadget_terrain_vertices(samples, budget);
+        if (vertices < 0) {
+            return 0;
+        }
+        budget -= vertices;
+    }
+    return 1;
+}
+#endif
+
 void Course_EffectsViewInteractDataInit(bool arg0) {
     s32 i;
     s32 j;
@@ -2077,13 +2180,26 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
     }
 
 #ifdef PORT
+    if (!Course_GdxTerrainPreflight(effectsInfo, D_800E32CC)) {
+        gdx_course_gadget_error = 2;
+        gdx_dbg_logf("[course] terrain vertex budget exceeded; gadgets disabled\n");
+        effectsInfo->count = 0;
+        gCourseFeaturesInfo.featureCount = 0;
+        gCourseFeaturesInfo.landmineCount = 0;
+        gCourseFeaturesInfo.jumpCount = 0;
+        for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
+            segment = GDX_GADGET_SEGMENT(gCourseIndex, i);
+            segment->landminesStart = segment->landminesEnd = NULL;
+            segment->jumpsStart = segment->jumpsEnd = NULL;
+        }
+    }
     sMagnetRailVtxCount[D_8079F93C] = 0;
     sMagnetRailPulseS = 0.0f;
 #endif
 
     for (i = 0; i < effectsInfo->count; i++) {
         effect = &effectsInfo->effects[i];
-        segment = &gCurrentCourseInfo->courseSegments[effect->segmentIndex];
+        segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
 
 #ifndef EXPANSION_KIT
         gEffectsDrawData[i].effectType = effect->effectType;
@@ -2125,7 +2241,12 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
 
             // Check if texture continues from the previous
             for (j = 0; j < i; j++) {
-                if ((effect->segmentIndex == (effectsInfo->effects[j].segmentIndex + 1)) &&
+                if (
+#ifdef PORT
+                    gdx_course_branch_gadget_adjacent(GDX_GADGET_SEGMENT(gCourseIndex, effectsInfo->effects[j].segmentIndex), segment) &&
+#else
+                    (effect->segmentIndex == (effectsInfo->effects[j].segmentIndex + 1)) &&
+#endif
                     (effect->effectType == effectsInfo->effects[j].effectType) &&
                     (effectsInfo->effects[j].segmentTValueEnd == 1.0f) &&
                     (effect->rightEdgeDistance == effectsInfo->effects[j].rightEdgeDistance) &&
@@ -2160,9 +2281,11 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
             }
 #endif
 
+#ifndef PORT
             if (D_800CD1E8 >= D_800E32CC) {
                 effectsInfo->count = i - 1;
             }
+#endif
 #ifndef EXPANSION_KIT
             gEffectsDrawData[i].effectType = effect->effectType;
 #endif
@@ -2174,28 +2297,32 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
 #endif
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
-        gCurrentCourseInfo->courseSegments[i].effectsStart = NULL;
-        gCurrentCourseInfo->courseSegments[i].effectsEnd = NULL;
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
+        GDX_GADGET_SEGMENT(gCourseIndex, i)->effectsStart = NULL;
+        GDX_GADGET_SEGMENT(gCourseIndex, i)->effectsEnd = NULL;
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
         for (j = 0; j < effectsInfo->count; j++) {
             effect = &effectsInfo->effects[j];
             if (i == effect->segmentIndex) {
-                gCurrentCourseInfo->courseSegments[i].effectsEnd = &gEffects[j + 1];
+                GDX_GADGET_SEGMENT(gCourseIndex, i)->effectsEnd = &gEffects[j + 1];
             }
         }
     }
 
-    for (i = 0; i < gCurrentCourseInfo->segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(gCourseIndex); i++) {
         for (j = effectsInfo->count - 1; j >= 0; j--) {
             effect = &effectsInfo->effects[j];
             if (i == effect->segmentIndex) {
-                gCurrentCourseInfo->courseSegments[i].effectsStart = &gEffects[j];
+                GDX_GADGET_SEGMENT(gCourseIndex, i)->effectsStart = &gEffects[j];
             }
         }
     }
+
+#ifdef PORT
+    gdx_course_branch_sync_gadgets();
+#endif
 
 #ifndef EXPANSION_KIT
     for (i = 0; i < effectsInfo->count; i++) {}
@@ -2204,6 +2331,8 @@ void Course_EffectsViewInteractDataInit(bool arg0) {
     for (i = 0; i < (temp = effectsInfo)->count; i++) {}
 #endif
 }
+
+#endif
 
 extern CourseInfo gCourseInfos[56];
 
@@ -2248,7 +2377,7 @@ void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
     f32 minimumDistanceFromCenter;
     s32 pad[6];
 
-    segment = &gCourseInfos[courseIndex].courseSegments[segmentIndex];
+    segment = GDX_GADGET_SEGMENT(courseIndex, segmentIndex);
     segmentWidth = segment->radiusLeft + segment->radiusRight;
     nextSegmentWidth = segment->next->radiusLeft + segment->next->radiusRight;
 
@@ -2272,19 +2401,19 @@ void Course_SegmentPitInit(s32 courseIndex, s32 segmentIndex) {
 
 #ifdef PORT
     {
-        s32 pit = COURSE_CONTEXT()->courseData.pit[segmentIndex];
+        s32 pit = GDX_GADGET_PART(pit, segmentIndex, 0);
         s32 shape = ((pit == PIT_BOTH) || (pit == PIT_LAVA_BOTH))       ? GDX_SETTINGS_VIEW_SHAPE_BOTH
                     : ((pit == PIT_MIDDLE) || (pit == PIT_LAVA_MIDDLE)) ? GDX_SETTINGS_VIEW_SHAPE_MIDDLE
                                                                         : GDX_SETTINGS_VIEW_SHAPE_SIDE;
 
         effectDistanceFromCenter = gdx_settings_view_part_edge(
-            effectDistanceFromCenter, gdx_settings_view_pit_width(gdx_course_branch_control_point(segmentIndex)), shape,
+            effectDistanceFromCenter, gdx_settings_view_pit_width(gdx_course_branch_settings_point(segment)), shape,
             segmentWidth, nextSegmentWidth);
     }
 #endif
 
     // clang-format off
-    switch (COURSE_CONTEXT()->courseData.pit[segmentIndex]) {
+    switch (GDX_GADGET_PART(pit, segmentIndex, 0)) {
         case PIT_LEFT:
             effect->segmentIndex = segmentIndex; \
             effect->effectType = COURSE_EFFECT_PIT;
@@ -2450,7 +2579,7 @@ void Course_SegmentDirtInit(s32 courseIndex, s32 segmentIndex) {
     effectCount = gCourseEffectsInfo.count;
     effect = &gCourseEffectsInfo.effects[effectCount];
 
-    segment = &gCourseInfos[courseIndex].courseSegments[segmentIndex];
+    segment = GDX_GADGET_SEGMENT(courseIndex, segmentIndex);
 
     segmentWidth = segment->radiusLeft + segment->radiusRight;
     nextSegmentWidth = segment->next->radiusLeft + segment->next->radiusRight;
@@ -2473,10 +2602,10 @@ void Course_SegmentDirtInit(s32 courseIndex, s32 segmentIndex) {
 
 #ifdef PORT
     {
-        s32 dirt = COURSE_CONTEXT()->courseData.dirt[segmentIndex];
+        s32 dirt = GDX_GADGET_PART(dirt, segmentIndex, 2);
 
         effectDistanceFromCenter = gdx_settings_view_part_edge(
-            effectDistanceFromCenter, gdx_settings_view_dirt_width(gdx_course_branch_control_point(segmentIndex)),
+            effectDistanceFromCenter, gdx_settings_view_dirt_width(gdx_course_branch_settings_point(segment)),
             (dirt == DIRT_BOTH)     ? GDX_SETTINGS_VIEW_SHAPE_BOTH
             : (dirt == DIRT_MIDDLE) ? GDX_SETTINGS_VIEW_SHAPE_MIDDLE
                                     : GDX_SETTINGS_VIEW_SHAPE_SIDE,
@@ -2485,7 +2614,7 @@ void Course_SegmentDirtInit(s32 courseIndex, s32 segmentIndex) {
 #endif
 
     // clang-format off
-    switch (COURSE_CONTEXT()->courseData.dirt[segmentIndex]) {
+    switch (GDX_GADGET_PART(dirt, segmentIndex, 2)) {
         case DIRT_LEFT:
             effect->segmentIndex = segmentIndex; \
             effect->effectType = COURSE_EFFECT_DIRT;
@@ -2578,7 +2707,7 @@ void Course_SegmentIceInit(s32 courseIndex, s32 segmentIndex) {
     effectCount = gCourseEffectsInfo.count;
     effect = &gCourseEffectsInfo.effects[effectCount];
 
-    segment = &gCourseInfos[courseIndex].courseSegments[segmentIndex];
+    segment = GDX_GADGET_SEGMENT(courseIndex, segmentIndex);
 
     segmentWidth = segment->radiusLeft + segment->radiusRight;
     nextSegmentWidth = segment->next->radiusLeft + segment->next->radiusRight;
@@ -2601,10 +2730,10 @@ void Course_SegmentIceInit(s32 courseIndex, s32 segmentIndex) {
 
 #ifdef PORT
     {
-        s32 ice = COURSE_CONTEXT()->courseData.ice[segmentIndex];
+        s32 ice = GDX_GADGET_PART(ice, segmentIndex, 3);
 
         effectDistanceFromCenter = gdx_settings_view_part_edge(
-            effectDistanceFromCenter, gdx_settings_view_ice_width(gdx_course_branch_control_point(segmentIndex)),
+            effectDistanceFromCenter, gdx_settings_view_ice_width(gdx_course_branch_settings_point(segment)),
             (ice == ICE_BOTH)     ? GDX_SETTINGS_VIEW_SHAPE_BOTH
             : (ice == ICE_MIDDLE) ? GDX_SETTINGS_VIEW_SHAPE_MIDDLE
                                   : GDX_SETTINGS_VIEW_SHAPE_SIDE,
@@ -2613,7 +2742,7 @@ void Course_SegmentIceInit(s32 courseIndex, s32 segmentIndex) {
 #endif
 
     // clang-format off
-    switch (COURSE_CONTEXT()->courseData.ice[segmentIndex]) {
+    switch (GDX_GADGET_PART(ice, segmentIndex, 3)) {
         case ICE_LEFT:
             effect->segmentIndex = segmentIndex; \
             effect->effectType = COURSE_EFFECT_ICE;
@@ -2728,8 +2857,8 @@ void Course_LandminesInit(s32 courseIndex) {
     jumpCount = gCourseFeaturesInfo.jumpCount;
     feature = &gCourseFeaturesInfo.features[featureCount];
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
-        segment = &gCourseInfos[courseIndex].courseSegments[i];
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        segment = GDX_GADGET_SEGMENT(courseIndex, i);
         lengthFactor = segment->length;
 
         segmentWidth = segment->radiusLeft + segment->radiusRight;
@@ -2741,7 +2870,7 @@ void Course_LandminesInit(s32 courseIndex) {
 
         t = 0.0f;
 
-        switch (COURSE_CONTEXT()->courseData.landmine[i]) {
+        switch (GDX_GADGET_PART(landmine, i, 5)) {
             case LANDMINE_MIDDLE:
 #ifdef EXPANSION_KIT
                 // FAKE
@@ -3201,8 +3330,8 @@ void Course_JumpsInit(s32 courseIndex) {
 
     feature = &gCourseFeaturesInfo.features[featureCount];
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
-        segment = &gCourseInfos[courseIndex].courseSegments[i];
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        segment = GDX_GADGET_SEGMENT(courseIndex, i);
 
         segmentWidth = segment->radiusLeft + segment->radiusRight;
         segmentWidthVariance = segment->next->radiusLeft + segment->next->radiusRight;
@@ -3213,7 +3342,7 @@ void Course_JumpsInit(s32 courseIndex) {
 
         t = 0.0f;
 
-        switch (COURSE_CONTEXT()->courseData.jump[i]) {
+        switch (GDX_GADGET_PART(jump, i, 4)) {
             case JUMP_ALL:
                 t -= 100.0f / Course_SplineGetTangent(segment, 1.0f, &tangent);
                 t += 1.0f;
@@ -3284,7 +3413,7 @@ void Course_SegmentDashInit(s32 courseIndex, s32 segmentIndex) {
 
     effectCount = gCourseEffectsInfo.count;
     effect = &gCourseEffectsInfo.effects[effectCount];
-    segment = &gCourseInfos[courseIndex].courseSegments[segmentIndex];
+    segment = GDX_GADGET_SEGMENT(courseIndex, segmentIndex);
     width = segment->radiusLeft + segment->radiusRight;
     widthVariance = segment->next->radiusLeft + segment->next->radiusRight;
     segmentCenterDistance = (segment->radiusLeft - segment->radiusRight) / 2;
@@ -3295,7 +3424,7 @@ void Course_SegmentDashInit(s32 courseIndex, s32 segmentIndex) {
 
     t = 0;
 
-    switch (COURSE_CONTEXT()->courseData.dash[segmentIndex]) {
+    switch (GDX_GADGET_PART(dash, segmentIndex, 1)) {
         case DASH_MIDDLE:
             lengthFactor /= 2;
             forwardMagnitude = Course_SplineGetTangent(segment, 0, &tangent);
@@ -3403,8 +3532,8 @@ void Course_GatesInit(s32 courseIndex) {
 
     feature = &gCourseFeaturesInfo.features[featureCount];
     for (i = 0; i < 3; i++) {
-        for (j = 0; j < gCourseInfos[courseIndex].segmentCount; j++) {
-            segment = &gCourseInfos[courseIndex].courseSegments[j];
+        for (j = 0; j < GDX_GADGET_COUNT(courseIndex); j++) {
+            segment = GDX_GADGET_SEGMENT(courseIndex, j);
 
             if (i == 3) {}
 
@@ -3415,8 +3544,8 @@ void Course_GatesInit(s32 courseIndex) {
             segmentWidthVariance -= segmentWidth;
             segmentCenterVariance -= segmentCenterDistance;
 
-            if (i == COURSE_CONTEXT()->courseData.gate[j]) {
-                switch (COURSE_CONTEXT()->courseData.gate[j]) {
+            if (i == GDX_GADGET_PART(gate, j, 6)) {
+                switch (GDX_GADGET_PART(gate, j, 6)) {
                     case GATE_SQUARE:
                         feature->featureType = COURSE_FEATURE_GATE_SQUARE;
                         break;
@@ -3459,8 +3588,8 @@ void Course_TallBuildingsInit(s32 courseIndex) {
 
     feature = &gCourseFeaturesInfo.features[featureCount];
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
-        segment = &gCourseInfos[courseIndex].courseSegments[i];
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        segment = GDX_GADGET_SEGMENT(courseIndex, i);
 
         segmentWidth = segment->radiusLeft + segment->radiusRight;
         segmentWidthVariance = segment->next->radiusLeft + segment->next->radiusRight;
@@ -3469,7 +3598,7 @@ void Course_TallBuildingsInit(s32 courseIndex) {
         segmentWidthVariance -= segmentWidth;
         segmentCenterVariance -= segmentCenterDistance;
 
-        switch (COURSE_CONTEXT()->courseData.building[i]) {
+        switch (GDX_GADGET_PART(building, i, 7)) {
             case BUILDING_TALL_LEFT:
                 feature->featureType = COURSE_FEATURE_BUILDING_TALL_LEFT;
                 feature->segmentIndex = i;
@@ -3544,8 +3673,8 @@ void Course_ShortBuildingsInit(s32 courseIndex) {
 
     feature = &gCourseFeaturesInfo.features[featureCount];
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
-        segment = &gCourseInfos[courseIndex].courseSegments[i];
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        segment = GDX_GADGET_SEGMENT(courseIndex, i);
 
         segmentWidth = segment->radiusLeft + segment->radiusRight;
         segmentWidthVariance = segment->next->radiusLeft + segment->next->radiusRight;
@@ -3554,7 +3683,7 @@ void Course_ShortBuildingsInit(s32 courseIndex) {
         segmentWidthVariance -= segmentWidth;
         segmentCenterVariance -= segmentCenterDistance;
 
-        switch (COURSE_CONTEXT()->courseData.building[i]) {
+        switch (GDX_GADGET_PART(building, i, 7)) {
             case BUILDING_SHORT_LEFT:
                 feature->featureType = COURSE_FEATURE_BUILDING_SHORT_LEFT;
                 feature->segmentIndex = i;
@@ -3629,8 +3758,8 @@ void Course_SpireBuildingsInit(s32 courseIndex) {
     featureCount = gCourseFeaturesInfo.featureCount;
     feature = &gCourseFeaturesInfo.features[featureCount];
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
-        segment = &gCourseInfos[courseIndex].courseSegments[i];
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        segment = GDX_GADGET_SEGMENT(courseIndex, i);
 
         segmentWidth = segment->radiusLeft + segment->radiusRight;
         segmentWidthVariance = segment->next->radiusLeft + segment->next->radiusRight;
@@ -3639,7 +3768,7 @@ void Course_SpireBuildingsInit(s32 courseIndex) {
         segmentWidthVariance -= segmentWidth;
         segmentCenterVariance -= segmentCenterDistance;
 
-        switch (COURSE_CONTEXT()->courseData.building[i]) {
+        switch (GDX_GADGET_PART(building, i, 7)) {
             case BUILDING_SPIRE_LEFT:
                 feature->featureType = COURSE_FEATURE_BUILDING_SPIRE_LEFT;
                 feature->segmentIndex = i;
@@ -3715,8 +3844,8 @@ void Course_ExtraBuildingsInit(s32 courseIndex) {
 
     feature = &gCourseFeaturesInfo.features[featureCount];
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
-        segment = &gCourseInfos[courseIndex].courseSegments[i];
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        segment = GDX_GADGET_SEGMENT(courseIndex, i);
 
         segmentWidth = segment->radiusLeft + segment->radiusRight;
         segmentWidthVariance = segment->next->radiusLeft + segment->next->radiusRight;
@@ -3725,7 +3854,7 @@ void Course_ExtraBuildingsInit(s32 courseIndex) {
         segmentWidthVariance -= segmentWidth;
         segmentCenterVariance -= segmentCenterDistance;
 
-        switch (COURSE_CONTEXT()->courseData.building[i]) {
+        switch (GDX_GADGET_PART(building, i, 7)) {
             case BUILDING_MOUNTAIN_BOTH:
                 feature->featureType = COURSE_FEATURE_BUILDING_MOUNTAIN_LEFT;
                 feature->segmentIndex = i;
@@ -3857,8 +3986,8 @@ void Course_SignsInit(s32 courseIndex) {
     feature = &gCourseFeaturesInfo.features[featureCount];
 
     for (i = 0; i < 5; i++) {
-        for (j = 0; j < gCourseInfos[courseIndex].segmentCount; j++) {
-            segment = &gCourseInfos[courseIndex].courseSegments[j];
+        for (j = 0; j < GDX_GADGET_COUNT(courseIndex); j++) {
+            segment = GDX_GADGET_SEGMENT(courseIndex, j);
 
             if (i == 5) {}
 
@@ -3869,8 +3998,8 @@ void Course_SignsInit(s32 courseIndex) {
             segmentWidthVariance -= segmentWidth;
             segmentCenterVariance -= segmentCenterDistance;
 
-            if (i == COURSE_CONTEXT()->courseData.sign[j]) {
-                switch (COURSE_CONTEXT()->courseData.sign[j]) {
+            if (i == GDX_GADGET_PART(sign, j, 8)) {
+                switch (GDX_GADGET_PART(sign, j, 8)) {
                     case SIGN_TV:
                         feature->featureType = COURSE_FEATURE_SIGN_TV_RIGHT;
                         feature->segmentIndex = j;
@@ -3992,7 +4121,47 @@ void Course_SignsInit(s32 courseIndex) {
 
 extern unk_807B3C20 D_802CB6D0;
 
+#ifdef PORT
+static s32 Course_GdxGadgetPreflight(s32 courseIndex, s32 editor) {
+    GdxGadgetDemand demand = { 0 };
+    GdxGadgetDemand limit = { 120, 32, 48, 4, 192, 0x80 / 6 };
+    signed char parts[9];
+    s32 i;
+
+#ifndef EXPANSION_KIT
+    limit.features = 105;
+#endif
+    if (editor) {
+        limit.jumps = 8;
+    }
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
+        parts[0] = GDX_GADGET_PART(pit, i, 0);
+        parts[1] = GDX_GADGET_PART(dash, i, 1);
+        parts[2] = GDX_GADGET_PART(dirt, i, 2);
+        parts[3] = GDX_GADGET_PART(ice, i, 3);
+        parts[4] = GDX_GADGET_PART(jump, i, 4);
+        parts[5] = GDX_GADGET_PART(landmine, i, 5);
+        parts[6] = GDX_GADGET_PART(gate, i, 6);
+        parts[7] = GDX_GADGET_PART(building, i, 7);
+        parts[8] = GDX_GADGET_PART(sign, i, 8);
+        if (!gdx_gadget_demand_add(&demand, parts, &limit)) {
+            gdx_course_gadget_error = 1;
+            gdx_dbg_logf("[course] gadget budget/part validation failed at segment %d; gadgets disabled\n", i);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+s32 Course_GdxCanTestDrive(s32 courseIndex) {
+    return gdx_course_gadget_error == 0 && Course_GdxGadgetPreflight(courseIndex, false);
+}
+#endif
+
 void Course_FeaturesInit(s32 courseIndex) {
+#ifdef PORT
+    gdx_course_gadget_error = 0;
+#endif
     if (IN_COURSE_EDITOR) {
         if (D_802CB6D0.controlPointCount < 4) {
             return;
@@ -4001,6 +4170,14 @@ void Course_FeaturesInit(s32 courseIndex) {
         return;
     }
 
+#ifdef PORT
+    if (!Course_GdxGadgetPreflight(courseIndex, IN_COURSE_EDITOR)) {
+        gCourseFeaturesInfo.featureCount = 0;
+        gCourseFeaturesInfo.landmineCount = 0;
+        gCourseFeaturesInfo.jumpCount = 0;
+        return;
+    }
+#endif
     gCourseFeaturesInfo.landmineCount = 0;
     gCourseFeaturesInfo.jumpCount = 0;
     gCourseFeaturesInfo.featureCount = 0;
@@ -4022,9 +4199,15 @@ void Course_EffectsInit(s32 courseIndex) {
         return;
     }
 
+#ifdef PORT
+    if (!Course_GdxGadgetPreflight(courseIndex, IN_COURSE_EDITOR)) {
+        gCourseEffectsInfo.count = 0;
+        return;
+    }
+#endif
     gCourseEffectsInfo.count = 0;
 
-    for (i = 0; i < gCourseInfos[courseIndex].segmentCount; i++) {
+    for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
         Course_SegmentIceInit(courseIndex, i);
         Course_SegmentDirtInit(courseIndex, i);
         Course_SegmentPitInit(courseIndex, i);
@@ -4032,10 +4215,23 @@ void Course_EffectsInit(s32 courseIndex) {
     }
 }
 
+void Course_GadgetsInit(s32 courseIndex) {
+    Course_FeaturesInit(courseIndex);
+    Course_EffectsInit(courseIndex);
+}
+
+#ifndef GDX_GADGET_GENERATION_TEST
+
 extern s32 gCourseIndex;
 extern CourseData D_8010C770;
 extern unk_807B3C20 D_802CDFD8;
+#ifdef PORT
+extern CourseSegment D_802C2020[];
+#define GDX_MAIN_SEGMENTS D_802C2020
+#else
 extern unk_807B3C20 D_802C2020;
+#define GDX_MAIN_SEGMENTS D_802C2020.unk_0000
+#endif
 #ifdef EXPANSION_KIT
 extern CourseSegment D_802D0620[];
 #endif
@@ -4056,7 +4252,7 @@ void Course_SegmentsInit(void) {
 #ifdef EXPANSION_KIT
     courseInfo->courseSegments = D_802D0620;
 #else
-    courseInfo->courseSegments = D_802C2020.unk_0000;
+    courseInfo->courseSegments = GDX_MAIN_SEGMENTS;
 #endif
 
     for (i = 0, segment = courseInfo->courseSegments; i < courseInfo->segmentCount; i++) {
@@ -4122,7 +4318,7 @@ void Course_SegmentsInit(void) {
 
     for (i = 0; i < courseInfo->segmentCount; i++) {
 #ifndef EXPANSION_KIT
-        D_802C2020.unk_0000[i] = D_802CDFD8.unk_0000[i];
+        GDX_MAIN_SEGMENTS[i] = D_802CDFD8.unk_0000[i];
 #endif
         courseInfo->courseSegments[i] = D_802CDFD8.unk_0000[i];
 
@@ -4289,8 +4485,12 @@ static void Gdx_SwapU32InPlace(void* p) {
     u8* b = (u8*)p;
     u8 t0 = b[0], t1 = b[1]; b[0] = b[3]; b[1] = b[2]; b[2] = t1; b[3] = t0;
 }
-static void CourseData_FromRom(CourseData* cd) {
+static void CourseData_FromRom(CourseData* runtime) {
+    CourseDataDisk disk;
+    CourseDataDisk* cd = &disk;
     s32 i;
+
+    memcpy(cd, runtime, sizeof(*cd));
     Gdx_SwapU32InPlace(&cd->checksum);
     for (i = 0; i < 64; i++) {
         Gdx_SwapU32InPlace(&cd->controlPoint[i].pos.x);
@@ -4302,6 +4502,9 @@ static void CourseData_FromRom(CourseData* cd) {
     }
     for (i = 0; i < 64; i++) {
         Gdx_SwapU16InPlace(&cd->bankAngle[i]);
+    }
+    if (!gdx_course_from_disk(runtime, cd)) {
+        memset(runtime, 0, sizeof(*runtime));
     }
 }
 #endif
@@ -4362,15 +4565,15 @@ void Course_Load(s32 courseIndex) {
 
     if (courseIndex >= COURSE_DEATH_RACE) {
 #ifndef EXPANSION_KIT
-        romAddr = SEGMENT_ROM_START(course_data) + (courseIndex - 30) * sizeof(CourseData);
+        romAddr = SEGMENT_ROM_START(course_data) + (courseIndex - 30) * sizeof(CourseDataDisk);
 #else
-        romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseData);
+        romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseDataDisk);
 #endif
 #ifdef PORT
-        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseDataDisk));
         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #else
-        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseDataDisk));
 #endif
         if ((gPlayer1OverallPosition >= 4) && (courseIndex == COURSE_ENDING)) {
             COURSE_CONTEXT()->courseData.skybox = SKYBOX_BLUE;
@@ -4424,7 +4627,7 @@ void Course_Load(s32 courseIndex) {
             PRINTF("DEF LOAD OK\n");
             func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
             DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex, &COURSE_CONTEXT()->courseData,
-                               sizeof(CourseData), 0);
+                               sizeof(CourseDataDisk), 0);
 #ifdef PORT
             /* Disk CourseData is big-endian too, not only the ROM path. */
             CourseData_FromRom(&COURSE_CONTEXT()->courseData);
@@ -4473,7 +4676,7 @@ void Course_Load(s32 courseIndex) {
                         PRINTF("DEF LOAD OK\n");
                         func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
                         DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex,
-                                           &COURSE_CONTEXT()->courseData, sizeof(CourseData), 0);
+                                           &COURSE_CONTEXT()->courseData, sizeof(CourseDataDisk), 0);
 #ifdef PORT
                         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #endif
@@ -4515,17 +4718,17 @@ void Course_Load(s32 courseIndex) {
 #endif
 
 #ifndef EXPANSION_KIT
-        romAddr = SEGMENT_ROM_START(course_data) + courseIndex * sizeof(CourseData);
+        romAddr = SEGMENT_ROM_START(course_data) + courseIndex * sizeof(CourseDataDisk);
 #else
-        romAddr = gRomSegmentPairs[5][0] + courseIndex * sizeof(CourseData);
+        romAddr = gRomSegmentPairs[5][0] + courseIndex * sizeof(CourseDataDisk);
 #endif
         PRINTF("UNPACK\n");
 #ifdef PORT
         PRINTF("Course_Load PORT: passing ramAddr=%p\n", (u8*)&COURSE_CONTEXT()->courseData);
-        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseDataDisk));
         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #else
-        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseDataDisk));
 #endif
         PRINTF("UNPACK OK\n");
 
@@ -4556,14 +4759,14 @@ void func_80702448(s32 courseIndex) {
 
     DDSave_ClearCachedGhostSaves();
     if (courseIndex >= COURSE_DEATH_RACE) {
-        romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseData);
+        romAddr = gRomSegmentPairs[5][0] + (courseIndex - 30) * sizeof(CourseDataDisk);
 #ifdef PORT
-        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseDataDisk));
         /* Without the swap the course-select preview mesh is built from garbage control
            points. */
         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #else
-        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseDataDisk));
 #endif
         if ((gPlayer1OverallPosition >= 4) && (courseIndex == COURSE_ENDING)) {
             COURSE_CONTEXT()->courseData.skybox = SKYBOX_BLUE;
@@ -4618,7 +4821,7 @@ void func_80702448(s32 courseIndex) {
             PRINTF("DEF LOAD OK\n");
             func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
             DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex, &COURSE_CONTEXT()->courseData,
-                               sizeof(CourseData), 0);
+                               sizeof(CourseDataDisk), 0);
 #ifdef PORT
             /* Disk CourseData is big-endian too, not only the ROM path. */
             CourseData_FromRom(&COURSE_CONTEXT()->courseData);
@@ -4669,7 +4872,7 @@ void func_80702448(s32 courseIndex) {
                         PRINTF("DEF LOAD OK\n");
                         func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
                         DiskDrive_LoadData(SEGMENT_DISK_START(silence_3) + diskCourseIndex,
-                                           &COURSE_CONTEXT()->courseData, sizeof(CourseData), 0);
+                                           &COURSE_CONTEXT()->courseData, sizeof(CourseDataDisk), 0);
 #ifdef PORT
                         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #endif
@@ -4689,13 +4892,13 @@ void func_80702448(s32 courseIndex) {
         }
         gCourseInfos[courseIndex].encodedCourseIndex = (Course_CalculateChecksum() << 5) | COURSE_EDIT_1;
     } else {
-        romAddr = gRomSegmentPairs[5][0] + courseIndex * sizeof(CourseData);
+        romAddr = gRomSegmentPairs[5][0] + courseIndex * sizeof(CourseDataDisk);
 
 #ifdef PORT
-        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)&COURSE_CONTEXT()->courseData, sizeof(CourseDataDisk));
         CourseData_FromRom(&COURSE_CONTEXT()->courseData);
 #else
-        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseData));
+        Dma_LoadAssetsAsync(romAddr, (u8*)osVirtualToPhysical(&COURSE_CONTEXT()->courseData), sizeof(CourseDataDisk));
 #endif
         // Patch Out Red Canyon 2 Dirt
         if (gInCourseEditor && courseIndex == COURSE_RED_CANYON_2) {
@@ -4717,15 +4920,11 @@ void func_80702448(s32 courseIndex) {
 }
 #endif
 
-void Course_GadgetsInit(s32 courseIndex) {
-    Course_FeaturesInit(courseIndex);
-    Course_EffectsInit(courseIndex);
-}
 
 void func_80074204(void) {
     s32 i;
 
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         COURSE_CONTEXT()->courseData.bankAngle[i] = 0;
         COURSE_CONTEXT()->courseData.pit[i] = PIT_NONE;
         COURSE_CONTEXT()->courseData.dash[i] = DASH_NONE;
@@ -4772,7 +4971,7 @@ void func_800742FC(void) {
     COURSE_CONTEXT()->courseData.skybox = SKYBOX_PURPLE;
     D_8010CF50 = COURSE_CONTEXT()->courseData;
     gCourseFeaturesInfo.features = gCourseFeatures;
-    gCourseInfos[0].courseSegments = D_802C2020.unk_0000;
+    gCourseInfos[0].courseSegments = GDX_MAIN_SEGMENTS;
     gCourseEffectsInfo.effects = gCourseEffects;
 
     for (i = 0; i < ARRAY_COUNT(gCourseInfos); i++) {}
@@ -4790,7 +4989,7 @@ void func_80074428(s32 courseIndex) {
     s32 sp20;
     CourseSegment* courseSegments = D_802D0620;
 #else
-    CourseSegment* courseSegments = D_802C2020.unk_0000;
+    CourseSegment* courseSegments = GDX_MAIN_SEGMENTS;
 #endif
     CourseSegment* var_v0;
     CourseData* courseData = &COURSE_CONTEXT()->courseData;
@@ -5035,4 +5234,6 @@ void func_80703234(void) {
         }
     }
 }
+#endif
+
 #endif

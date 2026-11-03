@@ -3,6 +3,9 @@
  *****************************/
 
 #include "leo/mfs.h"
+#ifdef PORT
+#include "../../../../port/gdx_course_snapshot_io.h"
+#endif
 
 void Mfs_GetFATBlockSizeInfo(s32* totalBlocksSizePtr, s32* unusedBlocksSizePtr) {
     s32 i;
@@ -85,6 +88,12 @@ s32 Mfs_CopyFileToDir(s32 entryId, char* name, u16 parentDirId) {
     s32 lbaOffset;
     s32 rollingFatId;
 
+#ifdef PORT
+    if (!gdx_snapshot_native_alias((u16) entryId, name, gMfsRamArea.directoryEntry[entryId].extension, parentDirId)) {
+        gMfsError = N64DD_ARGUMENT_ILLEGAL;
+        return -1;
+    }
+#endif
     newFatId = -1;
     offsetCopied = 0;
     offsetBlockSize = 0;

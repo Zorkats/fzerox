@@ -69,6 +69,9 @@ extern unk_8003A5D8 D_xk1_8003A598;
 #ifdef PORT
 #include "../../../../port/gdx_course_branch_editor.h"
 #include "../../../../port/gdx_course_state.h"
+#include "../../../../port/gdx_course_snapshot_io.h"
+extern u16 gWorkingDirectory;
+extern void gdx_course_edit_flash_message(const char* text);
 #endif
 extern s32 D_xk2_80104378;
 extern unk_800D6CA0 D_800D6CA0;
@@ -123,9 +126,19 @@ s32 func_xk2_800EAA1C(u8* arg0) {
             D_800D6CA0.unk_08 = 0x14;
         }
 #ifdef PORT
-        // The edited course now lives in this file, so its custom choices go under this name.
+        // Preserve the old complete generation before this name receives edited metadata.
+        if (!gdx_snapshot_native_backup(gWorkingDirectory, D_xk1_8003A598.name, D_xk1_8003A598.extension) ||
+            !gdx_snapshot_native_backup(gWorkingDirectory, D_xk1_8003A598.name,
+                                        D_xk1_8003A598.extension[3] == 'D' ? "CRSE" : "CRSD")) {
+            gdx_course_edit_flash_message("Course save cancelled: previous data could not be backed up");
+            D_800D6CA0.unk_08 = 0x10;
+            return -1;
+        }
         gdx_course_state_set_edit_file(D_xk1_8003A598.name, D_xk1_8003A598.extension);
-        gdx_course_branch_editor_saved();
+        if (!gdx_course_branch_editor_saved()) {
+            D_800D6CA0.unk_08 = 0x10;
+            return -1;
+        }
 #endif
     }
     mfsStrCpy(D_80030060, arg0);
@@ -374,7 +387,7 @@ void func_xk2_800EB20C(void) {
 void func_xk2_800EB250(void) {
     s32 i;
 
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         COURSE_CONTEXT()->courseData.pit[i] = PIT_NONE;
         COURSE_CONTEXT()->courseData.dash[i] = DASH_NONE;
         COURSE_CONTEXT()->courseData.dirt[i] = DIRT_NONE;

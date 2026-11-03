@@ -1,4 +1,7 @@
 #include "leo/mfs.h"
+#ifdef PORT
+#include "../../../../port/gdx_course_snapshot_io.h"
+#endif
 
 s32 Mfs_RenameFile(u16 dirId, char* newName, char* newExtension) {
     s32 err;
@@ -12,6 +15,12 @@ s32 Mfs_RenameFile(u16 dirId, char* newName, char* newExtension) {
     }
 #endif
 
+#ifdef PORT
+    if (!gdx_snapshot_native_alias(dirId, newName, newExtension, gMfsRamArea.directoryEntry[dirId].parentDirId)) {
+        gMfsError = N64DD_ARGUMENT_ILLEGAL;
+        return -1;
+    }
+#endif
     err = Mfs_CopyDirEntryFromRam(dirId);
     Mfs_SetDirEntryName(newName);
     Mfs_SetDirEntryExtension(newExtension);

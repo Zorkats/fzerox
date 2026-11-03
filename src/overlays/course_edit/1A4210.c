@@ -355,14 +355,23 @@ void func_xk2_800F27DC(CourseInfo* courseInfo) {
                     D_xk2_80104364 = 1;
                     D_800D6CA0.unk_1C = func_xk2_800E9134(temp_v0 & 0xFFFF);
                 }
-                if (gSegmentChunkCount >= 0x2FF) {
+                if (
+#ifdef PORT
+                    (temp_v0 & 0x20000) ||
+#endif
+                    gSegmentChunkCount >= 0x2FF) {
                     D_xk2_80104CA0[0xA] = 1;
                     D_xk2_80104368 = 1;
                 }
                 func_800A4D0C(0);
                 sp18 = 1;
             }
-            Course_EffectsViewInteractDataInit(false);
+#ifdef PORT
+            if (!(temp_v0 & 0x20000))
+#endif
+            {
+                Course_EffectsViewInteractDataInit(false);
+            }
             if (D_xk2_80104CA0[7] != 0) {
                 D_xk1_80032C20 = 0;
                 D_800D6CA0.unk_08 = 0x10;
@@ -382,13 +391,22 @@ void func_xk2_800F27DC(CourseInfo* courseInfo) {
                     D_xk2_80104364 = 1;
                     D_800D6CA0.unk_1C = func_xk2_800E9134(temp_v0 & 0xFFFF);
                 }
-                if (gSegmentChunkCount >= 0x2FF) {
+                if (
+#ifdef PORT
+                    (temp_v0 & 0x20000) ||
+#endif
+                    gSegmentChunkCount >= 0x2FF) {
                     D_xk2_80104CA0[0xA] = 1;
                     D_xk2_80104368 = 1;
                 }
                 func_800A4D0C(0);
             }
-            Course_EffectsViewInteractDataInit(false);
+#ifdef PORT
+            if (!(temp_v0 & 0x20000))
+#endif
+            {
+                Course_EffectsViewInteractDataInit(false);
+            }
             if (D_xk2_80104CA0[7] != 0) {
                 D_xk1_80032C20 = 0;
                 D_800D6CA0.unk_08 = 0x10;

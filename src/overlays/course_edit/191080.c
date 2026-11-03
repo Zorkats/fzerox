@@ -8,6 +8,7 @@
 #include ASSET_HEADER_EK(course_edit_textures.h)
 
 #ifdef PORT
+#include "../../../../port/gdx_course_branch_edit.h"
 #include "fzx_font.h"
 #include "../../../../port/gdx_course_branch_editor.h"
 #include "../../../../port/gdx_course_music.h"
@@ -1597,17 +1598,29 @@ Gfx* func_xk2_800E5058(Gfx* gfx) {
 
     if (D_xk2_80119918 == 0) {
         if ((gCreateOption == CREATE_OPTION_COURSE) || (gCreateOption == CREATE_OPTION_POINT)) {
-            if (D_802CB6D0.controlPointCount >= 0x40) {
+            if (D_802CB6D0.controlPointCount >= GDX_COURSE_POINT_CAPACITY) {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 0, 255);
             } else {
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
             }
             D_xk1_80032AD0 = 0;
+#ifdef PORT
+            gfx = func_xk1_8002924C(gfx, 0xD8, 0xC2, GDX_EK_LABEL(gdx_ek_label_size, sp34));
+            func_xk2_800EDE68(sp3C, D_802CB6D0.controlPointCount, 3);
+            func_xk2_800EDAD0(&gfx, 0xF8, 0xC2, sp3C);
+#else
             gfx = func_xk1_8002924C(gfx, 0xE8, 0xC2, GDX_EK_LABEL(gdx_ek_label_size, sp34));
             func_xk2_800EDE68(sp3C, D_802CB6D0.controlPointCount, 2);
             func_xk2_800EDAD0(&gfx, 0x108, 0xC2, sp3C);
+#endif
             gfx = func_xk1_8002924C(gfx, 0x114, 0xC2, "/");
-            func_xk2_800EDE68(sp3C, 0x40, 2);
+            func_xk2_800EDE68(sp3C, GDX_COURSE_POINT_CAPACITY,
+#ifdef PORT
+                                3
+#else
+                                2
+#endif
+            );
             func_xk2_800EDAD0(&gfx, 0x11B, 0xC2, sp3C);
         } else {
             gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
@@ -2262,6 +2275,12 @@ void func_xk2_800E6CA8(s32 arg0, CourseSegment arg1) {
     s32 pad[2];
     CourseSegment* temp_v1;
     s32 i;
+
+#ifdef PORT
+    if (!gdx_branch_edit_can_add(D_802CB6D0.controlPointCount, 1)) {
+        return;
+    }
+#endif
 
     if (arg0 != -1) {
         if (D_802CB6D0.controlPointCount >= 2) {

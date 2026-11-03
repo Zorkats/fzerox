@@ -47,7 +47,7 @@ extern void gdx_course_edit_undo_clear(void);
 void func_xk2_800EF78C(void) {
     s32 i;
 
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         D_xk2_80128990[i] = D_80128690[i];
     }
 
@@ -101,7 +101,7 @@ void func_xk2_800EF8B0(void) {
     Audio_TriggerSystemSE(NA_SE_37);
 #endif
     D_xk2_800F703C = -1;
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         D_80128690[i] = D_xk2_80128990[i];
     }
 
@@ -134,7 +134,7 @@ void func_xk2_800EFA94(CourseSegment* arg0, CourseSegment* arg1) {
     CourseSegment* var_s0;
     s32 i;
     s32 j;
-    Vec3f sp64[64];
+    Vec3f sp64[GDX_COURSE_POINT_CAPACITY];
 
     i = 0;
     var_s0 = arg0;
@@ -458,7 +458,11 @@ void func_xk2_800F07A4(void) {
     if (D_802CB6D0.controlPointCount < 4) {
         return;
     }
+#ifdef PORT
+    if (!gdx_branch_edit_can_add(D_802CB6D0.controlPointCount, 5)) {
+#else
     if (D_802CB6D0.controlPointCount >= 60) {
+#endif
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }

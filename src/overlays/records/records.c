@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef PORT
+extern s32 gSegmentChunkCount;
+#endif
 #include "records.h"
 #include "fzx_game.h"
 #include "fzx_racer.h"
@@ -199,6 +202,11 @@ void Records_Init(void) {
         } else {
             changingCourseIndex = false;
         }
+    }
+#endif
+#ifdef PORT
+    if (gSegmentChunkCount < 3) {
+        return;
     }
 #endif
     func_i3_80116C4C();
@@ -402,6 +410,11 @@ s32 Records_Update(void) {
     bool reloadRecords;
     bool stopStateUpdate;
 
+#ifdef PORT
+    if (gSegmentChunkCount < 3) {
+        return GAMEMODE_FLX_RECORDS_COURSE_SELECT;
+    }
+#endif
     Controller_SetGlobalInputs(&gSharedController);
     sGhostMarkerRenderInfo = &sGhostMarkerRenderInfos[D_800DCCFC];
 #ifdef EXPANSION_KIT
@@ -852,6 +865,11 @@ extern GfxPool* gGfxPool;
 extern Gfx D_8076CE28[];
 
 Gfx* Records_Draw(Gfx* gfx) {
+#ifdef PORT
+    if (gSegmentChunkCount < 3) {
+        return gfx;
+    }
+#endif
 
     if (D_i2_80106F10 != 0) {
         D_i2_80106F10--;

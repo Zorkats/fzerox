@@ -3,6 +3,9 @@
 #include "fzx_game.h"
 #include "fzx_racer.h"
 #include "fzx_course.h"
+#ifdef PORT
+extern void gdx_course_cpu_target(Racer* racer);
+#endif
 #include ASSET_HEADER(common_assets_compressed.h)
 
 s32 D_80141900;
@@ -2229,6 +2232,11 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                 }
             }
         }
+#ifdef PORT
+        if (racer->id >= gNumPlayers && CVarGetInteger("gEnhancements.Gameplay.CpuTrackHazards", 0)) {
+            gdx_course_cpu_target(racer);
+        }
+#endif
         if ((gNumPlayers == 1) && (racer->id != 0)) {
             var_fv0 = sPlayerRacer->raceDistance - racer->raceDistance;
             if ((var_fv0 > 0.0f) && (var_fv0 < 92.0f) &&

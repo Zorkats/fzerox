@@ -3,6 +3,7 @@
 #include "fzx_course.h"
 #include "leo/mfs.h"
 #include "../../../../port/gdx_edit_cup.h"
+#include "../../../../port/gdx_course_snapshot_io.h"
 
 extern char gEditCupTrackNames[GDX_EDIT_CUP_ROWS][GDX_EDIT_CUP_NAME_SIZE];
 extern OSThread* __osRunningThread;
@@ -11,10 +12,13 @@ static u8 sRecoveryBlock[0xC830 + BLK_SIZE_ZONE0];
 static MfsRamArea sRecoveryRamBefore;
 static s32 sRecoveryHealthy = true;
 
-static int recovery_track_valid(const u8* payload) {
-    CourseData course;
+static int recovery_track_valid(const char* name, const char* ext, const u8* payload) {
+    CourseDataDisk course;
     u32 checksum;
     s32 i;
+    if (payload[8] & 0x80) {
+        return gdx_snapshot_validate(gWorkingDirectory, name, ext, payload);
+    }
     memcpy(&course, payload, sizeof(course));
     if (course.controlPointCount < 0 || course.controlPointCount > 64 || course.creatorId != CREATOR_NINTENDO ||
         course.bgm < 0 || course.bgm > BGM_NEW_04) {
@@ -94,7 +98,7 @@ int gdx_recovery_native_restore_ready(const char* name, const char* ext, const u
     s32 entries = 0;
     s32 freeEntries = 0;
     s32 i;
-    if (!gdx_recovery_native_prepare() || size != 16 + 0xC830 || !recovery_track_valid(bytes + 16) ||
+    if (!gdx_recovery_native_prepare() || size != 16 + 0xC830 || !recovery_track_valid(name, ext, bytes + 16) ||
         (cupMask & ~3)) {
         return 0;
     }
@@ -133,7 +137,7 @@ int gdx_recovery_native_read(const char* name, const char* ext, u8* out, size_t 
     entry = &gMfsRamArea.directoryEntry[index];
     if (entry->fileSize != 0xC830 ||
         Mfs_LoadFileInDir(gWorkingDirectory, (char*) name, (char*) ext, out + 16, 0xC830) != 0 ||
-        !recovery_track_valid(out + 16)) {
+        !recovery_track_valid(name, ext, out + 16)) {
         return 0;
     }
     memset(out, 0, 16);
@@ -162,7 +166,7 @@ int gdx_recovery_native_write(const char* name, const char* ext, const u8* bytes
         }
         return 1;
     }
-    if (size != 16 + 0xC830 || !recovery_track_valid(bytes + 16) ||
+    if (size != 16 + 0xC830 || !recovery_track_valid(name, ext, bytes + 16) ||
         Mfs_GetFileIndex(gWorkingDirectory, (char*) name, (char*) ext) !=
         MFS_ENTRY_DOES_NOT_EXIST) {
         return 0;

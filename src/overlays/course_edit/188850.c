@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef PORT
+#include "../../../../port/gdx_course_branch_edit.h"
+extern s32 gSegmentChunkCount;
+#endif
 #include "leo/mfs.h"
 #include "fzx_racer.h"
 #include "fzx_course.h"
@@ -17,6 +21,7 @@ extern float gdx_course_edit_max_y(void);
 #include "../../../../port/gdx_course_edit_menu.h"
 #include "../../../../port/gdx_course_edit_undo.h"
 #include "../../../../port/gdx_course_state.h"
+#include "../../../../port/gdx_course_gadget_budget.h"
 /* Shows a short message at the top of the Course Edit hint strip (port/gdx_course_edit_help.cpp). */
 extern void gdx_course_edit_flash_message(const char* text);
 
@@ -68,10 +73,10 @@ UNUSED s32 D_xk2_80119888[2];
 s32 D_80119890;
 UNUSED s32 D_xk2_80119898[32];
 s32 D_xk2_80119918;
-CourseSegment D_xk2_80119920[64];
+CourseSegment D_xk2_80119920[GDX_COURSE_POINT_CAPACITY];
 unk_8011C220 D_8011C220[898];
-unk_80128690 D_80128690[64];
-unk_80128690 D_xk2_80128990[64];
+unk_80128690 D_80128690[GDX_COURSE_POINT_CAPACITY];
+unk_80128690 D_xk2_80128990[GDX_COURSE_POINT_CAPACITY];
 
 s32 D_xk2_800F6820 = 1;
 s32 gCourseEditCursorXPos = 160;
@@ -1034,8 +1039,8 @@ static void gdx_course_edit_insert_segment(void) {
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
-    if (D_802CB6D0.controlPointCount >= 60) {
-        gdx_course_edit_flash_message("Insert: the course already has 60 points");
+    if (!gdx_branch_edit_can_add(D_802CB6D0.controlPointCount, 1)) {
+        gdx_course_edit_flash_message("Insert: the course and its forks exceed the point budget");
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
@@ -2069,14 +2074,14 @@ void func_xk2_800DB924(void) {
     s32 j;
 #ifdef PORT
     bool deleteRequested = false;
-    u64 selection = 0;
+    GdxCourseEditMask selection = {{ 0, 0 }};
     extern int gdx_course_edit_controller_a_pressed(int port);
 #endif
 
 #ifdef PORT
     for (i = 0; i < gdx_course_edit_native_point_count(); i++) {
         if (D_80128690[i].unk_08 != 0) {
-            selection |= (u64)1 << i;
+            selection = gdx_course_mask_union(selection, gdx_course_mask_bit(i));
         }
     }
     deleteRequested = gdx_course_edit_input_take_delete(selection, D_802CB6D0.controlPointCount) != 0;
@@ -2427,7 +2432,7 @@ void func_xk2_800DC2D0(void) {
 void func_xk2_800DC3F8(void) {
     s32 i;
 
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         D_80128690[i].unk_08 = 0;
     }
 }
@@ -2658,7 +2663,7 @@ static void gdx_course_edit_apply_typed_scalar(void) {
     if (!gdx_course_edit_input_take_scalar_value(&option, &value)) {
         return;
     }
-    if (option != gMoveOption || gdx_course_edit_native_selection_mask() == 0) {
+    if (option != gMoveOption || gdx_course_mask_empty(gdx_course_edit_native_selection_mask())) {
         gdx_course_edit_native_play_refusal();
         return;
     }
@@ -2682,7 +2687,7 @@ static void gdx_course_edit_apply_typed_bank(void) {
     if (!gdx_course_edit_input_take_bank_value(&bank)) {
         return;
     }
-    if (gdx_course_edit_native_selection_mask() == 0) {
+    if (gdx_course_mask_empty(gdx_course_edit_native_selection_mask())) {
         gdx_course_edit_native_play_refusal();
         return;
     }
@@ -2719,7 +2724,7 @@ static void gdx_course_edit_restore_mouse_drag(void) {
     }
     D_802CB6D0 = D_807B6528;
     COURSE_CONTEXT()->courseData = D_8010CF50;
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         D_80128690[i] = D_xk2_80128990[i];
     }
     D_xk2_801197EC = D_802CB6D0.unk_0000;
@@ -2743,7 +2748,7 @@ static void gdx_course_edit_restore_mouse_drag(void) {
 static void gdx_course_edit_begin_mouse_drag(s32 pointIndex) {
     if (sGdxCourseEditMouseOwner || (D_800D6CA0.unk_00 != 0) ||
         (gCreateOption != CREATE_OPTION_POINT) || (D_800D6CA0.unk_08 != 0) ||
-        gInCourseEditTestRun || D_802CB6D0.controlPointCount > 64 || (pointIndex < 0) ||
+        gInCourseEditTestRun || D_802CB6D0.controlPointCount > GDX_COURSE_POINT_CAPACITY || (pointIndex < 0) ||
         (pointIndex >= gdx_course_edit_native_point_count())) {
         return;
     }
@@ -2901,7 +2906,11 @@ void func_xk2_800DC67C(void) {
             Audio_TriggerSystemSE(NA_SE_36);
             return;
         }
+#ifdef PORT
+        if (!gdx_branch_edit_can_add(D_802CB6D0.controlPointCount, 1)) {
+#else
         if (D_802CB6D0.controlPointCount >= 0x40) {
+#endif
             Audio_TriggerSystemSE(NA_SE_32);
             return;
         }
@@ -2971,7 +2980,11 @@ void func_xk2_800DC67C(void) {
             }
 
             Audio_TriggerSystemSE(NA_SE_39);
+#ifdef PORT
+            if ((D_xk2_800F704C == -1) && gdx_branch_edit_can_add(D_802CB6D0.controlPointCount, 1)) {
+#else
             if ((D_xk2_800F704C == -1) && (D_802CB6D0.controlPointCount < 0x40)) {
+#endif
                 D_xk2_800F7040 = 3;
                 func_xk2_800EF78C();
                 D_xk2_800F704C = -1;
@@ -3310,7 +3323,7 @@ void func_xk2_800DD568(void) {
 void func_xk2_800DD638(void) {
     s32 i;
 
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         D_80128690[i].unk_00 = 0;
         D_80128690[i].unk_04 = 0;
         D_80128690[i].unk_08 = 0;
@@ -4125,6 +4138,25 @@ void func_xk2_800DEE20(void) {
 #ifdef PORT
         /* The test run races path A from the ring, with path B from the fork set. */
         gdx_course_branch_editor_force_path_a();
+        {
+            s32 overflow;
+            func_800A4D0C(1);
+            overflow = func_800A1954(&gCourseInfos[0]) & 0x20000;
+            func_800A4D0C(2);
+            overflow |= func_800A1954(&gCourseInfos[0]) & 0x20000;
+            func_800A4D0C(0);
+            overflow |= func_800A1954(&gCourseInfos[0]) & 0x20000;
+            if (overflow) {
+                gdx_course_edit_flash_message("Course exceeds the geometry budget; simplify it before test driving.");
+                Audio_TriggerSystemSE(NA_SE_32);
+                return;
+            }
+        }
+        if (!Course_GdxCanTestDrive(gCourseIndex)) {
+            gdx_course_edit_flash_message("Course exceeds the race gadget budget; reduce its parts before test driving.");
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
 #endif
         Audio_TriggerSystemSE(NA_SE_36);
         gInCourseEditTestRun = true;

@@ -1,4 +1,7 @@
 #include "leo/mfs.h"
+#ifdef PORT
+#include "../../../../port/gdx_course_snapshot_io.h"
+#endif
 
 s32 Mfs_DeleteFile(u16 entryId) {
     s32 fatId;
@@ -13,6 +16,12 @@ s32 Mfs_DeleteFile(u16 entryId) {
         gMfsError = 0x106;
         return -1;
     }
+#ifdef PORT
+    if (!gdx_snapshot_native_backup_entry(entryId)) {
+        gMfsError = N64DD_ARGUMENT_ILLEGAL;
+        return -1;
+    }
+#endif
     Mfs_CopyFATFromRam();
     fatId = gMfsRamArea.directoryEntry[entryId].fileAllocationTableId;
 #if MFS_VERSION == MFS_VERSION_A

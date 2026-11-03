@@ -17,7 +17,7 @@ unk_807B3C20 D_802CDFD8;
    exit (func_xk2_800EC3AC), so it must match the 64-entry CourseSegment capacity of
    unk_807B3C20.unk_0000 -- the old 0x1000-byte stub wrote past segment 38. */
 #ifdef EXPANSION_KIT
-CourseSegment D_802D0620[64];
+CourseSegment D_802D0620[GDX_COURSE_POINT_CAPACITY];
 #endif
 CourseDecoration gCourseDecorations[32];
 CourseFeature gCourseFeatures[MAX_FEATURE_COUNT];

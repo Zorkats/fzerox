@@ -7,6 +7,12 @@
 #include "fzx_math.h"
 #include "PR/leo.h"
 
+#ifdef PORT
+#include "../../port/gdx_course_limits.h"
+#else
+#define GDX_COURSE_POINT_CAPACITY 64
+#endif
+
 typedef struct CourseSegment {
     /* 0x00 */ Vec3f pos;
     /* 0x0C */ Vec3f up;
@@ -670,7 +676,7 @@ typedef struct MenuWidget {
 } MenuWidget; // size = 0x34
 
 typedef struct unk_807B3C20 {
-    /* 0x0000 */ CourseSegment unk_0000[64];
+    /* 0x0000 */ CourseSegment unk_0000[GDX_COURSE_POINT_CAPACITY];
     /* 0x2900 */ s32 controlPointCount;
 } unk_807B3C20; // size 0x2904
 

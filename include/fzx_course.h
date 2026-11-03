@@ -11,7 +11,7 @@ typedef struct ControlPoint {
     /* 0x10 */ s32 trackSegmentInfo;
 } ControlPoint; // size = 0x14
 
-typedef struct CourseData {
+typedef struct CourseDataDisk {
     /* 0x000 */ u8 creatorId;
     /* 0x001 */ s8 controlPointCount;
     /* 0x002 */ s8 venue;
@@ -31,7 +31,34 @@ typedef struct CourseData {
     /* 0x720 */ s8 gate[64];
     /* 0x760 */ s8 building[64];
     /* 0x7A0 */ s8 sign[64];
+} CourseDataDisk; // size = 0x7E0
+
+#ifdef PORT
+#define GDX_COURSE_RUNTIME_POINTS GDX_COURSE_POINT_CAPACITY
+typedef struct CourseData {
+    /* 0x000 */ u8 creatorId;
+    /* 0x001 */ s8 controlPointCount;
+    /* 0x002 */ s8 venue;
+    /* 0x003 */ s8 skybox;
+    /* 0x004 */ u32 checksum;
+    /* 0x008 */ u8 flag;
+    /* 0x009 */ char fileName[22];
+    /* 0x01F */ s8 bgm;
+    /* 0x020 */ ControlPoint controlPoint[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x520 */ s16 bankAngle[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x5A0 */ s8 pit[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x5E0 */ s8 dash[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x620 */ s8 dirt[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x660 */ s8 ice[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x6A0 */ s8 jump[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x6E0 */ s8 landmine[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x720 */ s8 gate[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x760 */ s8 building[GDX_COURSE_RUNTIME_POINTS];
+    /* 0x7A0 */ s8 sign[GDX_COURSE_RUNTIME_POINTS];
 } CourseData; // size = 0x7E0
+#else
+typedef CourseDataDisk CourseData;
+#endif
 
 typedef struct CourseBuffer {
     /* 0x0000 */ CourseData courseData;
@@ -45,6 +72,20 @@ typedef struct CourseContext {
     /* 0xC720 */ SaveCourseRecords saveCourseRecord;
 #endif
 } CourseContext;
+
+#ifdef PORT
+typedef struct CourseContextDisk {
+    CourseDataDisk courseData;
+#ifdef EXPANSION_KIT
+    GhostSave ghostSave[3];
+    SaveCourseRecords saveCourseRecord;
+#endif
+} CourseContextDisk;
+typedef char GdxCourseDiskSize[(sizeof(CourseDataDisk) == 0x7E0) ? 1 : -1];
+#ifdef EXPANSION_KIT
+typedef char GdxCourseContextDiskSize[(sizeof(CourseContextDisk) == 0xC830) ? 1 : -1];
+#endif
+#endif
 
 typedef enum Courses {
     /*  0 */ COURSE_MUTE_CITY,

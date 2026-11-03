@@ -2,7 +2,7 @@
 #include "fzx_camera.h"
 #include "fzx_course.h"
 
-u8 D_xk2_80128D00[64];
+u8 D_xk2_80128D00[GDX_COURSE_POINT_CAPACITY];
 f32 D_xk2_80128D40;
 f32 D_xk2_80128D44;
 s32 D_xk2_80128D48;
@@ -31,7 +31,7 @@ void func_xk2_800F12B0(void) {
         }
     }
 
-    for (i = 0; i < 64; i++) {
+    for (i = 0; i < GDX_COURSE_POINT_CAPACITY; i++) {
         D_xk2_80128D00[i] = 0;
     }
 }

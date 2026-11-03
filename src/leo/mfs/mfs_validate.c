@@ -12,7 +12,8 @@ s32 Mfs_ValidateFileSystemOperation(s32 validationFlags, u16 entryIndex, u16 sub
     if (validationFlags & MFS_VALIDATION_CHECK_WRITE) {
 #ifdef PORT
         extern int gdx_recovery_blocks_writes(void);
-        if (gdx_recovery_blocks_writes()) {
+        extern int gdx_snapshot_blocks_writes(void);
+        if (gdx_recovery_blocks_writes() || gdx_snapshot_blocks_writes()) {
             return -1;
         }
 #endif

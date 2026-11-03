@@ -1,6 +1,9 @@
 #include "leo/mfs.h"
 #ifdef PORT
 #include "../../../../port/gdx_edit_cup.h"
+#include "fzx_course.h"
+#include "../../../../port/gdx_course_disk.h"
+#include "../../../../port/gdx_course_snapshot_io.h"
 #endif
 
 s32 Mfs_WriteNewFile(u8* buf, u32 fileSize, bool isEncoded) {
@@ -143,6 +146,12 @@ static s32 Mfs_SaveFileStock(u16 parentDirId, char* name, char* extension, u8* b
 // images sit in a buffer one full block long (the largest zone). The disk thread is the only caller.
 static u8 sGdxEditCupBlock[BLK_SIZE_ZONE0];
 
+static int Mfs_SaveSnapshotBase(unsigned short parentDirId, char* name, char* extension, unsigned char* buf,
+                                unsigned int fileSize, int attr, int copyCount, int writeChanges) {
+    return Mfs_SaveFileStock(parentDirId, name, extension, buf, fileSize, attr, copyCount, writeChanges);
+}
+
+
 s32 Mfs_SaveFile(u16 parentDirId, char* name, char* extension, u8* buf, u32 fileSize, s32 attr, s32 copyCount,
                  bool writeChanges) {
     u8* cent = sGdxEditCupBlock;
@@ -150,6 +159,14 @@ s32 Mfs_SaveFile(u16 parentDirId, char* name, char* extension, u8* buf, u32 file
     s32 anyLong;
     s32 err;
 
+    if (gdx_course_context_file(extension, fileSize) ||
+        (fileSize == sizeof(CourseContextDisk) &&
+         ((extension[0] == 'C' && extension[1] == 'R' && extension[2] == 'S' &&
+           (extension[3] == 'D' || extension[3] == 'E')) ||
+          (extension[0] == 'G' && extension[1] == 'O' && extension[2] == 'S' && extension[3] == 'T')))) {
+        return gdx_snapshot_native_save(Mfs_SaveSnapshotBase, parentDirId, name, extension, buf, fileSize,
+                                         attr, copyCount, writeChanges);
+    }
     if (!gdx_edit_cup_is_wide_cent(name, extension, fileSize)) {
         return Mfs_SaveFileStock(parentDirId, name, extension, buf, fileSize, attr, copyCount, writeChanges);
     }

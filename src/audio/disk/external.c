@@ -842,6 +842,10 @@ f32 Audio_PortBgmStreamFade(void) {
     }
     return seqPlayer->fadeVolume * seqPlayer->fadeVolumeScale;
 }
+
+f32 Audio_PortBgmPreviewGain(void) {
+    return sAudioPauseStatus == AUDIO_PAUSE_UNPAUSED ? 1.0f : 0.4f;
+}
 #endif
 
 // Na_BetaBgm_Start

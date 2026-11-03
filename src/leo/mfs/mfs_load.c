@@ -2,6 +2,9 @@
 #include "leo/mfs.h"
 #ifdef PORT
 #include "../../../../port/gdx_edit_cup.h"
+#include "fzx_course.h"
+#include "../../../../port/gdx_course_disk.h"
+#include "../../../../port/gdx_course_snapshot_io.h"
 #endif
 
 s32 Mfs_LoadFileIter(s32 fatId, u8* buf, u32 sizeToLoad, s32* nextFatIdPtr, u8** nextBufPos, s32* sizeLeftPtr,
@@ -122,12 +125,33 @@ static s32 Mfs_LoadFileInDirStock(u16 dirId, char* name, char* extension, u8* bu
 // The disk read path moves whole blocks, so the files load into a buffer one full block long (the largest
 // zone), like the save side in mfs_save.c. The disk thread is the only caller.
 static u8 sGdxEditCupLoadBlock[BLK_SIZE_ZONE0];
+static u8 sGdxCourseLoadBlock[sizeof(CourseContextDisk) + BLK_SIZE_ZONE0];
 
 s32 Mfs_LoadFileInDir(u16 dirId, char* name, char* extension, u8* buf, s32 sizeToLoad) {
     u8* cent = sGdxEditCupLoadBlock;
     u8* cenl = sGdxEditCupLoadBlock;
     u16 entryId;
 
+    if (gdx_course_context_file(extension, sizeToLoad)) {
+        int loaded;
+        if (!gdx_snapshot_begin(false)) {
+            gMfsError = N64DD_ARGUMENT_ILLEGAL;
+            return -1;
+        }
+        if (dirId == MFS_ENTRY_WORKING_DIR) {
+            dirId = gWorkingDirectory;
+        } else if (dirId == MFS_ENTRY_WORKING_PARENT_DIR) {
+            dirId = Mfs_GetParentDir(MFS_ENTRY_WORKING_DIR);
+        }
+        memset(sGdxCourseLoadBlock, 0, sizeof(sGdxCourseLoadBlock));
+        loaded = Mfs_LoadFileInDirStock(dirId, name, extension, sGdxCourseLoadBlock, sizeof(CourseContextDisk));
+        if (loaded == 0 && !gdx_snapshot_load(dirId, name, extension, sGdxCourseLoadBlock, buf)) {
+            gMfsError = N64DD_ARGUMENT_ILLEGAL;
+            loaded = -1;
+        }
+        gdx_snapshot_end();
+        return loaded;
+    }
     if (!gdx_edit_cup_is_wide_cent(name, extension, sizeToLoad)) {
         return Mfs_LoadFileInDirStock(dirId, name, extension, buf, sizeToLoad);
     }
@@ -181,6 +205,14 @@ s32 Mfs_LoadFileInDir(u16 dirId, char* name, char* extension, u8* buf, s32 sizeT
         gMfsError = N64DD_NOT_FOUND;
         return -1;
     }
+#ifdef PORT
+    if (gdx_course_context_file(extension, sizeof(CourseContext)) &&
+        sizeToLoad == sizeof(CourseContextDisk) &&
+        gMfsRamArea.directoryEntry[entryId].fileSize != sizeof(CourseContextDisk)) {
+        gMfsError = N64DD_ARGUMENT_ILLEGAL;
+        return -1;
+    }
+#endif
     return Mfs_CalculateSizeAndLoadFile(entryId, buf, sizeToLoad);
 }
 

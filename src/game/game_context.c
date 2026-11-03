@@ -7,5 +7,5 @@ SegmentChunk gSegmentChunks[1025]; // 0x18060
 #else
 SegmentChunk gSegmentChunks[769]; // 0x12060
 #endif
-CourseSegment D_802C2020[64];     // 0x2900
+CourseSegment D_802C2020[GDX_COURSE_POINT_CAPACITY];     // 0x2900
 Racer gRacers[TOTAL_RACER_COUNT]; // 0x6DB0

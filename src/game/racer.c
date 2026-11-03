@@ -727,7 +727,7 @@ extern int gdx_single_race_get_lap_time(int racerId, int lapIndex);
 extern s32 gdx_course_branch_live(void);
 extern void gdx_course_branch_reset_racers(void);
 extern void gdx_course_branch_racer_walked(s32 racerId, RacerSegmentPositionInfo* info);
-extern s32 gdx_course_branch_control_point(s32 segmentIndex);
+extern s32 gdx_course_branch_settings_point(const CourseSegment* segment);
 #endif
 
 void Racer_UpdateRivalRacer(void) {
@@ -3654,7 +3654,7 @@ static bool Racer_UsesCourseSettings(void) {
 
 // The control point under the racer, which the values Course Edit stores are keyed by.
 static s32 Racer_ControlPoint(Racer* racer) {
-    return gdx_course_branch_control_point(racer->segmentPositionInfo.courseSegment->segmentIndex);
+    return gdx_course_branch_settings_point(racer->segmentPositionInfo.courseSegment);
 }
 
 // The magnet's own value, else the course's, else the menu's.

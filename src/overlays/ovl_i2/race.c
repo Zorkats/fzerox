@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef PORT
+extern s32 gSegmentChunkCount;
+#endif
 #include "fzx_game.h"
 #include "fzx_course.h"
 #include "fzx_camera.h"
@@ -75,6 +78,11 @@ void Race_Init(void) {
 #endif
     RI_CK(A_pre_course_init)
     Course_Init();
+#ifdef PORT
+    if (gSegmentChunkCount < 3) {
+        return;
+    }
+#endif
     RI_CK(B_post_course_init)
 #ifdef EXPANSION_KIT
     if ((gGameMode == GAMEMODE_TIME_ATTACK) &&
@@ -114,6 +122,11 @@ void Race_Init(void) {
 }
 
 s32 Race_Update(void) {
+#ifdef PORT
+    if (gSegmentChunkCount < 3) {
+        return GAMEMODE_FLX_COURSE_SELECT;
+    }
+#endif
     Menus_Update();
     Effects_Update();
     Racer_Update();
@@ -141,6 +154,11 @@ extern Gfx D_8076CE28[];
 extern Gfx D_8076CF10[];
 
 Gfx* Race_Draw(Gfx* gfx) {
+#ifdef PORT
+    if (gSegmentChunkCount < 3) {
+        return gfx;
+    }
+#endif
 
     if (D_i2_80106F10 != 0) {
         D_i2_80106F10--;
