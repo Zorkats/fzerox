@@ -47,10 +47,10 @@ extern float gdx_course_edit_max_y(void);
  * The fan translation is not a data-only patch: it rebuilt these overlays (physical 0x0C39100
  * = VRAM 0x800D6D90). The port compiles this file and substitutes only the disk's DATA, so
  * wherever the disk's geometry differs it must be followed explicitly. Exactly three places
- * differ: the node-panel header, the track-shape name, and the Create Machine weight caption
+ * differ in that translation: the node-panel header, the track-shape name, and the Create Machine weight caption
  * (machine_create_draw.c). Everything else -- Bank, Width, L/R, X/Y/Z, the "M" row and the
- * five count rows -- is retail-to-the-pixel in the disk's recompiled code with only the
- * string pointer changed. */
+ * five count rows -- keeps retail coordinates in the disk's recompiled code with only the
+ * string pointer changed. The PORT course-info layout below is a separate extension. */
 
 /* Pixel width of an EK setup-font string, bounded to `max` bytes: that font is a flat 8 px
    per byte (A6340.c:125). The bound exists because D_xk2_800F7090 is [][8] and the English
@@ -77,6 +77,19 @@ static u8* GdxEkCopyBounded(u8* out, const u8* src, s32 max) {
 }
 #else
 #define GDX_EK_LABEL(bound, jp) ((u8*) (jp))
+#endif
+
+#ifdef PORT
+// Keep all 20 title cells above the length/count rows without moving the buttons.
+#define COURSE_INFO_LEFT 128
+#define COURSE_INFO_TEXT_X 132
+#define COURSE_INFO_NODE_SHIFT 8
+#define COURSE_INFO_NODE_SLASH_X 266
+#else
+#define COURSE_INFO_LEFT 232
+#define COURSE_INFO_TEXT_X 232
+#define COURSE_INFO_NODE_SHIFT 0
+#define COURSE_INFO_NODE_SLASH_X 276
 #endif
 
 extern MenuDropItem gRoadTypeMenuItems;
@@ -1459,10 +1472,7 @@ Gfx* func_xk2_800E49FC(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    /* Count rows in the course-info box (this one and the four below) keep retail's cluster in
-       both languages; the translated disk changes none of it. Shifting the cluster 8 px right
-       is what pushed the dash denominator outside the box before, not word length. */
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_boost, &sp38));
+    gfx = func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xBA, GDX_EK_LABEL(gdx_ek_label_boost, &sp38));
     func_xk2_800EDE68(sp40, dashCount, 2);
     func_xk2_800EDAD0(&gfx, 0x108, 0xBA, sp40);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1494,7 +1504,7 @@ Gfx* func_xk2_800E4BA0(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_jump, sp28));
+    gfx = func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xBA, GDX_EK_LABEL(gdx_ek_label_jump, sp28));
     func_xk2_800EDE68(sp30, gCourseFeaturesInfo.jumpCount, 1);
     func_xk2_800EDAD0(&gfx, 0x10E, 0xBA, sp30);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1524,7 +1534,7 @@ Gfx* func_xk2_800E4D04(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_trap, sp28));
+    gfx = func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xBA, GDX_EK_LABEL(gdx_ek_label_trap, sp28));
     func_xk2_800EDE68(sp30, gCourseFeaturesInfo.landmineCount / 6, 1);
     func_xk2_800EDAD0(&gfx, 0x10E, 0xBA, sp30);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1570,7 +1580,7 @@ Gfx* func_xk2_800E4E80(Gfx* gfx) {
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
     D_xk1_80032AD0 = 0;
-    gfx = func_xk1_8002924C(gfx, 0xE8, 0xBA, GDX_EK_LABEL(gdx_ek_label_object, &sp38));
+    gfx = func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xBA, GDX_EK_LABEL(gdx_ek_label_object, &sp38));
     func_xk2_800EDE68(sp40, decorationalFeatureCount, 2);
     func_xk2_800EDAD0(&gfx, 0x108, 0xBA, sp40);
     gfx = func_xk1_8002924C(gfx, 0x114, 0xBA, "/");
@@ -1605,15 +1615,15 @@ Gfx* func_xk2_800E5058(Gfx* gfx) {
             }
             D_xk1_80032AD0 = 0;
 #ifdef PORT
-            gfx = func_xk1_8002924C(gfx, 0xD8, 0xC2, GDX_EK_LABEL(gdx_ek_label_size, sp34));
+            gfx = func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xC2, GDX_EK_LABEL(gdx_ek_label_size, sp34));
             func_xk2_800EDE68(sp3C, D_802CB6D0.controlPointCount, 3);
-            func_xk2_800EDAD0(&gfx, 0xF8, 0xC2, sp3C);
+            func_xk2_800EDAD0(&gfx, 0xF8 - COURSE_INFO_NODE_SHIFT, 0xC2, sp3C);
 #else
             gfx = func_xk1_8002924C(gfx, 0xE8, 0xC2, GDX_EK_LABEL(gdx_ek_label_size, sp34));
             func_xk2_800EDE68(sp3C, D_802CB6D0.controlPointCount, 2);
             func_xk2_800EDAD0(&gfx, 0x108, 0xC2, sp3C);
 #endif
-            gfx = func_xk1_8002924C(gfx, 0x114, 0xC2, "/");
+            gfx = func_xk1_8002924C(gfx, COURSE_INFO_NODE_SLASH_X, 0xC2, "/");
             func_xk2_800EDE68(sp3C, GDX_COURSE_POINT_CAPACITY,
 #ifdef PORT
                                 3
@@ -1621,10 +1631,10 @@ Gfx* func_xk2_800E5058(Gfx* gfx) {
                                 2
 #endif
             );
-            func_xk2_800EDAD0(&gfx, 0x11B, 0xC2, sp3C);
+            func_xk2_800EDAD0(&gfx, 0x11B - COURSE_INFO_NODE_SHIFT, 0xC2, sp3C);
         } else {
             gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
-            gfx = func_xk1_8002924C(gfx, 0xE8, 0xC2, "BG %d", venueIndex + 1);
+            gfx = func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xC2, "BG %d", venueIndex + 1);
         }
     }
 
@@ -2920,40 +2930,26 @@ Gfx* func_xk2_800E8F7C(Gfx* gfx) {
 
     gSPDisplayList(gfx++, D_3000510);
     gDPSetPrimColor(gfx++, 0, 0, 128, 128, 255, 255);
-    gSPTextureRectangle(gfx++, 231 << 2, 177 << 2, 297 << 2, 203 << 2, 0, 0, 0, 1 << 10, 1 << 10);
+    gSPTextureRectangle(gfx++, (COURSE_INFO_LEFT - 1) << 2, 177 << 2, 297 << 2, 203 << 2, 0, 0, 0, 1 << 10, 1 << 10);
 
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 64, 64, 64, 255);
-    gSPTextureRectangle(gfx++, 232 << 2, 178 << 2, 296 << 2, 202 << 2, 0, 0, 0, 1 << 10, 1 << 10);
+    gSPTextureRectangle(gfx++, COURSE_INFO_LEFT << 2, 178 << 2, 296 << 2, 202 << 2, 0, 0, 0, 1 << 10, 1 << 10);
 
     gSPDisplayList(gfx++, D_3000540);
 
     if (D_80030060[0] == '\0') {
         gDPSetPrimColor(gfx++, 0, 0, 255, 64, 64, 0);
-        /* "No Title" is a plain literal in this function on both the retail and the
-           translated build, at retail's 0xE8/0xB2. Eight cells is 232..296, exactly the
-           interior drawn above, so the final 'e' sitting flush against the border column
-           is correct, not a clipping bug. */
-        return func_xk1_8002924C(gfx, 0xE8, 0xB2, "No Title");
+        return func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xB2, "No Title");
     }
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 0);
 #ifdef PORT
-    /* A file name reaches 20 characters. The box shows 8 per row, and its 24-pixel interior holds the
-       three rows that takes, so a long title wraps instead of running off the screen. */
     {
-        char row[9];
-        s32 start;
-        s32 i;
+        u8 title[GDX_EK_FILE_NAME_MAX + 1];
 
-        for (start = 0; (start < GDX_EK_FILE_NAME_MAX) && (D_80030060[start] != '\0'); start += 8) {
-            for (i = 0; (i < 8) && (D_80030060[start + i] != '\0'); i++) {
-                row[i] = D_80030060[start + i];
-            }
-            row[i] = '\0';
-            gfx = func_xk1_8002924C(gfx, 0xE8, 0xB2 + start, "%s", row);
-        }
-        return gfx;
+        return func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xB2, "%s",
+                               GdxEkCopyBounded(title, D_80030060, GDX_EK_FILE_NAME_MAX));
     }
 #else
     return func_xk1_8002924C(gfx, 0xE8, 0xB2, "%s", D_80030060);
