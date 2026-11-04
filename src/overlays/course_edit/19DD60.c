@@ -30,6 +30,7 @@ extern s32 gCourseEditCursorYPos;
 // the mouse while in-game sub-menus (BGM/background/file pickers, name entry, etc.) are open.
 // The cursor drivers in func_xk2_800DBEE4 are skipped when D_800D6CA0.unk_08 != 0, which would
 // otherwise freeze the cursor in those sub-menus.
+extern void gdx_course_edit_flash_message(const char* message);
 extern int gdx_course_edit_mouse_pos(s32* outX, s32* outY);
 extern int gdx_course_edit_mouse_wheel(void);
 extern int gdx_course_edit_mouse_menu_wheel(void);
@@ -609,30 +610,7 @@ s32 CourseEdit_Update(void) {
                     break;
             }
             break;
-        case 0x12:
-            if (D_80794E14) {
-                break;
-            }
-            switch (D_80119880) {
-                case -1:
-                case 1:
-                    if (COURSE_CONTEXT()->courseData.flag == 0) {
-                        func_xk2_800EBFE8(D_xk1_8003A598.name);
-                        D_800D6CA0.unk_08 = 0x22;
-                    } else {
-                        D_800D6CA0.unk_08 = 0;
-                    }
-                    break;
-                case 9:
-                    if (D_xk2_800F7408.courseData.flag == 0) {
-                        func_xk2_800EBFE8(D_xk1_8003A598.name);
-                        D_800D6CA0.unk_08 = 0x22;
-                    } else {
-                        D_800D6CA0.unk_08 = 0;
-                    }
-                    break;
-            }
-            break;
+#include "course_save_complete.inc"
         case 0xFF:
             func_xk2_800EC508();
             break;

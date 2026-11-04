@@ -553,48 +553,7 @@ Gfx* func_xk1_8002C420(Gfx* gfx, s32 arg1, s32 arg2) {
 
 extern u8* D_xk1_800331F0[];
 
-void func_xk1_8002C720(Gfx** gfxP, s32 arg1, s32 arg2, char* arg3, s32 arg4) {
-    Gfx* gfx;
-    s32 temp_a0;
-    s32 temp_t4;
-    u8 sp1B4[0x100];
-    u8 spB4[0x100];
-
-    gfx = *gfxP;
-    if (D_xk1_80032BD8 == 0) {
-        return;
-    }
-    func_xk1_80026830(arg3, sp1B4);
-    mfsStrCpy(spB4, D_xk1_800331F0[arg4 + 1]);
-    temp_a0 = mfsStrLen(sp1B4) + mfsStrLen(spB4);
-    temp_t4 = temp_a0 * 8;
-    arg1 = (((34 - temp_a0) / 2) * 8) + 24;
-
-    gSPDisplayList(gfx++, D_3000510);
-    gDPSetPrimColor(gfx++, 0, 0, 128, 128, 255, 255);
-    gSPTextureRectangle(gfx++, (arg1 - 2) << 2, (arg2 - 2) << 2, (arg1 + temp_t4 + 2) << 2, arg2 << 2, 0, 0, 0, 1 << 10,
-                        1 << 10);
-    gSPTextureRectangle(gfx++, (arg1 - 2) << 2, (arg2 + 16) << 2, (arg1 + temp_t4 + 2) << 2, (arg2 + 16 + 2) << 2, 0, 0,
-                        0, 1 << 10, 1 << 10);
-    gSPTextureRectangle(gfx++, (arg1 - 2) << 2, arg2 << 2, arg1 << 2, (arg2 + 16) << 2, 0, 0, 0, 1 << 10, 1 << 10);
-    gSPTextureRectangle(gfx++, (arg1 + temp_t4) << 2, arg2 << 2, (arg1 + temp_t4 + 2) << 2, (arg2 + 16) << 2, 0, 0, 0,
-                        1 << 10, 1 << 10);
-    gDPPipeSync(gfx++);
-    gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 160);
-    gSPTextureRectangle(gfx++, arg1 << 2, arg2 << 2, (arg1 + temp_t4) << 2, (arg2 + 16) << 2, 0, 0, 0, 1 << 10,
-                        1 << 10);
-    gSPDisplayList(gfx++, D_3000540);
-    gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
-    gDPPipeSync(gfx++);
-    gDPSetPrimColor(gfx++, 0, 0, 255, 64, 64, 255);
-    gfx = func_xk1_800262F4(gfx, arg1, arg2, sp1B4);
-    arg1 += mfsStrLen(sp1B4) * 8;
-    gDPPipeSync(gfx++);
-    gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
-    gfx = func_xk1_800264C0(gfx, arg1, arg2, arg4 + 1);
-
-    *gfxP = gfx;
-}
+#include "course_file_prompt.inc"
 
 s32 func_xk1_8002CA80(void) {
     return D_xk1_80032BD8;

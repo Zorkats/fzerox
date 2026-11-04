@@ -80,9 +80,10 @@ static u8* GdxEkCopyBounded(u8* out, const u8* src, s32 max) {
 #endif
 
 #ifdef PORT
-// Keep all 20 title cells above the length/count rows without moving the buttons.
-#define COURSE_INFO_LEFT 128
-#define COURSE_INFO_TEXT_X 132
+#include "../../../../port/gdx_course_editor_layout.h"
+extern u8 D_80030060[];
+#define COURSE_INFO_LEFT gdx_course_info_left(D_80030060, GDX_EK_FILE_NAME_MAX)
+#define COURSE_INFO_TEXT_X (COURSE_INFO_LEFT + 8)
 #define COURSE_INFO_NODE_SHIFT 8
 #define COURSE_INFO_NODE_SLASH_X 266
 #else
