@@ -120,6 +120,30 @@ s32 sMenuRaceIntroTimer;
 s32 sMenuHighlightedOptionMoveTimer;
 s32 sRaceMenuOptionIndex;
 s32 sGeneralRaceMenuScissorBoxTimer;
+#if defined(PORT) && defined(EXPANSION_KIT)
+#include "../../../../port/gdx_course_meta_view.h"
+#include "../../../../port/gdx_menu_words.h"
+
+// A seventh Time Attack finish row, only on a track saved by Course Edit on this install: the run becomes the
+// track's staff time, the time its CPUs pace against (port/gdx_course_meta_view.h). The other rows are ROM
+// textures, so the label "Save Record" is built from their words at runtime (port/gdx_menu_words.h) and only
+// falls back to the game font when that fails, as on a JP build. The box grows upward by one row, so every
+// other track keeps the stock layout.
+#define TIME_ATTACK_SET_STAFF_TIME (TIME_ATTACK_QUIT + 1)
+#define STAFF_ROW_UNKNOWN 0 // not yet decided for this race
+#define STAFF_ROW_HIDDEN 1
+#define STAFF_ROW_OFFERED 2
+#define STAFF_ROW_SET 3
+static s32 sStaffRowState;
+static s32 sStaffRowShift;
+static u8 sStaffRowTex[GDX_MENU_WORDS_SIZE];
+static s32 sStaffRowTexReady;
+#define TIME_ATTACK_FINISH_SHIFT sStaffRowShift
+#define TIME_ATTACK_FINISH_LAST (sStaffRowShift ? TIME_ATTACK_SET_STAFF_TIME : TIME_ATTACK_QUIT)
+#else
+#define TIME_ATTACK_FINISH_SHIFT 0
+#define TIME_ATTACK_FINISH_LAST TIME_ATTACK_QUIT
+#endif
 s32 sGpResultsEndMenuOptionIndex;
 s32 sGpResultsEndMenuScissorBoxTimer;
 s32 sPauseMenuOptionIndex;
@@ -419,6 +443,10 @@ void Menus_Init(void) {
             sMenuRaceIntroTimer = sRaceMenuOptionIndex = sGpResultsEndMenuOptionIndex = sMenuIsBusy =
                 sRaceFinishSaveTriggered = sSaveGhostMenuState = sMenuOptionTriggered = D_i3_801419A6 =
                     gShowNameEntryMenu = D_80141900 = sMenuHighlightedOptionMoveTimer = 0;
+#if defined(PORT) && defined(EXPANSION_KIT)
+    sStaffRowState = STAFF_ROW_UNKNOWN;
+    sStaffRowShift = 0;
+#endif
 
     sGpResultsRankingScrollPosition = sTotalRankingsManualScrollPosition = 0.0f;
     sSaveGhostMenuOptionsScissorBoxTimer = sGhostSaveMenuScissorBoxTimer = 90;
@@ -455,6 +483,10 @@ void Menus_Init(void) {
         func_80078104(aMenuToGamePakTex, TEX_SIZE(aMenuToGamePakTex, sizeof(u8)), 0, 1, 0);
         func_80078104(aMenuToDiskTex, TEX_SIZE(aMenuToDiskTex, sizeof(u8)), 0, 1, 0);
         func_80078104(aMenuOverwriteData2Tex, TEX_SIZE(aMenuOverwriteData2Tex, sizeof(u8)), 0, 1, 0);
+#endif
+#if defined(PORT) && defined(EXPANSION_KIT) && defined(VERSION_US)
+        // The second word of the staff row's "Save Record" label.
+        func_80078104(aMenuClearRecordTex, TEX_SIZE(aMenuClearRecordTex, sizeof(u8)), 0, 1, 0);
 #endif
         sLoserTexture = func_80078104(aLoserTex, TEX_SIZE(aLoserTex, sizeof(u8)), 0, 0, 0);
         sLoserPalette = func_80078104(aLoserTLUT, TEX_SIZE(aLoserTLUT, sizeof(u16)), 0, 0, 0);
@@ -2774,8 +2806,31 @@ Gfx* Menus_DrawCannotSaveGhost(Gfx* gfx) {
 
 Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
     bool sp4C;
+#if defined(PORT) && defined(EXPANSION_KIT)
+    s32 staffRowPrevious;
+#endif
 
     sp4C = false;
+#if defined(PORT) && defined(EXPANSION_KIT)
+    if (sStaffRowState == STAFF_ROW_UNKNOWN) {
+        // A retired run stops the clock early, so only a finished one counts.
+        sStaffRowState = ((gTitleDemoState == TITLE_DEMO_INACTIVE) &&
+                          (gRacers[0].stateFlags & RACER_STATE_FINISHED) &&
+                          !(gRacers[0].stateFlags & RACER_STATE_RETIRED) &&
+                          gdx_meta_view_staff_offer(gTotalLapCount, gRacers[0].raceTime))
+                             ? STAFF_ROW_OFFERED
+                             : STAFF_ROW_HIDDEN;
+        sStaffRowShift = (sStaffRowState == STAFF_ROW_OFFERED) ? 12 : 0;
+#ifdef VERSION_US
+        // Composed once and kept: the source textures never change, and the buffer's address is what the
+        // texture cache keys on, so it must not change after its first draw.
+        if ((sStaffRowShift != 0) && !sStaffRowTexReady) {
+            sStaffRowTexReady = gdx_menu_words_compose(func_800783AC(aMenuGhostSaveTex),
+                                                       func_800783AC(aMenuClearRecordTex), sStaffRowTex);
+        }
+#endif
+    }
+#endif
     if (sGeneralRaceMenuScissorBoxTimer > 0) {
         sGeneralRaceMenuScissorBoxTimer--;
     } else {
@@ -2797,7 +2852,7 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
            collapses an inverted range to zero area and leaves valid windows untouched, so the
            reveal animation is preserved. */
         s32 ulx = sGeneralRaceMenuScissorBoxTimer + 205;
-        s32 uly = sGeneralRaceMenuScissorBoxTimer + 132;
+        s32 uly = sGeneralRaceMenuScissorBoxTimer + 132 - TIME_ATTACK_FINISH_SHIFT;
         s32 lrx = 305 - sGeneralRaceMenuScissorBoxTimer;
         s32 lry = 225 - sGeneralRaceMenuScissorBoxTimer;
         /* Re-center about the hor+ pivot 160; see the RETIRE panel in Menus_DrawDeathRaceEndMenu. */
@@ -2816,11 +2871,11 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
                   sGeneralRaceMenuScissorBoxTimer + 132, 305 - sGeneralRaceMenuScissorBoxTimer,
                   225 - sGeneralRaceMenuScissorBoxTimer);
 #endif
-    gfx = Menus_DrawBeveledBox(gfx, 210, 137, 300, 220, 0, 0, 0, 180);
+    gfx = Menus_DrawBeveledBox(gfx, 210, 137 - TIME_ATTACK_FINISH_SHIFT, 300, 220, 0, 0, 0, 180);
     gSPDisplayList(gfx++, aMenuTextTlutSetupDL);
     gDPLoadTLUT_pal256(gfx++, func_800783AC(aMenuTextTLUT));
     gfx = Menus_SetOptionColor(gfx, sRaceMenuOptionIndex - TIME_ATTACK_RETRY);
-    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_RETRY, 230, 140);
+    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_RETRY, 230, 140 - TIME_ATTACK_FINISH_SHIFT);
     if (!sCannotSaveGhost) {
         gfx = Menus_SetOptionColor(gfx, (sRaceMenuOptionIndex - TIME_ATTACK_SAVE_GHOST) | sSaveGhostMenuOpen |
                                             sGhostSaveTimer);
@@ -2828,20 +2883,43 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
         gDPPipeSync(gfx++);
         gDPSetPrimColor(gfx++, 0, 0, 128, 128, 128, 255);
     }
-    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_GHOST_SAVE, 230, 152);
+    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_GHOST_SAVE, 230, 152 - TIME_ATTACK_FINISH_SHIFT);
     gfx = Menus_SetOptionColor(gfx, sRaceMenuOptionIndex - TIME_ATTACK_SETTINGS);
-    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_SETTINGS, 230, 164);
+    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_SETTINGS, 230, 164 - TIME_ATTACK_FINISH_SHIFT);
     gfx = Menus_SetOptionColor(gfx, sRaceMenuOptionIndex - TIME_ATTACK_CHANGE_MACHINE);
-    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_CHANGE_MACHINE, 230, 176);
+    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_CHANGE_MACHINE, 230, 176 - TIME_ATTACK_FINISH_SHIFT);
     gfx = Menus_SetOptionColor(gfx, sRaceMenuOptionIndex - TIME_ATTACK_CHANGE_COURSE);
-    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_CHANGE_COURSE, 230, 188);
+    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_CHANGE_COURSE, 230, 188 - TIME_ATTACK_FINISH_SHIFT);
     gfx = Menus_SetOptionColor(gfx, sRaceMenuOptionIndex - TIME_ATTACK_QUIT);
-    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_QUIT, 230, 200);
+    gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_QUIT, 230, 200 - TIME_ATTACK_FINISH_SHIFT);
+#if defined(PORT) && defined(EXPANSION_KIT)
+    if (sStaffRowShift != 0) {
+        if (sStaffRowState == STAFF_ROW_SET) {
+            gDPPipeSync(gfx++);
+            gDPSetPrimColor(gfx++, 0, 0, 128, 128, 128, 255);
+        } else {
+            gfx = Menus_SetOptionColor(gfx, (sRaceMenuOptionIndex - TIME_ATTACK_SET_STAFF_TIME) |
+                                                sSaveGhostMenuOpen | sGhostSaveTimer);
+        }
+        // Row 6 of the 12-pixel grid, still under the menu palette loaded above.
+        if (sStaffRowTexReady) {
+            gfx = func_8007E410(gfx, sStaffRowTex, NULL, G_IM_FMT_CI, 1, 230, 212 - TIME_ATTACK_FINISH_SHIFT,
+                                GDX_MENU_WORDS_WIDTH, GDX_MENU_WORDS_HEIGHT, 2);
+        }
+    }
+#endif
     gDPPipeSync(gfx++);
     gDPSetTextureLUT(gfx++, G_TT_NONE);
+#if defined(PORT) && defined(EXPANSION_KIT)
+    if ((sStaffRowShift != 0) && !sStaffRowTexReady) {
+        // FONT_SET_4 draws 8 above y, so the row's top lands on row 6 like a texture would.
+        gfx = Font_DrawString(gfx, 230, 212 - TIME_ATTACK_FINISH_SHIFT + 8, "SAVE RECORD", 0, FONT_SET_4, 0);
+    }
+#endif
     gDPPipeSync(gfx++);
     gfx = Menus_SetOptionColor(gfx, sSaveGhostMenuOpen + sGhostSaveTimer);
-    gfx = Font_DrawScaledString(gfx, 215, (sRaceMenuOptionIndex * 12) + 157, "\243\315", 1, FONT_SET_5, 0, 0.8f, 0.8f);
+    gfx = Font_DrawScaledString(gfx, 215, (sRaceMenuOptionIndex * 12) + 157 - TIME_ATTACK_FINISH_SHIFT, "\243\315", 1,
+                                FONT_SET_5, 0, 0.8f, 0.8f);
 
     if (sSaveGhostMenuOpen) {
 #ifdef EXPANSION_KIT
@@ -2869,7 +2947,19 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
     if ((sGeneralRaceMenuScissorBoxTimer == 0) && !sSaveGhostMenuOpen && (sGhostSaveMenuScissorBoxTimer != 0) &&
         (sGhostSaveTimer == 0) && (sSaveGhostMenuState == GHOST_SAVE_MENU_CLOSED) && !sp4C) {
         if (!sMenuIsBusy) {
-            sRaceMenuOptionIndex = Menus_UpdateHighlightedOptionVertical(0, sRaceMenuOptionIndex, 5);
+#if defined(PORT) && defined(EXPANSION_KIT)
+            staffRowPrevious = sRaceMenuOptionIndex;
+#endif
+            sRaceMenuOptionIndex =
+                Menus_UpdateHighlightedOptionVertical(0, sRaceMenuOptionIndex, TIME_ATTACK_FINISH_LAST);
+#if defined(PORT) && defined(EXPANSION_KIT)
+            // Skip over the staff time row once it is used. It is the last row, so down wraps to the top.
+            if ((sRaceMenuOptionIndex == TIME_ATTACK_SET_STAFF_TIME) && (sStaffRowState == STAFF_ROW_SET) &&
+                (staffRowPrevious != TIME_ATTACK_SET_STAFF_TIME)) {
+                sRaceMenuOptionIndex =
+                    (staffRowPrevious == TIME_ATTACK_RETRY) ? TIME_ATTACK_QUIT : TIME_ATTACK_RETRY;
+            }
+#endif
             // Skip over save ghost option when greyed out
             if ((sRaceMenuOptionIndex == TIME_ATTACK_SAVE_GHOST) && (sCannotSaveGhost)) {
                 if ((gControllers[gPlayerControlPorts[0]].stickY > 40) ||
@@ -2980,6 +3070,19 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
                     sMenuIsBusy = true;
                     sMenuStateFlags |= MENU_STATE_CHANGE_COURSE;
                     break;
+#if defined(PORT) && defined(EXPANSION_KIT)
+                case TIME_ATTACK_SET_STAFF_TIME:
+                    if (sStaffRowState != STAFF_ROW_OFFERED) {
+                        break;
+                    }
+                    if (gdx_meta_view_set_staff(gTotalLapCount, gRacers[0].raceTime)) {
+                        Audio_TriggerSystemSE(NA_SE_33);
+                        sStaffRowState = STAFF_ROW_SET;
+                    } else {
+                        Audio_TriggerSystemSE(NA_SE_16);
+                    }
+                    break;
+#endif
             }
         }
     }
@@ -3991,6 +4094,57 @@ Gfx* Menus_DrawCourseName(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
     return gfx;
 }
+
+#if defined(PORT) && defined(EXPANSION_KIT)
+// The creator of a custom track, under its name during the course intro (port/gdx_course_meta_view.h).
+// It slides in with the name box and is cut by a scissor that closes with the same padding, so both
+// leave together. Nothing is drawn when the track has no author.
+static Gfx* Menus_DrawCourseCreator(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
+    char caption[48];
+    s32 width;
+    s32 ulx;
+    s32 uly;
+    s32 lrx;
+    s32 lry;
+
+    if (gdx_meta_view_race_caption(caption, sizeof(caption)) <= 0) {
+        return gfx;
+    }
+    width = Font_GetStringWidth(caption, FONT_SET_4, 0);
+    if (width > 280) {
+        return gfx;
+    }
+    ulx = ((left - (width / 2)) + paddingSize) - 4;
+    uly = (top + paddingSize) - 11;
+    lrx = (((width / 2) + left) - paddingSize) + 5;
+    lry = (top - paddingSize) + 3;
+    if (ulx < 12) {
+        ulx = 12;
+    }
+    if (uly < 16) {
+        uly = 16;
+    }
+    if (lrx > 308) {
+        lrx = 308;
+    }
+    if (lry > 224) {
+        lry = 224;
+    }
+    if ((ulx >= lrx) || (uly >= lry)) {
+        return gfx;
+    }
+    gDPPipeSync(gfx++);
+    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
+    gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
+    gfx = Font_DrawString(gfx, (left - (width / 2)) + 1, top + 1, caption, 0, FONT_SET_4, 0);
+    gDPPipeSync(gfx++);
+    gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+    gfx = Font_DrawString(gfx, left - (width / 2), top, caption, 0, FONT_SET_4, 0);
+    gDPPipeSync(gfx++);
+    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+    return gfx;
+}
+#endif
 
 #ifdef PORT
 /* A ROM hack may reword this label. See port/gdx_game_text.h. */
@@ -5978,6 +6132,10 @@ Gfx* Menus_Draw(Gfx* gfx) {
                             i = 160;
                         }
                         gfx = Menus_DrawCourseName(gfx, i, 120, j);
+#if defined(PORT) && defined(EXPANSION_KIT)
+                        // Between the name box (bottom at 123) and the best time box (top at 141).
+                        gfx = Menus_DrawCourseCreator(gfx, i, 137, j);
+#endif
                     }
                     i = sMenuRaceIntroTimer * 8;
                     if (i > 160) {

@@ -61,8 +61,13 @@ void func_xk1_8002C720(Gfx** gfxP, s32 arg1, s32 arg2, char* arg3, s32 arg4) {
     }
     width += 16;
     arg1 = (320 - width) / 2;
-    // Preserve the bottom edge so the native Yes/No controls never move.
+    // A single row keeps the stock position. Taller boxes start below the Course Edit menu bar,
+    // which ends at y=56 and would hide the first row, and still finish above Yes/No at y=118.
     top = bottom - rows * 16;
+    if (rows > 1 && top < 64) {
+        top = 64;
+        bottom = top + rows * 16;
+    }
     gSPDisplayList(gfx++, D_3000510);
     gDPSetPrimColor(gfx++, 0, 0, 128, 128, 255, 255);
     gSPTextureRectangle(gfx++, (arg1 - 2) << 2, (top - 2) << 2, (arg1 + width + 2) << 2, top << 2,

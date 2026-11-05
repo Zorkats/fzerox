@@ -10,6 +10,8 @@
                 D_800D6CA0.unk_08 = 0;
                 break;
             }
+            // The course is on disk: its staff time no longer matches the layout, and this install made it.
+            gdx_meta_view_editor_saved();
 #endif
             switch (D_80119880) {
                 case -1:

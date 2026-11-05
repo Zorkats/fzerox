@@ -1192,9 +1192,17 @@ void Camera_UpdateProjectionViewMtx(GfxPool* gfxPool, Camera* camera) {
     Vec3f gdxSavedAt = camera->at;
     f32 gdxSavedFov = camera->fov;
     s32 gdxPhotoActive = GdxPhotoCamera_Update(camera);
+    // Extended draw distance pushes the far plane out, and the fog band at its end with it
+    // (port/gdx_draw_distance.h). The scale is exactly 1.0f otherwise, an exact multiply.
+    extern float gdx_draw_distance_far_scale(void);
+    f32 gdxFar = camera->far * gdx_draw_distance_far_scale();
 #endif
 
+#ifdef PORT
+    Matrix_SetFrustrum(&gfxPool->unk_20008[camera->id], &camera->projectionMtx, camera->fov, camera->near, gdxFar,
+#else
     Matrix_SetFrustrum(&gfxPool->unk_20008[camera->id], &camera->projectionMtx, camera->fov, camera->near, camera->far,
+#endif
                        camera->fovScaleX, camera->frustrumCenterX, camera->fovScaleY, camera->frustrumCenterY,
                        &camera->perspectiveScale);
 
@@ -1242,7 +1250,11 @@ void Camera_UpdateProjectionViewMtx(GfxPool* gfxPool, Camera* camera) {
             }
             fov = camera->fov + ((85.0f - camera->fov) * var_fv0);
 
+#ifdef PORT
+            Matrix_SetFrustrum(&gfxPool->unk_20008[camera->id], &camera->projectionMtx, fov, camera->near, gdxFar,
+#else
             Matrix_SetFrustrum(&gfxPool->unk_20008[camera->id], &camera->projectionMtx, fov, camera->near, camera->far,
+#endif
                                camera->fovScaleX, camera->frustrumCenterX, camera->fovScaleY, camera->frustrumCenterY,
                                &camera->perspectiveScale);
             Camera_CalculateProjectionViewMtx(&camera->projectionViewMtx, &camera->projectionMtx, &camera->viewMtx);

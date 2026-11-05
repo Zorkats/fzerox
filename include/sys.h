@@ -82,9 +82,10 @@ typedef union unk_Light {
 
 // ROUGH APPROXIMATIONS OF SIZES, NOT CORRECT!!
 #ifndef EXPANSION_KIT
+#define COURSE_VTX_BUFFER_COUNT 4096
 typedef struct GfxPool {
     Gfx gfxBuffer[8193];
-    Vtx courseVtxBuffer[4096];
+    Vtx courseVtxBuffer[COURSE_VTX_BUFFER_COUNT];
     Mtx unk_20008[4];
     Mtx unk_20108[4];
     Mtx unk_20208[4];
@@ -114,12 +115,24 @@ typedef struct GfxPool {
     s8 pad_2C6A8[0x48];
 } GfxPool; // size = 0x2C6F0
 #else
+// The stock pool holds 13313 display list commands and 4096 course vertices. The port adds room that
+// only Extended draw distance uses (port/gdx_draw_distance.h): course.c keeps the stock limits
+// otherwise. Host offsets differ from the comments below in any case, since sizeof(Gfx) doubles, and
+// the port reads them through offsetof (port/decomp_port.c).
+#define GFX_POOL_STOCK_GFX_COUNT 13313
+#ifdef PORT
+#define GFX_POOL_GFX_COUNT (GFX_POOL_STOCK_GFX_COUNT + 16384)
+#define COURSE_VTX_BUFFER_COUNT 0x4000
+#else
+#define GFX_POOL_GFX_COUNT GFX_POOL_STOCK_GFX_COUNT
+#define COURSE_VTX_BUFFER_COUNT 0x1000
+#endif
 typedef struct GfxPool {
-    /* 0x00000 */ Gfx gfxBuffer[13313];
+    /* 0x00000 */ Gfx gfxBuffer[GFX_POOL_GFX_COUNT];
     /* 0x1A008 */ Mtx unk_20008[4];
     /* 0x1A108 */ Mtx unk_20108[4];
     /* 0x1A208 */ Mtx unk_20208[4];
-    /* 0x1A308 */ Vtx courseVtxBuffer[4096];
+    /* 0x1A308 */ Vtx courseVtxBuffer[COURSE_VTX_BUFFER_COUNT];
     /* 0x2A308 */ Vtx effectsVtxBuffer[2048];
     /* 0x32308 */ Mtx unk_20308[30];
     /* 0x32A08 */ Mtx unk_20A88[30];

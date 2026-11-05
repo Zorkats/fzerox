@@ -726,6 +726,10 @@ extern int gdx_single_race_get_lap_time(int racerId, int lapIndex);
 /* Course Edit fork runtime (port/gdx_course_branch.c). */
 extern s32 gdx_course_branch_live(void);
 extern void gdx_course_branch_reset_racers(void);
+/* CM4 staff run splits (port/gdx_course_splits_view.h). */
+extern void gdx_splits_view_race_init(void);
+extern void gdx_splits_view_player_moved(int lap, int lapsCompleted, float lapShare, int raceTime,
+                                         int completedLapsTime);
 extern void gdx_course_branch_racer_walked(s32 racerId, RacerSegmentPositionInfo* info);
 extern s32 gdx_course_branch_settings_point(const CourseSegment* segment);
 #endif
@@ -1838,6 +1842,8 @@ void Racer_Init(void) {
     { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
     /* Every racer starts on the stock ring with no fork history. */
     gdx_course_branch_reset_racers();
+    /* A single-player Time Attack run on a course file records its splits for the staff time. */
+    gdx_splits_view_race_init();
     /* gEnhancements.Graphics.FancyLighting, reducing stock ambient lighting
        so new light sources can shine. */
     { extern int CVarGetInteger(const char* name, int defaultValue);
@@ -4851,6 +4857,13 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                     racer->lapsCompletedDistance -= gCurrentCourseInfo->length;
                 }
                 racer->raceDistance = racer->raceDistancePosition = racer->lapsCompletedDistance + racer->lapDistance;
+#ifdef PORT
+                if (racer == gRacers) {
+                    gdx_splits_view_player_moved(racer->lap, racer->lapsCompleted,
+                                                 racer->lapDistance / gCurrentCourseInfo->length, racer->raceTime,
+                                                 racer->completedLapsTime);
+                }
+#endif
             }
 
             D_800CF4B8[TRACK_SHAPE_INDEX((u32) racer->segmentPositionInfo.courseSegment->trackSegmentInfo &
@@ -6221,6 +6234,9 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     // so the point light and custom lights read better against segment lighting.
     s32 gdxFancyLighting;
     f32 gdxCullX;
+    // Depth past which machines and ghosts are not drawn: stock 2500, scaled by Extended draw distance
+    // (port/gdx_draw_distance.h). The scale is exactly 1.0f otherwise.
+    f32 gdxMachineDrawDistance;
 #endif
 #ifdef EXPANSION_KIT
     s32 prevForceFieldLava;
@@ -6262,6 +6278,7 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     {
         extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
         extern float gdx_get_ultrawide_cull_xscale(void);
+        extern float gdx_draw_distance_far_scale(void);
         gdxForceMaxMachineLod = CVarGetInteger("gEnhancements.Graphics.ForceMaxMachineLOD", 0);
         gdxMachineLodDistMod = CVarGetInteger("gEnhancements.Graphics.MachineLODDistMod", 0);
         gdxForceDrawMachineShad = CVarGetInteger("gEnhancements.Graphics.ForceDrawMachineShad", 0);
@@ -6271,6 +6288,7 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
            cull — machines between the 4:3 band and the true frame edge vanished at 21:9.
            Exactly 1.0f (IEEE-exact no-op comparison) unless UltrawideMode is on. */
         gdxCullX = gdx_get_ultrawide_cull_xscale();
+        gdxMachineDrawDistance = 2500.0f * gdx_draw_distance_far_scale();
     }
 #endif
 
@@ -6291,7 +6309,11 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                             (sp580.m[1][2] * racer->segmentPositionInfo.pos.y) +
                             (sp580.m[2][2] * racer->segmentPositionInfo.pos.z)) +
                            sp580.m[3][2];
+#ifdef PORT
+                if ((temp_fa0 < 0.0f) || (temp_fa0 > gdxMachineDrawDistance)) {
+#else
                 if ((temp_fa0 < 0.0f) || (temp_fa0 > 2500.0f)) {
+#endif
                     continue;
                 }
                 sp574 = 1.0f / (((sp580.m[0][3] * racer->segmentPositionInfo.pos.x) +
@@ -6397,7 +6419,11 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
                             (sp580.m[1][2] * racer->segmentPositionInfo.pos.y) +
                             (sp580.m[2][2] * racer->segmentPositionInfo.pos.z)) +
                            sp580.m[3][2];
+#ifdef PORT
+                if ((temp_fa0 < 0.0f) || (temp_fa0 > gdxMachineDrawDistance)) {
+#else
                 if ((temp_fa0 < 0.0f) || (temp_fa0 > 2500.0f)) {
+#endif
                     continue;
                 }
                 sp574 = 1.0f / (((sp580.m[0][3] * racer->segmentPositionInfo.pos.x) +

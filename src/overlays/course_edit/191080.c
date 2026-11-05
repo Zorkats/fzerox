@@ -82,7 +82,36 @@ static u8* GdxEkCopyBounded(u8* out, const u8* src, s32 max) {
 #ifdef PORT
 #include "../../../../port/gdx_course_editor_layout.h"
 extern u8 D_80030060[];
-#define COURSE_INFO_LEFT gdx_course_info_left(D_80030060, GDX_EK_FILE_NAME_MAX)
+
+/* The tightest left edge the count rows allow: each label, drawn at COURSE_INFO_TEXT_X, must end
+   before its count field. Measured from the labels the loaded disk supplies, so a translation with
+   longer words widens the panel only as far as it needs. Every Japanese label is four characters. */
+static s32 GdxCourseInfoLabelLimit(void) {
+    static const u8 sJpLabel[] = { 0x99, 0xB2, 0xDD, 0xC4, 0x00 };
+    const struct {
+        const char* label;
+        s32 fieldX;
+    } rows[] = {
+        { gdx_ek_label_size, GDX_COURSE_INFO_SIZE_FIELD_X },
+        { gdx_ek_label_boost, 0x108 },
+        { gdx_ek_label_object, 0x108 },
+        { gdx_ek_label_jump, 0x10E },
+        { gdx_ek_label_trap, 0x10E },
+    };
+    s32 limit = GDX_COURSE_INFO_RIGHT;
+    s32 i;
+
+    for (i = 0; i < (s32) ARRAY_COUNT(rows); i++) {
+        s32 rowLimit = gdx_course_info_label_limit(GDX_EK_LABEL(rows[i].label, sJpLabel), 16, rows[i].fieldX);
+
+        if (rowLimit < limit) {
+            limit = rowLimit;
+        }
+    }
+    return limit;
+}
+
+#define COURSE_INFO_LEFT gdx_course_info_left(D_80030060, GDX_EK_FILE_NAME_MAX, GdxCourseInfoLabelLimit())
 #define COURSE_INFO_TEXT_X (COURSE_INFO_LEFT + 8)
 #define COURSE_INFO_NODE_SHIFT 8
 #define COURSE_INFO_NODE_SLASH_X 266
@@ -2949,7 +2978,7 @@ Gfx* func_xk2_800E8F7C(Gfx* gfx) {
     {
         u8 title[GDX_EK_FILE_NAME_MAX + 1];
 
-        return func_xk1_8002924C(gfx, COURSE_INFO_TEXT_X, 0xB2, "%s",
+        return func_xk1_8002924C(gfx, gdx_course_info_title_x(D_80030060, GDX_EK_FILE_NAME_MAX), 0xB2, "%s",
                                GdxEkCopyBounded(title, D_80030060, GDX_EK_FILE_NAME_MAX));
     }
 #else

@@ -4122,18 +4122,18 @@ void Course_SignsInit(s32 courseIndex) {
 extern unk_807B3C20 D_802CB6D0;
 
 #ifdef PORT
-static s32 Course_GdxGadgetPreflight(s32 courseIndex, s32 editor) {
+static s32 Course_GdxGadgetPreflight(s32 courseIndex) {
     GdxGadgetDemand demand = { 0 };
-    GdxGadgetDemand limit = { 120, 32, 48, 4, 192, 0x80 / 6 };
+    /* MAX_FEATURE_COUNT and MAX_JUMP_COUNT in course_gadget_context.c, and the jumpVtx buffers. The Expansion
+     * Kit race buffers hold 8 jumps like the editor, so a course built in the editor races with all of them. */
+    GdxGadgetDemand limit = { 120, 32, 48, 8, 192, 0x80 / 6 };
     signed char parts[9];
     s32 i;
 
 #ifndef EXPANSION_KIT
     limit.features = 105;
+    limit.jumps = 4;
 #endif
-    if (editor) {
-        limit.jumps = 8;
-    }
     for (i = 0; i < GDX_GADGET_COUNT(courseIndex); i++) {
         parts[0] = GDX_GADGET_PART(pit, i, 0);
         parts[1] = GDX_GADGET_PART(dash, i, 1);
@@ -4154,7 +4154,7 @@ static s32 Course_GdxGadgetPreflight(s32 courseIndex, s32 editor) {
 }
 
 s32 Course_GdxCanTestDrive(s32 courseIndex) {
-    return gdx_course_gadget_error == 0 && Course_GdxGadgetPreflight(courseIndex, false);
+    return gdx_course_gadget_error == 0 && Course_GdxGadgetPreflight(courseIndex);
 }
 #endif
 
@@ -4171,7 +4171,7 @@ void Course_FeaturesInit(s32 courseIndex) {
     }
 
 #ifdef PORT
-    if (!Course_GdxGadgetPreflight(courseIndex, IN_COURSE_EDITOR)) {
+    if (!Course_GdxGadgetPreflight(courseIndex)) {
         gCourseFeaturesInfo.featureCount = 0;
         gCourseFeaturesInfo.landmineCount = 0;
         gCourseFeaturesInfo.jumpCount = 0;
@@ -4200,7 +4200,7 @@ void Course_EffectsInit(s32 courseIndex) {
     }
 
 #ifdef PORT
-    if (!Course_GdxGadgetPreflight(courseIndex, IN_COURSE_EDITOR)) {
+    if (!Course_GdxGadgetPreflight(courseIndex)) {
         gCourseEffectsInfo.count = 0;
         return;
     }

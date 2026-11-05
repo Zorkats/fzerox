@@ -75,6 +75,8 @@ extern void Math_Rand2Init(s32 seed, s32 mask);
 static GdxGpResumeState sGdxResumeState;
 static s32 sGdxResumePending = false;
 static s32 sGdxResumeRequested = false;
+/* Read once by ovl_i3/cpu.c func_i3_80115E74, see gdx_gp_resume_take_field_setup. */
+static s32 sGdxResumeFieldSetup = false;
 
 static void gdx_gp_resume_capture(GdxGpResumeState* s) {
     s32 i;
@@ -127,6 +129,25 @@ static void gdx_gp_resume_restore(const GdxGpResumeState* s) {
     /* Same RNG words that Course_GenerateRandomCourse will draw from for the next X Cup course. */
     Math_Rand1Init(s->randSeed1, (s32) s->randMask1);
     Math_Rand2Init(s->randSeed2, (s32) s->randMask2);
+    sGdxResumeFieldSetup = true;
+}
+
+/* The CPU personalities, rivals and grid order are set up on a cup's first race only, and the
+ * record does not carry them. The first race after a restore sets them up again; the next ones
+ * keep them, as in a cup that was never left. */
+int gdx_gp_resume_take_field_setup(void) {
+    s32 take = sGdxResumeFieldSetup;
+
+    sGdxResumeFieldSetup = false;
+    return take;
+}
+
+/* Enhancements > Gameplay > Save cup progress. Off, no cup is saved and Continue Cup is never
+ * offered, so a quit cup is gone as in stock. */
+int gdx_gp_resume_enabled(void) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+
+    return CVarGetInteger("gEnhancements.Gameplay.SaveCupProgress", 1) != 0;
 }
 
 /* Menu gate: true only on the main menu's mode grid (D_800CD384 0) or its class list (1, where the
@@ -153,6 +174,11 @@ void gdx_gp_resume_next_course_init(void) {
         return;
     }
     if (gSelectedMode != MODE_GP_RACE || gCupType < 0 || gCupType > X_CUP) {
+        return;
+    }
+    if (!gdx_gp_resume_enabled()) {
+        /* A record from before the setting was turned off would still be offered. */
+        gdx_gp_resume_clear();
         return;
     }
     /* A crash restart or re-do reaches this screen for the course already in progress. The record

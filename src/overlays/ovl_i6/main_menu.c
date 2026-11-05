@@ -169,6 +169,7 @@ const s32 kMaxSubOptionLimits[] = { 3, 1, 0, 2, 0, 3, 0, 0 };
 /* Slice 7: a CONTINUE row under the Grand Prix classes while a cup in progress is saved. It takes the same
    path as the Continue Cup button of the port menu (game.c gdx_gp_resume_request_continue). */
 extern int gdx_gp_resume_available(int* outDifficulty);
+extern int gdx_gp_resume_enabled(void);
 extern void gdx_gp_resume_request_continue(void);
 extern Gfx* func_80078DB4(Gfx* gfx, unk_80077D50* arg1, s32 left, s32 top, TexturePtr texture, u32 arg5, s32 arg6,
                           s32 arg7, f32 arg8, f32 arg9);
@@ -644,7 +645,7 @@ void MainMenu_DifficultyInit(void) {
         int savedDifficulty = 0;
 
         sGdxContinueHoldTimer = 0;
-        sGdxContinueAvailable = gdx_gp_resume_available(&savedDifficulty) != 0;
+        sGdxContinueAvailable = gdx_gp_resume_enabled() && (gdx_gp_resume_available(&savedDifficulty) != 0);
         if (!sGdxContinueAvailable && (gModeSubOption[MODE_GP_RACE] > gdx_main_menu_class_limit(MODE_GP_RACE))) {
             /* The cup that row stood for is gone, so the cursor goes back to a class. */
             gModeSubOption[MODE_GP_RACE] = 0;

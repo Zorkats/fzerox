@@ -423,6 +423,16 @@ extern s8 gTitleDemoState;
 extern s32 gTotalRacers;
 extern s32 D_800E5FF0;
 extern s16 D_80115D50[];
+#ifdef PORT
+/* decomp/src/game/game.c: true once after Continue Cup restored a cup. The record carries the
+ * roster and points but not the CPU personalities, rivals or grid order set up below, and a fresh
+ * process holds them zeroed, which sends every CPU after the player (issue #62). The first resumed
+ * race sets them up again as a cup's first race does. */
+extern int gdx_gp_resume_take_field_setup(void);
+#define GDX_GP_FIRST_RACE() (gdxFieldSetup)
+#else
+#define GDX_GP_FIRST_RACE() (D_800E5FF0 == 1)
+#endif
 
 void func_i3_80115E74(void) {
     s32 pad[44];
@@ -438,6 +448,13 @@ void func_i3_80115E74(void) {
     s32 var_a3;
     s32 temp_hi;
     s32 var_s5;
+#ifdef PORT
+    s32 gdxFieldSetup = (D_800E5FF0 == 1);
+
+    if ((gGameMode == GAMEMODE_GP_RACE) && gdx_gp_resume_take_field_setup()) {
+        gdxFieldSetup = 1;
+    }
+#endif
 
 #ifdef PORT
     /* Single Race CPUs race like GP opponents. Only stock Practice keeps the pace-table AI. */
@@ -458,7 +475,7 @@ void func_i3_80115E74(void) {
         gRacers[i].id = i;
     }
 
-    if ((gGameMode != GAMEMODE_GP_RACE) || (D_800E5FF0 == 1) || (gTitleDemoState == TITLE_DEMO_ACTIVE) ||
+    if ((gGameMode != GAMEMODE_GP_RACE) || GDX_GP_FIRST_RACE() || (gTitleDemoState == TITLE_DEMO_ACTIVE) ||
         (D_i3_8013DBEC != 0) || (gNumPlayers >= 2)) {
         for (racer = gRacers; racer < &gRacers[gTotalRacers]; racer++) {
             switch (gGameMode) {
@@ -483,7 +500,7 @@ void func_i3_80115E74(void) {
         }
     }
     if ((gNumPlayers == 1) && (gTotalRacers != 1)) {
-        if ((gGameMode != GAMEMODE_GP_END_CS) && ((gGameMode != GAMEMODE_GP_RACE) || (D_800E5FF0 == 1) ||
+        if ((gGameMode != GAMEMODE_GP_END_CS) && ((gGameMode != GAMEMODE_GP_RACE) || GDX_GP_FIRST_RACE() ||
                                                   (gTitleDemoState == TITLE_DEMO_ACTIVE) || (D_i3_8013DBEC != 0))) {
             for (i = 0; i < 100; i++) {
                 m = (Math_Rand2() % (gTotalRacers - 1)) + 1;
@@ -590,7 +607,7 @@ void func_i3_80115E74(void) {
             }
         }
     }
-    if ((gGameMode != GAMEMODE_GP_RACE) || (D_800E5FF0 == 1) || ((gCourseIndex % 6) == 0) ||
+    if ((gGameMode != GAMEMODE_GP_RACE) || GDX_GP_FIRST_RACE() || ((gCourseIndex % 6) == 0) ||
         (gTitleDemoState == TITLE_DEMO_ACTIVE) || (D_i3_8013DBEC != 0)) {
         tempRacer = gRacers;
         gRacers[0].unk_368 = 0xFF;
@@ -673,11 +690,25 @@ void func_i3_80115E74(void) {
 
 extern CourseInfo* gCurrentCourseInfo;
 extern s32 gCupType;
+#if defined(PORT) && defined(EXPANSION_KIT)
+extern s32 gTotalLapCount;
+extern s32 sDDStaffGhostRecordTimes[];
+// port/gdx_course_meta_view.c: the target race time from the raced custom track's creator staff time, or -1.
+extern int gdx_meta_view_cpu_target(int raceLaps, int difficulty, int playerRecord, const unsigned int* stockTargets,
+                                    const int* stockStaff, int courseCount);
+// port/gdx_course_splits_view.c: Expert and Master CPUs follow the pace of the creator's staff run (CM4).
+extern void gdx_splits_view_pace_begin(int creatorPaced, int difficulty);
+extern int gdx_splits_view_cpu_pace(int elapsed, int window, float lapLength, float raceDistance, float* outBehind,
+                                    float* outBehindBefore);
+#endif
 
 void func_i3_80116974(void) {
     s32 pad[2];
     s32 timeRecord;
     GhostInfo sp1C;
+#if defined(PORT) && defined(EXPANSION_KIT)
+    s32 gdxCreatorPaced = 0;
+#endif
 
 #ifdef PORT
     /* raceTime is only assigned when a staff record exists (staffTime != -1), yet the
@@ -713,7 +744,23 @@ void func_i3_80116974(void) {
         }
     } else {
         D_i3_80141990 = MAX_TIMER;
+#if defined(PORT) && defined(EXPANSION_KIT)
+        {
+            // A custom track paces its CPUs against its creator's staff time, calibrated on the stock courses.
+            s32 creatorTarget =
+                gdx_meta_view_cpu_target(gTotalLapCount, gDifficulty, gCurrentCourseInfo->timeRecord[0], D_i3_8013E328,
+                                         sDDStaffGhostRecordTimes, COURSE_BIG_FOOT + 1);
+
+            if (creatorTarget > 0) {
+                D_i3_80141990 = creatorTarget;
+                gdxCreatorPaced = 1;
+            }
+        }
+#endif
     }
+#if defined(PORT) && defined(EXPANSION_KIT)
+    gdx_splits_view_pace_begin(gdxCreatorPaced, gDifficulty);
+#endif
     D_i3_80141994 = D_i3_80141990;
 }
 
@@ -1396,11 +1443,19 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                 func_i3_80116A50(racer);
             }
 
+#if defined(PORT) && defined(EXPANSION_KIT)
+            /* A track with the creator's splits paces along that run; the stock pace is a straight line. */
+            if (!gdx_splits_view_cpu_pace(racer->raceTime - racer->lapTimes[0], racer->unk_398 - racer->lapTimes[0],
+                                          gCurrentCourseInfo->length, racer->raceDistance, &spBC, &spB4)) {
+#endif
             var_fv0 = (gCurrentCourseInfo->length * (gTotalLapCount - 1)) / (racer->unk_398 - racer->lapTimes[0]);
             spBC =
                 (((racer->raceTime - racer->lapTimes[0]) * var_fv0) + gCurrentCourseInfo->length) - racer->raceDistance;
             spB4 = ((((racer->raceTime - racer->lapTimes[0]) - 0x11) * var_fv0) + gCurrentCourseInfo->length) -
                    racer->raceDistance;
+#if defined(PORT) && defined(EXPANSION_KIT)
+            }
+#endif
 
             var_fv0 = func_i3_fabsf(sPlayerRacer->raceDistance - racer->raceDistance);
             racer->unk_1EC = (spBC * 0.05f) + (spBC - spB4);

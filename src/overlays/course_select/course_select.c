@@ -556,6 +556,9 @@ extern u16 gInputButtonPressed;
 extern Camera gCameras[];
 extern s32 gTransitionState;
 extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
+#if defined(PORT) && defined(EXPANSION_KIT)
+#include "../../../../port/gdx_course_meta_view.h"
+#endif
 
 s32 CourseSelect_Update(void) {
     s32 originalCupSelectOption;
@@ -1412,6 +1415,36 @@ Gfx* CourseSelect_NameDraw(Gfx* gfx) {
                                                0) /
                            2),
                     210, sTrackSubtitles[sCourseSelectCup * 6 + sCourseSelectTrackNo], 0, FONT_SET_4, 0);
+#if defined(PORT) && defined(EXPANSION_KIT)
+                // Edit Cup tracks have no subtitle: under the name go who made the track, then its staff time,
+                // one line each. A part that is not set takes no line, so without an author the time moves up.
+                if ((gCupType == EDIT_CUP) && (gCourseIndex >= COURSE_EDIT_1) && (gCourseIndex < COURSE_EDIT_1 + 6)) {
+                    char trackName[EDIT_CUP_TRACK_NAME_SIZE + 1];
+                    char caption[64];
+                    s32 captionY = 210;
+                    s32 line;
+                    s32 i;
+
+                    for (i = 0; i < EDIT_CUP_TRACK_NAME_SIZE; i++) {
+                        trackName[i] = gEditCupTrackNames[gCourseIndex - COURSE_EDIT_1][i];
+                    }
+                    trackName[EDIT_CUP_TRACK_NAME_SIZE] = '\0';
+                    for (line = GDX_META_CAPTION_AUTHOR; line <= GDX_META_CAPTION_STAFF; line++) {
+                        // A signed track says so after the author, when the longer line still fits.
+                        if ((line != GDX_META_CAPTION_AUTHOR) ||
+                            (gdx_meta_view_caption(trackName, GDX_META_CAPTION_AUTHOR_SIGNED, caption,
+                                                   sizeof(caption)) == 0) ||
+                            (Font_GetStringWidth(caption, FONT_SET_4, 0) > 300)) {
+                            gdx_meta_view_caption(trackName, line, caption, sizeof(caption));
+                        }
+                        if ((caption[0] != '\0') && (Font_GetStringWidth(caption, FONT_SET_4, 0) <= 300)) {
+                            gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(caption, FONT_SET_4, 0) / 2),
+                                                  captionY, caption, 0, FONT_SET_4, 0);
+                            captionY += 10;
+                        }
+                    }
+                }
+#endif
             }
             break;
     }

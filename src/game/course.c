@@ -6,6 +6,7 @@
 #include "fzx_camera.h"
 #ifdef PORT
 #include "../../../port/gdx_course_disk.h"
+#include "../../../port/gdx_draw_distance.h"
 #endif
 #include "fzx_segmentA.h"
 #ifndef GDX_COURSE_CHECKSUM_TEST
@@ -115,6 +116,12 @@ f32 D_800CF514 = 1500.0f;
 f32 D_800CF518 = 3000.0f;
 f32 D_800CF51C = 400.0f;
 f32 sCourseFarRenderDistance = 5500.0f;
+#if defined(PORT) && defined(EXPANSION_KIT)
+/* Where the chunk loops stop for lack of room, set by Course_DrawRing from port/gdx_draw_distance.h:
+   a courseVtxBuffer index, and a gfxBuffer pointer that is NULL for no display list limit. */
+static s32 sGdxCourseVtxLimit = 0xFF0;
+static Gfx* sGdxCourseDispLimit = NULL;
+#endif
 f32 sCourseRenderOriginDistance = 1000.0f;
 
 // TRACK_SHAPE_ROAD
@@ -2853,8 +2860,8 @@ void func_800A4BAC(void) {
     D_800F8958[1].unk_28 = D_8014640;
     D_800F8958[1].loadVtxIndex = 8;
 
-    var_a0 = &D_8024DCE0[0].courseVtxBuffer[0xFFF];
-    var_v1 = &D_8024DCE0[1].courseVtxBuffer[0xFFF];
+    var_a0 = &D_8024DCE0[0].courseVtxBuffer[COURSE_VTX_BUFFER_COUNT - 1];
+    var_v1 = &D_8024DCE0[1].courseVtxBuffer[COURSE_VTX_BUFFER_COUNT - 1];
     // FAKE
     goto dummy;
 dummy:;
@@ -3904,13 +3911,17 @@ void Course_DrawBackwardChunkGroup(SegmentChunkGroup* chunkGroup) {
         }
 
 #ifdef EXPANSION_KIT
-        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]
 #ifdef PORT
-            && gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL
-#endif
-        ) {
+        if (((gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[sGdxCourseVtxLimit]) &&
+             (gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL)) ||
+            ((sGdxCourseDispLimit != NULL) && (sCourseDisp >= sGdxCourseDispLimit))) {
             break;
         }
+#else
+        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]) {
+            break;
+        }
+#endif
 #endif
 
         trackShape = TRACK_SHAPE_INDEX((u32) sWorkingSegmentChunk->trackSegmentInfo & TRACK_SHAPE_MASK);
@@ -3992,13 +4003,17 @@ void Course_DrawForwardChunkGroup(SegmentChunkGroup* chunkGroup) {
         }
 
 #ifdef EXPANSION_KIT
-        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]
 #ifdef PORT
-            && gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL
-#endif
-        ) {
+        if (((gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[sGdxCourseVtxLimit]) &&
+             (gdx_course_branch_chunk_mesh(sWorkingSegmentChunk, sWorkingNextSegmentChunk) == NULL)) ||
+            ((sGdxCourseDispLimit != NULL) && (sCourseDisp >= sGdxCourseDispLimit))) {
             break;
         }
+#else
+        if (gCourseVtxPtr >= &gGfxPool->courseVtxBuffer[0xFF0]) {
+            break;
+        }
+#endif
 #endif
 
         trackShape = TRACK_SHAPE_INDEX((u32) sWorkingSegmentChunk->trackSegmentInfo & TRACK_SHAPE_MASK);
@@ -4207,18 +4222,23 @@ Gfx* Course_Draw(Gfx* gfx, s32 cameraIndex) {
     racer = &gRacers[camera->id];
 #ifdef PORT
     {
-        extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
-        s32 drawDistancePercent = CVarGetInteger("gEnhancements.Graphics.DrawDistance", 100);
-        // Clamped here and not only in the menu, since the CVar can be hand-edited. 200% is the
-        // effective ceiling, not an arbitrary one: the track streams a bounded set of chunks
-        // (gSegmentChunks, capped at SEGMENT_CHUNK_COUNT), so past ~200% the scaled threshold
-        // already clears the furthest built chunk and a larger multiplier un-culls nothing.
-        if (drawDistancePercent < 100) {
-            drawDistancePercent = 100;
-        } else if (drawDistancePercent > 200) {
-            drawDistancePercent = 200;
+        GdxDrawDistance gdxDrawDistance;
+
+        // Clamped in port/gdx_draw_distance.c, since the CVars can be hand-edited.
+        gdx_draw_distance_current(&gdxDrawDistance);
+        gdxFarRenderDistanceScale = gdxDrawDistance.cullScale;
+#ifdef EXPANSION_KIT
+        // Extended draw distance above 100% lets the chunk loops use the room the port adds to the
+        // pool (sys.h). Otherwise they stop at the stock vertex limit with no display list limit, as
+        // before. The furthest chunk group is drawn first, so a full pool loses the nearest ones.
+        sGdxCourseVtxLimit = gdxDrawDistance.bigBudget ? (COURSE_VTX_BUFFER_COUNT - 0x10) : 0xFF0;
+        sGdxCourseDispLimit = NULL;
+        if (gdxDrawDistance.bigBudget && (gfx >= gGfxPool->gfxBuffer) &&
+            (gfx < &gGfxPool->gfxBuffer[GFX_POOL_GFX_COUNT])) {
+            // Leaves a whole stock pool for what is drawn after the course.
+            sGdxCourseDispLimit = &gGfxPool->gfxBuffer[GFX_POOL_GFX_COUNT - GFX_POOL_STOCK_GFX_COUNT];
         }
-        gdxFarRenderDistanceScale = (f32) drawDistancePercent / 100.0f;
+#endif
     }
     /* The NDC-x cull below tests the 4:3 frustum's +-1.0, but under hor+ the visible band is
        +-(aspect/(4/3)), so chunks that occupy real screen get culled (side pop-in).

@@ -26,6 +26,7 @@ extern s32 gCourseEditCursorYPos;
 #ifdef PORT
 #include "../../../../port/gdx_course_edit_input.h"
 #include "../../../../port/gdx_course_edit_menu.h"
+#include "../../../../port/gdx_course_meta_view.h"
 // Absolute mouse drive (port/gdx_course_edit_mouse.cpp): keeps the Course Edit cursor following
 // the mouse while in-game sub-menus (BGM/background/file pickers, name entry, etc.) are open.
 // The cursor drivers in func_xk2_800DBEE4 are skipped when D_800D6CA0.unk_08 != 0, which would

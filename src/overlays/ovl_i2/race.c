@@ -69,6 +69,10 @@ void Race_Init(void) {
 #else
 #define RI_CK(n)
 #endif
+#ifdef PORT
+    /* GDX_DET_RACE_SEED determinism seam (port/gdx_det_layout.c); a no-op unless that variable is set. */
+    { extern void gdx_det_race_init(void); gdx_det_race_init(); }
+#endif
     D_800CCFE8 = D_i2_80106F10 = 3;
     gGamePaused = false;
 #ifdef EXPANSION_KIT
@@ -134,6 +138,11 @@ s32 Race_Update(void) {
     Background_Update();
     Course_Update();
     func_80074844();
+#ifdef PORT
+    /* GDX_DET_LOG determinism probe (port/gdx_det_layout.c); a no-op unless that variable is set.
+       Declared inline: gdiffuser_game compiles decomp/ without port/ include paths. */
+    { extern void gdx_det_probe_frame(void); gdx_det_probe_frame(); }
+#endif
 
     return gGameMode;
 }
