@@ -2361,6 +2361,58 @@ void Save_RomCopyGhostReplayInfo(GhostData* ghostData, s32 courseIndex) {
 }
 #endif
 
+#if defined(PORT) && defined(EXPANSION_KIT)
+/* port/gdx_course_meta_view.c */
+extern int gdx_meta_view_staff_ghost(const char* trackName, int* raceTime, int* lapTimes, int* replayEnd,
+                                     int* replaySize, unsigned char* machine, unsigned char* replay, int replayCap);
+
+/* CM3: an Edit Cup track's staff ghost is its creator's staff run, kept with the track's metadata
+   (port/gdx_staff_ghost.h) because exports drop the disk's GOST area. Without one the slot stays as it is and no
+   staff ghost runs, like a stock course with an unreadable record. */
+static void Gdx_LoadEditStaffGhost(s32 courseIndex, s32 encodedCourseIndex) {
+    static u8 sReplay[sizeof(((Ghost*) 0)->replayData)];
+    char trackName[EDIT_CUP_TRACK_NAME_SIZE + 1];
+    MachineInfo machineInfo;
+    s32 raceTime;
+    s32 lapTimes[3];
+    s32 replayEnd;
+    s32 replaySize;
+    s32 ghostIndex;
+    s32 i;
+    s32* word;
+    Ghost* ghost;
+
+    for (i = 0; i < EDIT_CUP_TRACK_NAME_SIZE; i++) {
+        trackName[i] = gEditCupTrackNames[courseIndex - COURSE_EDIT_1][i];
+    }
+    trackName[EDIT_CUP_TRACK_NAME_SIZE] = '\0';
+    if ((encodedCourseIndex == 0) ||
+        !gdx_meta_view_staff_ghost(trackName, &raceTime, lapTimes, &replayEnd, &replaySize,
+                                   (unsigned char*) &machineInfo, sReplay, (int) sizeof(sReplay))) {
+        return;
+    }
+    ghostIndex = func_i2_801005CC_impl(courseIndex, encodedCourseIndex);
+    ghost = &gGhosts[ghostIndex];
+    ghost->encodedCourseIndex = encodedCourseIndex;
+    ghost->ghostType = GHOST_STAFF;
+    ghost->raceTime = raceTime;
+    for (i = 0; i < 3; i++) {
+        ghost->lapTimes[i] = lapTimes[i];
+    }
+    ghost->replayEnd = replayEnd;
+    ghost->replaySize = replaySize;
+    ghost->machineInfo = machineInfo;
+    for (i = 0; i < (s32) sizeof(ghost->replayData); i++) {
+        ghost->replayData[i] = (i < replaySize) ? (s8) sReplay[i] : 0;
+    }
+    // The same word sum racer.c takes when it keeps a run.
+    ghost->replayChecksum = 0;
+    for (word = (s32*) &ghost->replayData[(replaySize - 1) & ~3]; word >= (s32*) ghost->replayData; word--) {
+        ghost->replayChecksum += *word;
+    }
+}
+#endif
+
 s32 Save_LoadStaffGhost_impl(s32 courseIndex, s32 encodedCourseIndex) {
     s32 ghostIndex;
     GhostInfo ghostInfo;
@@ -2379,6 +2431,13 @@ s32 Save_LoadStaffGhost_impl(s32 courseIndex, s32 encodedCourseIndex) {
         isEditCupCourse = true;
     } else {
         isEditCupCourse = false;
+    }
+#endif
+
+#if defined(PORT) && defined(EXPANSION_KIT)
+    if ((courseIndex >= COURSE_EDIT_1) && (courseIndex <= COURSE_EDIT_6)) {
+        Gdx_LoadEditStaffGhost(courseIndex, encodedCourseIndex);
+        return 0;
     }
 #endif
 

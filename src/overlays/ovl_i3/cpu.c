@@ -4,6 +4,10 @@
 #include "fzx_racer.h"
 #include "fzx_course.h"
 #ifdef PORT
+#include "../../../../port/gdx_course_settings_view.h"
+extern s32 gdx_course_branch_settings_point(const CourseSegment* segment);
+#endif
+#ifdef PORT
 extern void gdx_course_cpu_target(Racer* racer);
 #endif
 #include ASSET_HEADER(common_assets_compressed.h)
@@ -413,8 +417,13 @@ extern s32 gCourseIndex;
 // port/gdx_xcup_random.c: an X Cup slot racing a real course uses that course's CPU tuning.
 extern int gdx_xcup_real_course(int courseIndex);
 extern int gdx_xcup_real_cup(int cupType, int courseIndex);
-#define CPU_TUNING_COURSE() gdx_xcup_real_course(gCourseIndex)
-#define CPU_TUNING_CUP() gdx_xcup_real_cup(gCupType, gCourseIndex)
+// port/gdx_test_drive.c: a Course Edit test drive with CPUs tunes them as an Edit Cup race. The editor keeps
+// gCourseIndex at 0, which would otherwise give them Mute City's tuning.
+extern int gdx_test_drive_cpus(void);
+extern short* gdx_test_drive_cpu_line(void);
+extern void gdx_test_drive_pole(int* positions, int count);
+#define CPU_TUNING_COURSE() (gdx_test_drive_cpus() ? COURSE_EDIT_1 : gdx_xcup_real_course(gCourseIndex))
+#define CPU_TUNING_CUP() (gdx_test_drive_cpus() ? EDIT_CUP : gdx_xcup_real_cup(gCupType, gCourseIndex))
 #else
 #define CPU_TUNING_COURSE() gCourseIndex
 #define CPU_TUNING_CUP() gCupType
@@ -433,6 +442,14 @@ extern int gdx_gp_resume_take_field_setup(void);
 #else
 #define GDX_GP_FIRST_RACE() (D_800E5FF0 == 1)
 #endif
+#ifdef PORT
+#include "../../../../port/gdx_split_gp.h"
+/* The player count the CPU field reacts to. A split-screen GP (port/gdx_split_gp.h) keeps the one-player GP
+   field: personalities, rivals, the finish-order grid and the attacks, all around player one. */
+#define GDX_CPU_PLAYERS() (gdx_split_gp_active() ? 1 : gNumPlayers)
+#else
+#define GDX_CPU_PLAYERS() (gNumPlayers)
+#endif
 
 void func_i3_80115E74(void) {
     s32 pad[44];
@@ -450,6 +467,7 @@ void func_i3_80115E74(void) {
     s32 var_s5;
 #ifdef PORT
     s32 gdxFieldSetup = (D_800E5FF0 == 1);
+    s32 gdxBackGrid = 0;
 
     if ((gGameMode == GAMEMODE_GP_RACE) && gdx_gp_resume_take_field_setup()) {
         gdxFieldSetup = 1;
@@ -476,7 +494,7 @@ void func_i3_80115E74(void) {
     }
 
     if ((gGameMode != GAMEMODE_GP_RACE) || GDX_GP_FIRST_RACE() || (gTitleDemoState == TITLE_DEMO_ACTIVE) ||
-        (D_i3_8013DBEC != 0) || (gNumPlayers >= 2)) {
+        (D_i3_8013DBEC != 0) || (GDX_CPU_PLAYERS() >= 2)) {
         for (racer = gRacers; racer < &gRacers[gTotalRacers]; racer++) {
             switch (gGameMode) {
                 case GAMEMODE_GP_RACE:
@@ -489,17 +507,27 @@ void func_i3_80115E74(void) {
                 case GAMEMODE_GP_END_CS:
                     racer->unk_34D = 1;
                     break;
+#ifdef PORT
+                case GAMEMODE_COURSE_EDIT:
+                    /* A test drive with CPUs gives them race personalities. */
+                    if (gdx_test_drive_cpus()) {
+                        func_i3_80115E34(racer);
+                    } else {
+                        racer->unk_34D = -1;
+                    }
+                    break;
+#endif
                 default:
                     racer->unk_34D = -1;
                     break;
             }
-            if (gNumPlayers != 1) {
+            if (GDX_CPU_PLAYERS() != 1) {
                 racer->unk_34D = 1;
             }
             racer->unk_350 = racer->unk_368 = 0xFF;
         }
     }
-    if ((gNumPlayers == 1) && (gTotalRacers != 1)) {
+    if ((GDX_CPU_PLAYERS() == 1) && (gTotalRacers != 1)) {
         if ((gGameMode != GAMEMODE_GP_END_CS) && ((gGameMode != GAMEMODE_GP_RACE) || GDX_GP_FIRST_RACE() ||
                                                   (gTitleDemoState == TITLE_DEMO_ACTIVE) || (D_i3_8013DBEC != 0))) {
             for (i = 0; i < 100; i++) {
@@ -628,6 +656,9 @@ void func_i3_80115E74(void) {
             }
         }
         gRacers[0].position = D_80115D50[0] = gTotalRacers;
+#ifdef PORT
+        gdxBackGrid = 1;
+#endif
     } else {
         var_a1 = 0;
         for (k = 1; k <= gTotalRacers; k++) {
@@ -659,8 +690,27 @@ void func_i3_80115E74(void) {
                 }
             }
             gRacers[0].position = gTotalRacers;
+#ifdef PORT
+            gdxBackGrid = 1;
+#endif
         }
     }
+#ifdef PORT
+    /* A split-screen cup's first grid puts every player at the back, as the one-player cup does for player
+       one. Later races keep the reversed finish order. */
+    if (gdxBackGrid && gdx_split_gp_active()) {
+        int grid[30];
+
+        for (i = 0; i < gTotalRacers; i++) {
+            grid[i] = gRacers[i].position;
+        }
+        if (gdx_split_gp_back_grid(grid, gTotalRacers, gNumPlayers)) {
+            for (i = 0; i < gTotalRacers; i++) {
+                gRacers[i].position = D_80115D50[i] = grid[i];
+            }
+        }
+    }
+#endif
 
     if (((gGameMode == GAMEMODE_GP_RACE) && (D_i3_8013E94C[CPU_TUNING_COURSE()] == 1)) ||
         (gTitleDemoState == TITLE_DEMO_ACTIVE)) {
@@ -681,7 +731,21 @@ void func_i3_80115E74(void) {
             gRacers[i].position = i + 1;
         }
     }
-    if (gNumPlayers != 1) {
+#ifdef PORT
+    /* The player starts a test drive on pole, with the CPUs behind in their race order. */
+    if (gdx_test_drive_cpus()) {
+        int grid[30];
+
+        for (i = 0; i < gTotalRacers; i++) {
+            grid[i] = gRacers[i].position;
+        }
+        gdx_test_drive_pole(grid, gTotalRacers);
+        for (i = 0; i < gTotalRacers; i++) {
+            gRacers[i].position = grid[i];
+        }
+    }
+#endif
+    if (GDX_CPU_PLAYERS() != 1) {
         for (i = 0; i < 4; i++) {
             gRacers[i].position = i + 1;
         }
@@ -840,6 +904,12 @@ void Cpu_InitRacer(Racer* racer) {
     D_80141900 = 0;
 #endif
     if (racer->id == 0) {
+#ifdef PORT
+        /* The editor never runs the race loader that allocates the CPU speed table (func_i3_80116C4C). */
+        if (gdx_test_drive_cpus()) {
+            D_i3_8013DBE8 = gdx_test_drive_cpu_line();
+        }
+#endif
         func_i3_80116974();
         if (CPU_TUNING_COURSE() < COURSE_EDIT_1) {
             func_80077CF0(D_i3_8013DB80[CPU_TUNING_COURSE()], 0x200 * sizeof(s16), D_i3_8013DBE8);
@@ -929,7 +999,12 @@ void Cpu_InitRacer(Racer* racer) {
     racer->unk_3A0 = gTotalRacers;
     racer->unk_1EC = 2500.0f / 27.0f;
 
+#ifdef PORT
+    /* Test-drive CPUs attack as GP CPUs do. */
+    if ((gGameMode == GAMEMODE_GP_RACE) || gdx_test_drive_cpus()) {
+#else
     if (gGameMode == GAMEMODE_GP_RACE) {
+#endif
         racer->unk_360 = D_i3_8013EBD0[D_i3_8013E7A8[racer->character].unk_02 * 4 + gDifficulty];
         racer->unk_364 = D_i3_8013EC30[D_i3_8013E7A8[racer->character].unk_02 * 4 + gDifficulty] + racer->unk_360;
     }
@@ -973,7 +1048,7 @@ void Cpu_InitRacer(Racer* racer) {
             }
         }
         if ((sPlayerRacer->position == racer->position - 4) || (sPlayerRacer->position == (racer->position + 4)) ||
-            (gNumPlayers >= 2)) {
+            (GDX_CPU_PLAYERS() >= 2)) {
             var_fa0 = sPlayerRacer->unk_1A8;
             if (var_fa0 > 0.95f) {
                 var_fa0 = 0.95f;
@@ -985,7 +1060,12 @@ void Cpu_InitRacer(Racer* racer) {
 #ifndef EXPANSION_KIT
         } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[CPU_TUNING_COURSE()] != 0)) {
 #else
+#ifdef PORT
+        } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[CPU_TUNING_COURSE()] != 0) ||
+                   (CPU_TUNING_CUP() == EDIT_CUP)) {
+#else
         } else if ((gDifficulty == MASTER) && (D_i3_8013E94C[CPU_TUNING_COURSE()] != 0) || (gCupType == EDIT_CUP)) {
+#endif
 #endif
             var_fa0 = (Math_Rand1() % 256 / 255.0f + 10.0f) / 14.0f;
             if (var_fa0 > 0.95f) {
@@ -1053,7 +1133,11 @@ void func_i3_801175A4(void) {
         }
 
         if (var_t0 != 0) {
+#ifdef PORT
+            if (CPU_TUNING_CUP() == EDIT_CUP) {
+#else
             if (gCupType == EDIT_CUP) {
+#endif
                 var_v0_2 = D_i3_8013DC04[gDifficulty] * ((f32) (s32) ((f32) var_a3 / var_t0) * gTotalLapCount);
             } else {
                 var_v0_2 = D_i3_8013DBF0[gDifficulty] * ((f32) (s32) ((f32) var_a3 / var_t0) * gTotalLapCount);
@@ -1234,8 +1318,13 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
 #ifdef PORT
     // Community request F5: AiAggression (percent) scales the combat probabilities below;
     // past 100% it also drops the EXPERT-only gates. 100 is bit-identical to stock.
+    // A track's CPU aggression preset (Course Edit, PA) scales it, or replaces it with 100% for Normal, unless the
+    // player ignores track settings.
     extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
     f32 aiAggressionScale = CVarGetInteger("gEnhancements.Gameplay.AiAggression", 100) / 100.0f;
+    if (CVarGetInteger("gEnhancements.Gameplay.IgnoreTrackSettings", 0) == 0) {
+        aiAggressionScale = gdx_settings_view_ai_resolve(aiAggressionScale);
+    }
     extern int gdx_single_race_active(void); // port/gdx_single_race.c
 #endif
 
@@ -1334,7 +1423,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
     } else if ((racer->currentRadiusRight + racer->currentRadiusLeft) < 184.0f) {
         racer->unk_1E8 = 0.0f;
         racer->unk_1EC = (2500.0f / 27.0f);
-    } else if (gNumPlayers == 1) {
+    } else if (GDX_CPU_PLAYERS() == 1) {
         if (racer->unk_352 != 0xFF) {
             spBC = (gRacers[racer->unk_352].raceDistance + racer->unk_38C) - racer->raceDistance;
             func_i3_fabsf(sPlayerRacer->raceDistance - racer->raceDistance);
@@ -1678,7 +1767,7 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
         }
         controller->stickX = (var_a3 * 5) / 8;
         controller->stickY = var_a1;
-        if (gNumPlayers == 1) {
+        if (GDX_CPU_PLAYERS() == 1) {
 #ifdef PORT
             if (sp70 && (racer->raceTime > 1000) && ((gDifficulty >= EXPERT) || (aiAggressionScale > 1.0f)) &&
                 (racer->id != 0) && (gTotalRacers != 1) && (racer->awarenessFlags & 0x200)) {
@@ -1703,7 +1792,11 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                 }
                 if ((racer->distanceFromRacerBehind < 23.0f) &&
                     (func_i3_fabsf(sp40->unk_33C - racer->unk_33C) < 138.0f) && (racer->driftingCounter == 0) &&
+#ifdef PORT
+                    (((f32) (Math_Rand1() % 32768) / 32767.0f) < 0.01f * aiAggressionScale)) {
+#else
                     (((f32) (Math_Rand1() % 32768) / 32767.0f) < 0.01f)) {
+#endif
                     if (racer->unk_33C < sp40->unk_33C) {
                         racer->driftingCounter = 5;
                     } else {
@@ -1763,6 +1856,17 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
             racer->nextSegmentLandmine = COURSE_CONTEXT()->courseData.landmine[var_a3];
             racer->nextSegmentDirt = COURSE_CONTEXT()->courseData.dirt[var_a3];
             racer->nextSegmentDash = COURSE_CONTEXT()->courseData.dash[var_a3];
+#ifdef PORT
+            // A Brake pad slows whoever drives over it, so a CPU never aims for one.
+            if (gdx_settings_view_pad_kind(gdx_course_branch_settings_point(racer->segmentPositionInfo.courseSegment)) ==
+                GDX_SETTINGS_VIEW_PAD_BRAKE) {
+                racer->segmentDash = DASH_NONE;
+            }
+            if (gdx_settings_view_pad_kind(gdx_course_branch_settings_point(
+                    racer->segmentPositionInfo.courseSegment->next)) == GDX_SETTINGS_VIEW_PAD_BRAKE) {
+                racer->nextSegmentDash = DASH_NONE;
+            }
+#endif
             racer->obstaclePriorityState = 6;
             if (racer->segmentLandmine != LANDMINE_NONE) {
                 racer->obstaclePriorityState = 5;

@@ -7,6 +7,10 @@
 #include "ovl_i6.h"
 #include ASSET_HEADER(common_assets_compressed.h)
 #include ASSET_HEADER(setup_gfx.h)
+#ifdef PORT
+#include "../../../../port/gdx_gnet_sign.h"
+#include "../../../../port/gdx_main_menu_grid.h"
+#endif
 
 #ifndef EXPANSION_KIT
 s16 D_i6_8011F910[SCREEN_HEIGHT];
@@ -255,6 +259,99 @@ static s32 gdx_main_menu_class_limit(s32 mode) {
 static s32 gdx_main_menu_continue_row(void) {
     return sGdxContinueAvailable ? gdx_main_menu_class_limit(MODE_GP_RACE) + 1 : -1;
 }
+
+/* O2-9: a ninth card, G-NET, opens Online > LAN Lobby in the port menu (port/gdx_menu.cpp). The nine cards sit in
+   a 3x3 grid at three quarters of their size (port/gdx_main_menu_grid.h), and the cursor skips the cards that
+   cannot be picked, as the stock redirects below do in the 4x2 grid. */
+extern void gdx_menu_request_lan_lobby(void);
+
+/* The card is a stock sign with new text and colours, by Heebeejeebees, built from the loaded signs
+   (port/gdx_gnet_sign.h). The scaled draw loads 16-row blocks, and its last block reads rows 80 to 95, so the
+   storage has 96 rows; u64 keeps it 8-byte aligned, as texture loads expect. */
+#define GDX_GNET_SIGN_STORAGE_ROWS 96
+static u64 sGdxGnetSignStorage[GDX_GNET_SIGN_WIDTH * GDX_GNET_SIGN_STORAGE_ROWS * sizeof(u16) / sizeof(u64)];
+static unk_80077D50 sGdxGnetSignTexInfo = { 17, sGdxGnetSignStorage, GDX_GNET_SIGN_WIDTH, GDX_GNET_SIGN_HEIGHT, 0 };
+static bool sGdxGnetSignReady = false;
+
+/* Cards the cursor may stop on: the stock rules for Versus, Course Edit and Create Machine. */
+static unsigned gdx_main_menu_cards_available(void) {
+    unsigned available = GDX_MAIN_MENU_GRID_ALL;
+
+#ifndef EXPANSION_KIT
+#ifndef VERSION_JP
+    if (gControllersConnected < 2) {
+        available &= ~(1u << MODE_VS_BATTLE);
+    }
+#endif
+    available &= ~((1u << MODE_COURSE_EDIT) | (1u << MODE_CREATE_MACHINE));
+#else
+    if (gLeoDriveConnectionState == 0) {
+        available &= ~((1u << MODE_COURSE_EDIT) | (1u << MODE_CREATE_MACHINE));
+    }
+#endif
+    return available;
+}
+
+/* The stock 4x2 cursor moves, redone on the 3x3 grid in the same order: right, left, down, up. */
+static s32 gdx_main_menu_navigate(s32 mode) {
+    unsigned available = gdx_main_menu_cards_available();
+
+    mode = gdx_main_menu_grid_settle(mode, available);
+    if (gInputPressed & BTN_RIGHT) {
+        mode = gdx_main_menu_grid_move(mode, GDX_MAIN_MENU_GRID_RIGHT, available);
+    }
+    if (gInputPressed & BTN_LEFT) {
+        mode = gdx_main_menu_grid_move(mode, GDX_MAIN_MENU_GRID_LEFT, available);
+    }
+    if (gInputPressed & BTN_DOWN) {
+        mode = gdx_main_menu_grid_move(mode, GDX_MAIN_MENU_GRID_DOWN, available);
+    }
+    if (gInputPressed & BTN_UP) {
+        mode = gdx_main_menu_grid_move(mode, GDX_MAIN_MENU_GRID_UP, available);
+    }
+    return mode;
+}
+
+/* Builds the G-NET card once every sign is loaded. Returns false while one is not. */
+static bool gdx_main_menu_build_gnet_sign(void) {
+    const unsigned char* sources[GDX_GNET_SIGN_SOURCES];
+    s32 i;
+
+    if (sGdxGnetSignReady) {
+        return true;
+    }
+    for (i = 0; i < GDX_GNET_SIGN_SOURCES; i++) {
+        sources[i] = (const unsigned char*) func_800783AC(sMenuSignCompTexInfos[i]->unk_04);
+    }
+    sGdxGnetSignReady =
+        gdx_gnet_sign_compose(&gGdxGnetSignMap, sources, (unsigned char*) sGdxGnetSignStorage) != 0;
+    return sGdxGnetSignReady;
+}
+
+/* Draws the G-NET card the way MainMenu_SignDraw draws a mode sign, sliding in with `counter`. */
+static Gfx* gdx_main_menu_gnet_draw(Gfx* gfx, s32 counter) {
+    s32 pulse;
+
+    if (!gdx_main_menu_build_gnet_sign()) {
+        return gfx;
+    }
+    if (gSelectedMode == GDX_MAIN_MENU_GNET_CARD) {
+        if (D_800CD384 == 0) {
+            pulse = gGameFrameCount % 30;
+            if (pulse >= 15) {
+                pulse = 30 - pulse;
+            }
+            gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255 - pulse * 5);
+        } else {
+            gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+        }
+    } else {
+        gDPSetPrimColor(gfx++, 0, 0, 128, 128, 128, 180);
+    }
+    return func_80078DB4(gfx, &sGdxGnetSignTexInfo, gdx_main_menu_grid_left(GDX_MAIN_MENU_GNET_CARD) - SQ(counter) * 2,
+                         gdx_main_menu_grid_top(GDX_MAIN_MENU_GNET_CARD), (TexturePtr) sGdxGnetSignStorage, 4, 0, 0,
+                         GDX_MAIN_MENU_GRID_SCALE, GDX_MAIN_MENU_GRID_SCALE);
+}
 #endif
 
 s32 MainMenu_Update(void) {
@@ -272,6 +369,9 @@ s32 MainMenu_Update(void) {
     switch (D_800CD384) {
         case 0:
             previous = gSelectedMode;
+#ifdef PORT
+            gSelectedMode = gdx_main_menu_navigate(gSelectedMode);
+#else
             if (gInputPressed & BTN_RIGHT) {
                 if ((gSelectedMode % 4) != 3) {
                     gSelectedMode++;
@@ -322,6 +422,7 @@ s32 MainMenu_Update(void) {
                 }
             }
 #endif
+#endif
             if (previous != gSelectedMode) {
                 Audio_TriggerSystemSE(NA_SE_30);
             }
@@ -355,6 +456,21 @@ s32 MainMenu_Update(void) {
                         D_800CD384 = 1;
                         break;
                     case MODE_DEATH_RACE:
+#ifdef PORT
+                        /* Death Race course select (port/gdx_death_race.h): the course screen, as Practice uses,
+                           instead of the stock loop. Death Race is always one player at Master. */
+                        {
+                            extern int CVarGetInteger(const char* name, int defaultValue);
+
+                            if (CVarGetInteger("gEnhancements.Gameplay.DeathRaceCourseSelect", 0)) {
+                                gNumPlayers = 1;
+                                Audio_SetPlayerMode(gNumPlayers - 1);
+                                gDifficulty = gAntiPiracyAddedDifficulty + MASTER;
+                                D_800CD384 = 3;
+                                break;
+                            }
+                        }
+#endif
                         D_800CD384 = 5;
                         gCourseIndex = COURSE_DEATH_RACE;
                         gCurrentTrackName = gTrackNames[gCourseIndex];
@@ -385,6 +501,11 @@ s32 MainMenu_Update(void) {
                         func_8070481C();
 #endif
                         return GAMEMODE_CREATE_MACHINE;
+#ifdef PORT
+                    case GDX_MAIN_MENU_GNET_CARD:
+                        gdx_menu_request_lan_lobby();
+                        break;
+#endif
                     default:
                         D_800CD384 = 2;
                         break;
@@ -542,6 +663,12 @@ s32 MainMenu_Update(void) {
                             var_v1_2 = true;
                         }
                         break;
+#ifdef PORT
+                    case MODE_DEATH_RACE:
+                        /* Death Race course select has no option list to slide out. */
+                        var_v1_2 = true;
+                        break;
+#endif
                 }
                 if (var_v1_2) {
                     D_800CD384 = 4;
@@ -556,6 +683,11 @@ s32 MainMenu_Update(void) {
                     case MODE_PRACTICE:
                         D_800CD384 = 1;
                         break;
+#ifdef PORT
+                    case MODE_DEATH_RACE:
+                        D_800CD384 = 0;
+                        break;
+#endif
                 }
             }
             break;
@@ -743,6 +875,25 @@ Gfx* MainMenu_SignDraw(Gfx* gfx, Object* signObj) {
         OBJECT_COUNTER(signObj) = 0;
     }
 
+#ifdef PORT
+    /* The 3x3 grid: the card at three quarters of its size, and G-NET drawn with Options, a sign every build shows. */
+    temp1 = gdx_main_menu_grid_left(mode) - (SQ(OBJECT_COUNTER(signObj)) * 2);
+    temp2 = gdx_main_menu_grid_top(mode);
+
+    gfx = func_80078EA0_impl(gfx, sMenuSignCompTexInfos[mode], temp1, temp2, 4, 0, 0, GDX_MAIN_MENU_GRID_SCALE,
+                             GDX_MAIN_MENU_GRID_SCALE, true);
+    if (mode == MODE_OPTIONS) {
+        gfx = gdx_main_menu_gnet_draw(gfx, OBJECT_COUNTER(signObj));
+    }
+
+#ifdef VERSION_JP
+    /* No room under a card in the 3x3 grid: the name sits over the bottom of the card. */
+    if (mode == gSelectedMode) {
+        gfx = Font_DrawString(gfx, (temp1 - (Font_GetStringWidth(D_i6_8011D850[mode], FONT_SET_4, 0) / 2)) + 24,
+                              temp2 + 52, D_i6_8011D850[mode], 0, FONT_SET_4, 0);
+    }
+#endif
+#else
     temp1 = (((mode % 4) * 0x40) - (SQ(OBJECT_COUNTER(signObj)) * 2)) + 0x20;
     temp2 = ((mode / 4) * 0x5B) + 0x26;
 
@@ -753,6 +904,7 @@ Gfx* MainMenu_SignDraw(Gfx* gfx, Object* signObj) {
         gfx = Font_DrawString(gfx, (temp1 - (Font_GetStringWidth(D_i6_8011D850[mode], FONT_SET_4, 0) / 2)) + 0x20,
                               temp2 + 0x5B, D_i6_8011D850[mode], 0, FONT_SET_4, 0);
     }
+#endif
 #endif
 
     return gfx;

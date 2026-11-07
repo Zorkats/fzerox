@@ -65,6 +65,8 @@ s32 sCloudCount;
 TexturePtr sSkyboxTexture;
 TexturePtr sVenueFloorTexture;
 TexturePtr sCloudTexture;
+// The cloud art for the wind streaks (port/gdx_wind.h, drawn in hud.c), or NULL on a race without wind.
+TexturePtr gGdxWindCloudTexture;
 TexturePtr sStarTexture;
 BackgroundSprite sBackgroundSprites[6];
 BackgroundSpritePaletteReplacement sBackgroundSpritePaletteReplacements[6];
@@ -502,6 +504,9 @@ extern s32 gNumPlayers;
 extern s32 gCourseIndex;
 extern s32 gGameMode;
 extern Camera gCameras[];
+extern bool gInCourseEditor;
+extern bool gInCourseEditTestRun;
+extern int gdx_settings_view_wind_any(void);
 
 void Background_Init(void) {
     s32 pad;
@@ -580,6 +585,13 @@ void Background_Init(void) {
 
     if (sSkyboxFlags & SKYBOX_CLOUDY) {
         sCloudTexture = func_80078104(aCloudTex, TEX_SIZE(aCloudTex, sizeof(u8)), 0, 0, 0);
+    }
+    // The editor can add wind at any time, so it always has the art.
+    gGdxWindCloudTexture = NULL;
+    if (gdx_settings_view_wind_any() || gInCourseEditor || gInCourseEditTestRun) {
+        gGdxWindCloudTexture = (sSkyboxFlags & SKYBOX_CLOUDY)
+                                   ? sCloudTexture
+                                   : func_80078104(aCloudTex, TEX_SIZE(aCloudTex, sizeof(u8)), 0, 0, 0);
     }
     if (sSkyboxFlags & SKYBOX_STARRY) {
         sStarTexture = func_80078104(D_F2207C8, TEX_SIZE(D_F2207C8, sizeof(u8)), 0, 0, 0);

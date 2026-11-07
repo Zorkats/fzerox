@@ -5,6 +5,7 @@
 #include "../../../../port/gdx_course_packs.h"
 #include "../../../../port/gdx_course_state.h"
 #include "../../../../port/gdx_ek_text.h"
+#include "../../../../port/gdx_wind.h"
 #endif
 #include "fzx_course.h"
 #include "fzx_expansion_kit.h"
@@ -99,6 +100,9 @@ s32 gLandmineTypeOption = 0;
 s32 gGateTypeOption = 0;
 s32 gBuildingTypeOption = 0;
 s32 gSignTypeOption = 0;
+#ifdef PORT
+s32 gWindTypeOption = 0; // GDX_WIND_PART_* (port/gdx_wind.h)
+#endif
 s32 gVenueOption = 0;
 s32 gSkyboxOption = 0;
 s32 gBGMOption = 0;
@@ -358,6 +362,26 @@ MenuDropItem sSignTypeMenuItems[] = {
 
 MenuWidget sSignTypeWidget = { 6,   INVALID_OPTION,  INVALID_OPTION, 120, 36, 0, 16, sSignTypeMenuItems, 160, 48, 160,
                                128, &gSignTypeOption };
+
+#ifdef PORT
+// The WIND part (port/gdx_wind.h): Weak, Mid, Strong and Gale, then CLEAR, which takes the segment's wind away.
+// The icons and the WIND label are drawn at run time by CourseEdit_InitWindArt.
+MenuDropItem sWindTypeMenuItems[] = {
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu1Tex, NULL, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu2Tex, NULL, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu3Tex, NULL, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
+      aExpansionKitMenu4Tex, NULL, NULL, NULL, 16, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditClearTex,
+      NULL, NULL, NULL, 48, 16, NULL, NULL },
+};
+
+MenuWidget sWindTypeWidget = { GDX_WIND_PART_ROWS, INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sWindTypeMenuItems,
+                               160, 48, 160, 48 + (16 * (GDX_WIND_PART_ROWS - 1)), &gWindTypeOption };
+#endif
 
 MenuDropItem sVenueMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
@@ -943,11 +967,83 @@ MenuDropItem sPartsStyleMenuItems[] = {
       aCourseEditBuildingTex, NULL, NULL, NULL, 48, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditSignTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
+#ifdef PORT
+    // WIND: its label is composed at run time (CourseEdit_InitWindArt).
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, NULL, NULL, NULL,
+      NULL, 48, 16, NULL, NULL },
+#endif
 };
 
 MenuWidget gPartsStyleWidget = {
+#ifdef PORT
+    10, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sPartsStyleMenuItems, 112, 48, 112, 192, &gPartsStyleOption
+#else
     9, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sPartsStyleMenuItems, 112, 48, 112, 176, &gPartsStyleOption
+#endif
 };
+
+#ifdef PORT
+extern void gdx_invalidate_texture_address(const void* addr);
+
+#define GDX_WIND_LABEL_WIDTH 48
+#define GDX_WIND_LABEL_HEIGHT 16
+#define GDX_WIND_LABEL_TOP 4 // the font's 8 rows, in the middle of the 16-row label
+
+static u64 sWindIconTex[GDX_WIND_PART_GALE + 1][GDX_WIND_ICON_BYTES / sizeof(u64)];
+static u64 sWindLabelTex[(GDX_WIND_LABEL_WIDTH * GDX_WIND_LABEL_HEIGHT / 2) / sizeof(u64)];
+static bool sWindIconsReady = false;
+static bool sWindLabelReady = false;
+
+// The WIND part's art, none of it from the ROM's data but the font: the submenu icons are drawn by
+// gdx_wind_part_icon, and the WIND label is written in the Expansion Kit font (port/gdx_ek_text.h), so it waits
+// until the Expansion Kit textures hold their data.
+static void CourseEdit_InitWindArt(void) {
+    u8 line[GDX_EK_TEXT_BYTES(GDX_WIND_LABEL_WIDTH)];
+    u8* label = (u8*) sWindLabelTex;
+    s32 rowBytes = GDX_WIND_LABEL_WIDTH / 2;
+    s32 ink;
+    s32 i;
+
+    if (!sWindIconsReady) {
+        for (i = 0; i <= GDX_WIND_PART_GALE; i++) {
+            gdx_wind_part_icon(i, (unsigned char*) sWindIconTex[i]);
+            sWindTypeMenuItems[i].subContentsRGBATex = sWindIconTex[i];
+        }
+        sWindIconsReady = true;
+    }
+    if (sWindLabelReady) {
+        return;
+    }
+    ink = gdx_ek_text_measure(aExpansionKitFontCharacterSheet1Tex, "WIND");
+    if ((ink <= 0) || (ink > GDX_WIND_LABEL_WIDTH)) {
+        return;
+    }
+    gdx_ek_text_compose(aExpansionKitFontCharacterSheet1Tex, "WIND", (GDX_WIND_LABEL_WIDTH - ink) / 2, line,
+                        GDX_WIND_LABEL_WIDTH);
+    // An empty line means the font sheet is not loaded yet.
+    for (i = 0; i < (s32) sizeof(line); i++) {
+        if (line[i] != 0) {
+            break;
+        }
+    }
+    if (i == (s32) sizeof(line)) {
+        return;
+    }
+    for (i = 0; i < (s32) sizeof(sWindLabelTex); i++) {
+        label[i] = 0;
+    }
+    for (i = 0; i < GDX_EK_TEXT_HEIGHT; i++) {
+        s32 j;
+
+        for (j = 0; j < rowBytes; j++) {
+            label[((GDX_WIND_LABEL_TOP + i) * rowBytes) + j] = line[(i * rowBytes) + j];
+        }
+    }
+    gdx_invalidate_texture_address(label);
+    sPartsStyleMenuItems[TRACK_PART_STYLE_WIND].contentsTex = label;
+    sWindLabelReady = true;
+}
+#endif
 
 MenuDropItem gCourseEditMenuItems[] = {
     { aExpansionKitMenuGoldBackgroundTex, aExpansionKitMenuGoldBackgroundTex, aCourseEditCreateTex, NULL,
@@ -1575,6 +1671,7 @@ void gdx_course_edit_restore_custom_rows(void) {
 void func_xk1_80028250(void) {
 #ifdef PORT
     CourseEdit_InitLavaIcons();
+    CourseEdit_InitWindArt();
 #endif
     MenuWidget* sCourseDesignTypeWidgets[] = {
         &gRoadTypeWidget,
@@ -1611,10 +1708,16 @@ void func_xk1_80028250(void) {
     MenuWidget* sCoursePartTypeWidgets[] = {
         &sPitTypeWidget,      &sDashTypeWidget, &sDirtTypeWidget,     &sIceTypeWidget,  &sJumpTypeWidget,
         &sLandmineTypeWidget, &sGateTypeWidget, &sBuildingTypeWidget, &sSignTypeWidget,
+#ifdef PORT
+        &sWindTypeWidget,
+#endif
     };
     s32* sCoursePartTypeOptions[] = {
         &gPitTypeOption,      &gDashTypeOption, &gDirtTypeOption,     &gIceTypeOption,  &gJumpTypeOption,
         &gLandmineTypeOption, &gGateTypeOption, &gBuildingTypeOption, &gSignTypeOption,
+#ifdef PORT
+        &gWindTypeOption,
+#endif
     };
 
     if (gCreateWidget.openIndex == INVALID_OPTION) {
@@ -1681,6 +1784,9 @@ void func_xk1_80028250(void) {
             gGateTypeOption = 0;
             gBuildingTypeOption = 0;
             gSignTypeOption = 0;
+#ifdef PORT
+            gWindTypeOption = 0;
+#endif
 
             gCourseEditMenuItems[1].contentsTex = aCourseEditStyleTex;
             gCourseEditMenuItems[1].widget = &gPartsStyleWidget;
@@ -1952,6 +2058,12 @@ void func_xk1_80028A04(void) {
             gCourseEditMenuItems[2].widget = &sSignTypeWidget;
             gCourseEditMenuOptions[2] = &gSignTypeOption;
             break;
+#ifdef PORT
+        case TRACK_PART_STYLE_WIND:
+            gCourseEditMenuItems[2].widget = &sWindTypeWidget;
+            gCourseEditMenuOptions[2] = &gWindTypeOption;
+            break;
+#endif
     }
 }
 
@@ -2056,6 +2168,15 @@ void func_xk1_80028EBC(void) {
         func_xk1_80027C80(&gCourseEditWidget);
     }
 }
+
+#ifdef PORT
+// Closes the menus once a WIND row is picked, as func_xk1_80028EBC does for SIGN.
+void CourseEdit_WindTypeUpdate(void) {
+    if (sWindTypeWidget.openIndex != INVALID_OPTION) {
+        func_xk1_80027C80(&gCourseEditWidget);
+    }
+}
+#endif
 
 void func_xk1_80028EF0(void) {
     if (gVenueWidget.openIndex != INVALID_OPTION) {
@@ -2191,6 +2312,26 @@ void func_xk1_80029070(void) {
     gCourseEditMenuItems[2].contentsTex = NULL;
     gCourseEditMenuItems[2].widget = NULL;
 }
+
+#ifdef PORT
+// Course Edit tool keys (port/gdx_course_edit_mouse.cpp). A key opens its POINT tool, with the menu row the
+// POINT tab shows. The same key again goes back to COURSE to pick points. Returns 1 when it went back.
+s32 CourseEdit_KeySelectTool(s32 moveOption) {
+    if ((gCreateOption == CREATE_OPTION_POINT) && (gMoveOption == moveOption)) {
+        func_xk1_80029070();
+        gPointOption = POINT_OPTION_SET;
+        return 1;
+    }
+    gCreateOption = CREATE_OPTION_POINT;
+    gCourseEditMenuItems[1].contentsTex = aCourseEditMoveTex;
+    gCourseEditMenuItems[1].widget = &gMoveWidget;
+    gCourseEditMenuOptions[1] = &gMoveOption;
+    gCourseEditMenuItems[2].contentsTex = NULL;
+    gCourseEditMenuItems[2].widget = NULL;
+    gMoveOption = moveOption;
+    return 0;
+}
+#endif
 
 s32 func_xk1_800290B4(void) {
     return sMenuPageYOffset;

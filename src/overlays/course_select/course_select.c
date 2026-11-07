@@ -158,6 +158,24 @@ s32 func_i5_80077DAC(s32 cupType) {
 }
 #endif
 
+#if defined(PORT) && defined(EXPANSION_KIT)
+extern s32 gCupType;
+extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
+extern int gdx_meta_view_staff_ghost_time(const char* trackName); // port/gdx_course_meta_view.h
+
+/* The staff time of an Edit Cup slot whose track carries its creator's staff ghost, else -1. */
+static s32 CourseSelect_GdxEditStaffGhostTime(s32 courseIndex) {
+    char trackName[EDIT_CUP_TRACK_NAME_SIZE + 1];
+    s32 i;
+
+    for (i = 0; i < EDIT_CUP_TRACK_NAME_SIZE; i++) {
+        trackName[i] = gEditCupTrackNames[courseIndex - COURSE_EDIT_1][i];
+    }
+    trackName[EDIT_CUP_TRACK_NAME_SIZE] = '\0';
+    return gdx_meta_view_staff_ghost_time(trackName);
+}
+#endif
+
 void CourseSelect_UpdateUnlockedGhosts(void) {
     GhostInfo ghostInfo;
     s32 staffTime;
@@ -188,6 +206,13 @@ void CourseSelect_UpdateUnlockedGhosts(void) {
         if (Save_LoadStaffGhostRecord(&ghostInfo, gCourseIndex) != 0) {
 #else
         ghostInfo.raceTime = Save_GetDDStaffGhostRecordTime(gCourseIndex);
+#ifdef PORT
+        // CM3: an Edit Cup track with its creator's staff ghost unlocks the STAFF choice like a stock course.
+        if ((ghostInfo.raceTime == -1) && (gCupType == EDIT_CUP) && (gCourseIndex >= COURSE_EDIT_1) &&
+            (gCourseIndex <= COURSE_EDIT_6)) {
+            ghostInfo.raceTime = CourseSelect_GdxEditStaffGhostTime(gCourseIndex);
+        }
+#endif
         if (ghostInfo.raceTime == -1) {
 #endif
             sUnlockedGhosts = 1;
@@ -485,8 +510,12 @@ void CourseSelect_Init(void) {
             if (gGameMode != GAMEMODE_FLX_RECORDS_COURSE_SELECT) {
                 Object_Init(OBJECT_COURSE_SELECT_GHOST_OPTION, 0, 0, 10);
             }
+#ifdef PORT
+            /* Death Race course select keeps no ghosts, so only Time Attack shows the ghost marker. */
+#else
             /* fallthrough */
         case MODE_DEATH_RACE:
+#endif
             Object_Init(OBJECT_COURSE_SELECT_GHOST_MARKER, 190, 160, 10);
             break;
     }

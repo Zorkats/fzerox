@@ -176,6 +176,12 @@ void gdx_gp_resume_next_course_init(void) {
     if (gSelectedMode != MODE_GP_RACE || gCupType < 0 || gCupType > X_CUP) {
         return;
     }
+    /* A split-screen cup (port/gdx_split_gp.h) is not saved: the record holds neither its field size nor
+     * the players out of the cup. */
+    if (gNumPlayers >= 2) {
+        gdx_gp_resume_clear();
+        return;
+    }
     if (!gdx_gp_resume_enabled()) {
         /* A record from before the setting was turned off would still be offered. */
         gdx_gp_resume_clear();

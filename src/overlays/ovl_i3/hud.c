@@ -12,6 +12,9 @@
 #include ASSET_HEADER(super_textures.h)
 #include ASSET_HEADER(common_assets_compressed.h)
 #include "segment_symbols.h"
+#ifdef PORT
+#include "../../../../port/gdx_split_gp.h"
+#endif
 
 /* Anchor Set/Clear for the split-screen HUD; expands to nothing in a non-PORT build. Macros
  * rather than open-coded #ifdef blocks so the stock draw order stays readable across cases
@@ -199,9 +202,16 @@ s32 sReversePositions[][4][2] = {
 
 s32 sLivesPositions[][4][2] = {
     { { 68, 48 }, { 0, 0 }, { 0, 0 }, { 0, 0 } },
+#ifdef PORT
+    /* Split-screen GP (port/gdx_split_gp.h) shows every player's lives; stock draws them for one player only. */
+    { { 226, 40 }, { 226, 152 }, { 0, 0 }, { 0, 0 } },
+    { { 112, 40 }, { 112, 152 }, { 256, 40 }, { 256, 152 } },
+    { { 112, 40 }, { 112, 152 }, { 256, 40 }, { 256, 152 } },
+#else
     { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } },
     { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } },
     { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } },
+#endif
 };
 
 s32 sPortraitReplacementIndexes[] = {
@@ -521,6 +531,8 @@ extern Gfx D_80149D0[];
 #ifdef PORT
 extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
+extern int gdx_death_race_laps(void);                               // port/gdx_death_race.c
+extern int gdx_death_race_laps_done(void);                          // port/gdx_death_race.c
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
 extern u8 aLapCounterExtraDigitsTex[];                              // port/gdx_lap_digits.c
 #endif
@@ -969,7 +981,12 @@ Gfx* Hud_DrawPosition(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 
     for (i = 0; i < 2; i++) {
         //! @bug the numPlayersIndex condition should be conditionally &&ed here
+#ifdef PORT
+        /* A split-screen GP field reaches two-digit places, so its tens digit is drawn. */
+        if (((i == 0) & numPlayersIndex) && !gdx_split_gp_active()) {
+#else
         if ((i == 0) & numPlayersIndex) {
+#endif
             left += (s32) (28.0f * baseScale);
             position %= digitMask;
             digitMask /= 10;
@@ -1029,7 +1046,12 @@ Gfx* Hud_DrawLapRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 #endif
         return gfx;
     }
+#ifdef PORT
+    /* A Death Race lap limit shows the lap box. Endless keeps it hidden. */
+    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0)) {
+#else
     if (gGameMode == GAMEMODE_DEATH_RACE) {
+#endif
         return gfx;
     }
     if (gRacers[playerIndex].stateFlags & RACER_STATE_FINISHED) {
@@ -1074,6 +1096,9 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 top;
     s32 left;
     s32 lap;
+#ifdef PORT
+    s32 total = gTotalLapCount;
+#endif
 
 #ifdef PORT
     /* A finite Single Race shows the lap counter, as GP does. Unlimited keeps it hidden. */
@@ -1083,7 +1108,12 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 #endif
         return gfx;
     }
+#ifdef PORT
+    /* A Death Race lap limit shows the player's lap against the limit. Endless keeps it hidden. */
+    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0)) {
+#else
     if (gGameMode == GAMEMODE_DEATH_RACE) {
+#endif
         return gfx;
     }
     if (gRacers[playerIndex].stateFlags & RACER_STATE_FINISHED) {
@@ -1093,10 +1123,22 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
         return gfx;
     }
 
+#ifdef PORT
+    /* The Death Race lap number wraps every three laps, so its laps come from port/gdx_death_race.c. */
+    lap = gPlayerLapNumbers[playerIndex];
+    if (gGameMode == GAMEMODE_DEATH_RACE) {
+        lap = gdx_death_race_laps_done() + 1;
+        total = gdx_death_race_laps();
+    }
+    if (total < lap) {
+        lap = total;
+    }
+#else
     lap = gPlayerLapNumbers[playerIndex];
     if (gTotalLapCount < lap) {
         lap = gTotalLapCount;
     }
+#endif
 
     left = sLapPositions[numPlayersIndex][playerIndex][0];
     top = sLapPositions[numPlayersIndex][playerIndex][1];
@@ -1106,8 +1148,8 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 #ifdef PORT
     /* A Single Race can run up to 99 laps. Two-digit counts keep a tens column for the lap number,
        so the slash holds still as the race passes lap 10. */
-    if (gTotalLapCount > 5) {
-        if (gTotalLapCount >= 10) {
+    if (total > 5) {
+        if (total >= 10) {
             if (lap >= 10) {
                 gfx = Hud_DrawLapDigit(gfx, left, top, lap / 10);
             }
@@ -1117,11 +1159,11 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
         left += 8;
         gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 11) << 2, 0, 0, 0, 1 << 12, 1 << 10);
         left += 8;
-        if (gTotalLapCount >= 10) {
-            gfx = Hud_DrawLapDigit(gfx, left, top, gTotalLapCount / 10);
+        if (total >= 10) {
+            gfx = Hud_DrawLapDigit(gfx, left, top, total / 10);
             left += 8;
         }
-        return Hud_DrawLapDigit(gfx, left, top, gTotalLapCount % 10);
+        return Hud_DrawLapDigit(gfx, left, top, total % 10);
     }
 #endif
 
@@ -1138,13 +1180,105 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 
     // Lap Count
 
+#ifdef PORT
+    gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 11) << 2, 0, 0, (total * 12) << 5,
+                        1 << 12, 1 << 10);
+#else
     gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 11) << 2, 0, 0, (gTotalLapCount * 12) << 5,
                         1 << 12, 1 << 10);
+#endif
 
     return gfx;
 }
 
 extern s32 gNumPlayers;
+
+#if defined(PORT) && defined(EXPANSION_KIT)
+#include "fzx_camera.h"
+#include "../../../../port/gdx_wind.h"
+
+extern TexturePtr gGdxWindCloudTexture;                  // background.c
+extern s32 Racer_WindStrength(Racer* racer, s32* angle); // racer.c
+
+// Wind streaks (port/gdx_wind.h): squashed cloud puffs drifting across each player's view, in the stock cloud
+// art. Drawn under the HUD, before it sets its own render state.
+static Gfx* Hud_DrawWindStreaks(Gfx* gfx) {
+    s32 view;
+    s32 views = (gNumPlayers < GDX_WIND_VIEWS) ? gNumPlayers : GDX_WIND_VIEWS;
+    bool begun = false;
+
+    if (gGdxWindCloudTexture == NULL) {
+        return gfx;
+    }
+    for (view = 0; view < views; view++) {
+        Camera* camera = &gCameras[view];
+        f32 left = camera->currentScissorLeft;
+        f32 top = camera->currentScissorTop;
+        f32 width = camera->currentScissorRight - left;
+        f32 height = camera->currentScissorBottom - top;
+        s32 i;
+
+        if (!gGamePaused) {
+            s32 angle;
+            s32 strength = Racer_WindStrength(&gRacers[view], &angle);
+            float side = 0.0f;
+            float depth = 0.0f;
+
+            gdx_wind_view_shares(angle, camera->at.x - camera->eye.x, camera->at.z - camera->eye.z, &side, &depth);
+            gdx_wind_streaks_step(view, strength, side, depth);
+        }
+        if ((width < 8.0f) || (height < 8.0f)) {
+            continue;
+        }
+        for (i = 0; i < GDX_WIND_STREAKS; i++) {
+            GdxWindStreakRect rect;
+            f32 ulx;
+            f32 uly;
+            f32 lrx;
+            f32 lry;
+            f32 dsdx;
+            f32 dtdy;
+
+            if (!gdx_wind_streak_rect(view, i, width, height, &rect) || (rect.width < 2.0f)) {
+                continue;
+            }
+            dsdx = 64.0f / rect.width;
+            dtdy = 32.0f / rect.height;
+            ulx = (rect.left < 0.0f) ? 0.0f : rect.left;
+            uly = (rect.top < 0.0f) ? 0.0f : rect.top;
+            lrx = ((rect.left + rect.width) > width) ? width : (rect.left + rect.width);
+            lry = ((rect.top + rect.height) > height) ? height : (rect.top + rect.height);
+            if ((lrx - ulx < 1.0f) || (lry - uly < 1.0f)) {
+                continue;
+            }
+            if (!begun) {
+                begun = true;
+                gDPPipeSync(gfx++);
+                // The 3D viewports reach the screen's edges in widescreen; so do the streaks.
+                gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+                gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+                gDPSetRenderMode(gfx++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
+                gDPSetCombineLERP(gfx++, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0, PRIMITIVE, 0, TEXEL0, 0,
+                                  PRIMITIVE, 0, TEXEL0, 0);
+                gDPSetTextureFilter(gfx++, G_TF_BILERP);
+                gDPLoadTextureBlock(gfx++, gGdxWindCloudTexture, G_IM_FMT_IA, G_IM_SIZ_8b, 64, 32, 0,
+                                    G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK,
+                                    G_TX_NOLOD, G_TX_NOLOD);
+            }
+            gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, rect.alpha);
+            gSPTextureRectangle(gfx++, (s32) ((left + ulx) * 4.0f), (s32) ((top + uly) * 4.0f),
+                                (s32) ((left + lrx) * 4.0f), (s32) ((top + lry) * 4.0f), G_TX_RENDERTILE,
+                                (s32) ((ulx - rect.left) * dsdx * 32.0f), (s32) ((uly - rect.top) * dtdy * 32.0f),
+                                (s32) (dsdx * 1024.0f), (s32) (dtdy * 1024.0f));
+        }
+    }
+    if (begun) {
+        gDPPipeSync(gfx++);
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_STRETCH);
+    }
+    return gfx;
+}
+#endif
 
 Gfx* Hud_DrawHud(Gfx* gfx) {
 #ifdef PORT
@@ -1165,6 +1299,9 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
         // Deliberately a separate CVar for split-screen; see gdx_widescreen_split_ui_active.
         gdxWideSplitHud = gdx_widescreen_split_ui_active();
     }
+#ifdef EXPANSION_KIT
+    gfx = Hud_DrawWindStreaks(gfx);
+#endif
 #endif
 
     gSPDisplayList(gfx++, D_8014940);
@@ -1491,6 +1628,25 @@ Gfx* Hud_DrawHud(Gfx* gfx) {
             gfx = Hud_DrawReverse(gfx, 3, 3);
             break;
     }
+
+#ifdef PORT
+    if (gdx_split_gp_active()) {
+        s32 gdxLivesPlayer;
+
+        for (gdxLivesPlayer = 0; gdxLivesPlayer < gNumPlayers; gdxLivesPlayer++) {
+            /* The right-hand lives anchor right, as the rest of that column of the HUD does. */
+            const int gdxRight = (gNumPlayers == 2) || (gdxLivesPlayer >= 2);
+
+            if (gdxRight) {
+                GDX_WIDE_SPLIT_SET(gdxWideSplitHud, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+            gfx = Hud_DrawPlayerLives(gfx, gNumPlayers - 1, gdxLivesPlayer);
+            if (gdxRight) {
+                GDX_WIDE_SPLIT_CLEAR(gdxWideSplitHud, G_EX_WIDESCREEN_ANCHOR_RIGHT);
+            }
+        }
+    }
+#endif
 
     gDPPipeSync(gfx++);
     gDPSetCycleType(gfx++, G_CYC_1CYCLE);
@@ -1950,8 +2106,31 @@ void Hud_InitRacePortraits(void) {
 
 extern s32 gLivesChangeCounter;
 
+#ifdef PORT
+/* Split-screen GP: each player's life icon flashes on its own. */
+static s32 sGdxSplitLivesCounter[4];
+static s32 sGdxSplitPrevLives[4];
+
+void gdx_split_gp_hud_lives_changed(int player, int previous) {
+    if ((player < 0) || (player >= 4)) {
+        return;
+    }
+    sGdxSplitPrevLives[player] = previous;
+    sGdxSplitLivesCounter[player] = 90;
+}
+#endif
+
 void Hud_ResetLivesChangeCounter(void) {
     gLivesChangeCounter = 0;
+#ifdef PORT
+    {
+        s32 i;
+
+        for (i = 0; i < 4; i++) {
+            sGdxSplitLivesCounter[i] = 0;
+        }
+    }
+#endif
 }
 
 extern s32 gPreviousLivesCount;
@@ -2006,19 +2185,34 @@ Gfx* Hud_DrawPlayerLives(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 numLives;
     s32 left;
     s32 top;
+#ifdef PORT
+    s32* gdxCounter = &gLivesChangeCounter;
+    s32* gdxPrevious = &gPreviousLivesCount;
+#define GDX_LIVES_COUNTER (*gdxCounter)
+#define GDX_PREVIOUS_LIVES (*gdxPrevious)
+#else
+#define GDX_LIVES_COUNTER gLivesChangeCounter
+#define GDX_PREVIOUS_LIVES gPreviousLivesCount
+#endif
 
     if (gGameMode != GAMEMODE_GP_RACE) {
         return gfx;
     }
-
-    if (gLivesChangeCounter > 0) {
-        gLivesChangeCounter--;
+#ifdef PORT
+    if (gdx_split_gp_active() && (playerIndex >= 0) && (playerIndex < 4)) {
+        gdxCounter = &sGdxSplitLivesCounter[playerIndex];
+        gdxPrevious = &sGdxSplitPrevLives[playerIndex];
     }
-    if (gLivesChangeCounter != 0) {
-        if (gPlayerLives[playerIndex] < gPreviousLivesCount) {
+#endif
+
+    if (GDX_LIVES_COUNTER > 0) {
+        GDX_LIVES_COUNTER--;
+    }
+    if (GDX_LIVES_COUNTER != 0) {
+        if (gPlayerLives[playerIndex] < GDX_PREVIOUS_LIVES) {
             numLives = gPlayerLives[playerIndex];
         } else {
-            numLives = gPreviousLivesCount;
+            numLives = GDX_PREVIOUS_LIVES;
         }
     } else {
         numLives = gPlayerLives[playerIndex];
@@ -2043,11 +2237,13 @@ Gfx* Hud_DrawPlayerLives(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     }
 
     // Flash Change In Life Icon
-    if ((gLivesChangeCounter != 0) && ((gGameFrameCount % 20) >= 5)) {
+    if ((GDX_LIVES_COUNTER != 0) && ((gGameFrameCount % 20) >= 5)) {
         gSPTextureRectangle(gfx++, left << 2, top << 2, (left + 7) << 2, (top + 7) << 2, 0, 0, 0, 1 << 12, 1 << 10);
     }
 
     return gfx;
+#undef GDX_LIVES_COUNTER
+#undef GDX_PREVIOUS_LIVES
 }
 
 #ifdef PORT

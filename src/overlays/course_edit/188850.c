@@ -959,6 +959,13 @@ void func_xk2_800D8CC4(void) {
     func_xk2_800D85A0();
     func_xk2_800D8778();
     func_xk2_800D88D8();
+#ifdef PORT
+    {
+        extern void gdx_course_branch_editor_wind_place(void); // port/gdx_course_branch_editor.c
+
+        gdx_course_branch_editor_wind_place();
+    }
+#endif
 }
 
 extern s32 D_8076C958;
@@ -4185,7 +4192,14 @@ void func_xk2_800DEE20(void) {
         // follows the player's last selection, 1-30 pin a roster machine; the skin
         // always follows the last selection.
         {
+            extern s32 gDifficulty;
+            extern int gdx_test_drive_begin(int cpus, int difficulty, int gameDifficulty);
             s32 testDriveMachine = CVarGetInteger("gEnhancements.Gameplay.TestDriveMachine", 0);
+
+            /* CPUs and their difficulty, held until the test drive ends (port/gdx_test_drive.h). */
+            gDifficulty = gdx_test_drive_begin(CVarGetInteger("gEnhancements.Gameplay.TestDriveCpus", 0),
+                                               CVarGetInteger("gEnhancements.Gameplay.TestDriveDifficulty", 2),
+                                               gDifficulty);
 
             if (testDriveMachine == 0) {
                 gRacers[0].character = gPlayerCharacters[0];

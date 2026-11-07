@@ -65,6 +65,9 @@ typedef enum TrackPartStyle {
     /* 6 */ TRACK_PART_STYLE_GATE,
     /* 7 */ TRACK_PART_STYLE_BUILDING,
     /* 8 */ TRACK_PART_STYLE_SIGN,
+#ifdef PORT
+    /* 9 */ TRACK_PART_STYLE_WIND,
+#endif
 } TrackPartStyle;
 
 #endif // FZX_EXPANSION_KIT_H

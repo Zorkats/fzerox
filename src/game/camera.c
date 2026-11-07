@@ -6,6 +6,10 @@
 #include "fzx_save.h"
 #include "src/overlays/ending/ending.h"
 #include ASSET_HEADER(course_track_gfx.h)
+
+#ifdef PORT
+extern int gdx_death_race_show_loser(void); // port/gdx_death_race.c
+#endif
 #define ENDING_CHARACTER_FIREWORKS (1 << 0)
 #define ENDING_SHOW_PODIUM_SEQUENCE (1 << 1)
 #define ENDING_DRAW_CONGRATULATIONS (1 << 2)
@@ -3205,6 +3209,11 @@ void Camera_UpdateRace(Camera* camera, CameraSettings* cameraSettings, CameraScr
                 } else {
                     camera->mode = CAMERA_MODE_FINISHED_LOSER;
                 }
+#ifdef PORT
+            } else if ((gGameMode == GAMEMODE_DEATH_RACE) && gdx_death_race_show_loser()) {
+                /* A Death Race lap limit ran out with machines left: LOSER. */
+                camera->mode = CAMERA_MODE_FINISHED_LOSER;
+#endif
             } else {
                 camera->mode = CAMERA_MODE_FINISHED_SUCCESS;
             }

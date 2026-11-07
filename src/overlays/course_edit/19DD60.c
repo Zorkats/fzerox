@@ -270,6 +270,13 @@ void func_xk2_800EC91C(void) {
     gGamePaused = false;
     gInCourseEditTestRun = false;
 #ifdef PORT
+    /* The test drive's CPUs leave, and the difficulty they raced at goes back to the game's. */
+    {
+        extern s32 gDifficulty;
+        extern int gdx_test_drive_end(int gameDifficulty);
+
+        gDifficulty = gdx_test_drive_end(gDifficulty);
+    }
     /* Exit side of the entry note in func_xk2_800DEE20 (course_edit/188850.c): re-latch the
        editor's 4:3 pin on this frame, not one frame later. port/input_bridge.c. */
     {
@@ -425,6 +432,13 @@ void func_xk2_800EC9BC(void) {
     func_xk1_80028E54();
     func_xk1_80028E88();
     func_xk1_80028EBC();
+#ifdef PORT
+    {
+        extern void CourseEdit_WindTypeUpdate(void); // expansion_kit/A3AE0.c
+
+        CourseEdit_WindTypeUpdate();
+    }
+#endif
     func_xk1_80028EF0();
     func_xk1_80028F50();
     func_xk1_80028F94();

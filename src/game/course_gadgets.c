@@ -22,6 +22,9 @@
 #include "../../../port/gdx_course_branch.h"
 #include "../../../port/gdx_course_disk.h"
 #include "../../../port/gdx_course_gadget_budget.h"
+#include "../../../port/gdx_course_settings_view.h"
+#include "../../../port/gdx_dash_pad.h"
+#include "../../../port/gdx_wind.h"
 
 #define GDX_GADGET_COUNT(course) gdx_course_branch_gadget_count(course)
 #define GDX_GADGET_SEGMENT(course, index) gdx_course_branch_gadget_segment(course, index)
@@ -440,10 +443,166 @@ static Gfx* Course_MagnetRailsDraw(Gfx* gfx) {
     }
     return gfx;
 }
+
+// Wind (port/gdx_wind.h): a plate painted on the road in the middle of every segment with wind, its chevrons
+// pointing the way the wind blows, one to four for its strength. It lies on the road's own plane, so it banks with
+// the road, and the road's geometry hides it like any other part. Tunnels block wind, and plates are only painted
+// on flat roads; pipes, cylinders, half-pipes and air have none. The art is drawn here, so the repo carries none.
+#define WIND_ROAD_MAX_PLATES 256
+#define WIND_ROAD_LIFT 4.0f         /* world units above the road, under the dash plates' 5 where they meet */
+#define WIND_ROAD_WIDTH_SHARE 0.45f /* half the plate's width, as a share of half the road's width */
+
+void Course_SegmentGetCenterPosition(CourseSegment* segment, f32 t, Vec3f* pos);
+
+static Vtx sWindRoadVtx[2][WIND_ROAD_MAX_PLATES * 4];
+static ALIGNED8 u8 sWindRoadTex[4][GDX_WIND_ROAD_TEX_BYTES];
+static bool sWindRoadTexReady = false;
+
+static void Course_WindRoadSetVtx(Vtx* vtx, const float* pos, s32 s, s32 t) {
+    vtx->v.ob[0] = Math_Round(pos[0]);
+    vtx->v.ob[1] = Math_Round(pos[1]);
+    vtx->v.ob[2] = Math_Round(pos[2]);
+    vtx->v.flag = 0;
+    vtx->v.tc[0] = s;
+    vtx->v.tc[1] = t;
+    vtx->v.cn[0] = vtx->v.cn[1] = vtx->v.cn[2] = vtx->v.cn[3] = 255;
+}
+
+// The four corners of the segment's plate, front first. Returns its chevron count, 0 when it has none.
+static s32 Course_WindRoadPlate(CourseSegment* segment, Vtx* vtx) {
+    s32 shape = segment->trackSegmentInfo & TRACK_SHAPE_MASK;
+    s32 point;
+    s32 strength;
+    int angle = 0;
+    f32 lengthFromStart;
+    f32 proportion;
+    f32 roadHalf;
+    float center[3];
+    float up[3];
+    float corners[4][3];
+    Vec3f pos;
+    Mtx3F basis;
+
+    if ((shape != TRACK_SHAPE_ROAD) && (shape != TRACK_SHAPE_WALLED_ROAD) && (shape != TRACK_SHAPE_BORDERLESS_ROAD)) {
+        return 0;
+    }
+    point = gdx_course_branch_settings_point(segment);
+    strength = gdx_wind_resolve(gdx_settings_view_wind_strength(point), gdx_settings_view_wind_angle(point), 0, &angle);
+    if (strength <= 0) {
+        return 0;
+    }
+    proportion = Course_SplineGetLengthInfo(segment, 0.5f, &lengthFromStart);
+    Course_SplineGetBasis(segment, 0.5f, &basis, proportion);
+    Course_SegmentGetCenterPosition(segment, 0.5f, &pos);
+    roadHalf = (segment->radiusLeft + segment->radiusRight) * 0.5f;
+    roadHalf += (((segment->next->radiusLeft + segment->next->radiusRight) * 0.5f) - roadHalf) * proportion;
+    up[0] = basis.y.x;
+    up[1] = basis.y.y;
+    up[2] = basis.y.z;
+    center[0] = pos.x + (up[0] * WIND_ROAD_LIFT);
+    center[1] = pos.y + (up[1] * WIND_ROAD_LIFT);
+    center[2] = pos.z + (up[2] * WIND_ROAD_LIFT);
+    // The plate keeps the art's 32 by 48 shape.
+    if (!gdx_wind_road_quad(angle, center, up,
+                            roadHalf * WIND_ROAD_WIDTH_SHARE * ((f32) GDX_WIND_ROAD_TEX_HEIGHT / GDX_WIND_ROAD_TEX_WIDTH),
+                            roadHalf * WIND_ROAD_WIDTH_SHARE, corners)) {
+        return 0;
+    }
+    Course_WindRoadSetVtx(&vtx[0], corners[0], 0, 0);
+    Course_WindRoadSetVtx(&vtx[1], corners[1], GDX_WIND_ROAD_TEX_WIDTH << 5, 0);
+    Course_WindRoadSetVtx(&vtx[2], corners[2], 0, GDX_WIND_ROAD_TEX_HEIGHT << 5);
+    Course_WindRoadSetVtx(&vtx[3], corners[3], GDX_WIND_ROAD_TEX_WIDTH << 5, GDX_WIND_ROAD_TEX_HEIGHT << 5);
+    return gdx_wind_chevrons(strength);
+}
+
+static Gfx* Course_WindArrowsDraw(Gfx* gfx) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+    static s8 sChevrons[WIND_ROAD_MAX_PLATES];
+    Vtx* vtx = sWindRoadVtx[gGameFrameCount & 1];
+    s32 count = GDX_GADGET_COUNT(gCourseIndex);
+    s32 plates = 0;
+    s32 loaded;
+    s32 i;
+
+    // Races honor Ignore track settings, as the push does (racer.c); the editor always shows the course's wind.
+    if (!IN_COURSE_EDITOR && (CVarGetInteger("gEnhancements.Gameplay.IgnoreTrackSettings", 0) != 0)) {
+        return gfx;
+    }
+    for (i = 0; (i < count) && (plates < WIND_ROAD_MAX_PLATES); i++) {
+        s32 chevrons = Course_WindRoadPlate(GDX_GADGET_SEGMENT(gCourseIndex, i), &vtx[plates * 4]);
+
+        if ((chevrons >= 1) && (chevrons <= 4)) {
+            sChevrons[plates++] = (s8) chevrons;
+        }
+    }
+    if (plates == 0) {
+        return gfx;
+    }
+    if (!sWindRoadTexReady) {
+        for (i = 0; i < 4; i++) {
+            gdx_wind_road_texture(i + 1, sWindRoadTex[i]);
+        }
+        sWindRoadTexReady = true;
+    }
+
+    gDPPipeSync(gfx++);
+    gSPClearGeometryMode(gfx++, G_CULL_BACK);
+    gDPSetCombineMode(gfx++, G_CC_DECALRGBA, G_CC_DECALRGBA);
+    gDPSetRenderMode(gfx++, G_RM_AA_ZB_TEX_EDGE, G_RM_AA_ZB_TEX_EDGE2);
+    gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
+    // One texture load for each chevron count, then every plate that uses it.
+    for (loaded = 1; loaded <= 4; loaded++) {
+        bool any = false;
+
+        for (i = 0; i < plates; i++) {
+            if (sChevrons[i] != loaded) {
+                continue;
+            }
+            if (!any) {
+                gDPLoadTextureBlock(gfx++, sWindRoadTex[loaded - 1], G_IM_FMT_RGBA, G_IM_SIZ_16b,
+                                    GDX_WIND_ROAD_TEX_WIDTH, GDX_WIND_ROAD_TEX_HEIGHT, 0, G_TX_NOMIRROR | G_TX_CLAMP,
+                                    G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+                any = true;
+            }
+            gSPVertex(gfx++, &vtx[i * 4], 4, 0);
+            gSP2Triangles(gfx++, 0, 1, 2, 0, 1, 3, 2, 0);
+        }
+    }
+    gDPPipeSync(gfx++);
+    return gfx;
+}
 #endif
 
 #if !defined(EXPANSION_KIT) || defined(NON_MATCHING)
 // Draw Course Effects and Features
+#ifdef PORT
+#ifdef EXPANSION_KIT
+#define GDX_EFFECT_DRAW_INDEX(drawData) ((s32) ((drawData) - gEffectsDrawData[0]))
+#else
+#define GDX_EFFECT_DRAW_INDEX(drawData) ((s32) ((drawData) - gEffectsDrawData))
+#endif
+
+// The dash tile as aSetupCourseEffectTextureDL loads it: 16x16 RGBA16 at TMEM 0x180, tile 3, wrapping.
+#define GDX_LOAD_DASH_TILE(gfx, tex)                                                                            gDPLoadMultiBlock((gfx)++, (tex), 0x180, COURSE_EFFECT_DASH, G_IM_FMT_RGBA, G_IM_SIZ_16b,                                   GDX_DASH_PAD_TEX_SIDE, GDX_DASH_PAD_TEX_SIDE, 0, G_TX_NOMIRROR | G_TX_WRAP,                                G_TX_NOMIRROR | G_TX_WRAP, 4, 4, G_TX_NOLOD, G_TX_NOLOD)
+
+// One dash plate. A Super or Brake pad loads its own art into the dash tile and puts the stock art back after,
+// so the next stock pad draws as before. Without readable stock art every pad draws stock.
+static Gfx* Course_GdxDashPadDraw(Gfx* gfx, Vtx* dashVtx, s32 effectIndex) {
+    const void* tex = gdx_dash_pad_texture(gdx_dash_pad_effect_kind(effectIndex));
+
+    if (tex != NULL) {
+        GDX_LOAD_DASH_TILE(gfx, tex);
+    }
+    gSPVertex(gfx++, dashVtx, 6, 0);
+    gSP2Triangles(gfx++, 0, 4, 1, 0, 0, 3, 4, 0);
+    gSP2Triangles(gfx++, 0, 2, 3, 0, 2, 5, 3, 0);
+    if (tex != NULL) {
+        GDX_LOAD_DASH_TILE(gfx, gdx_dash_pad_stock_texture());
+    }
+    return gfx;
+}
+#endif
+
 Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
     s32 i;
     s32 j;
@@ -615,9 +774,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                     gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, effectDrawData->effectType, G_ON);
                 }
                 if (effectDrawData->effectType == COURSE_EFFECT_DASH) {
+#ifdef PORT
+                    gfx = Course_GdxDashPadDraw(gfx, dashVtx, i);
+#else
                     gSPVertex(gfx++, dashVtx, 6, 0);
                     gSP2Triangles(gfx++, 0, 4, 1, 0, 0, 3, 4, 0);
                     gSP2Triangles(gfx++, 0, 2, 3, 0, 2, 5, 3, 0);
+#endif
                     dashVtx += 6;
                     continue;
                 }
@@ -695,9 +858,13 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
                 }
 #endif
                 if (effectDrawData->effectType == COURSE_EFFECT_DASH) {
+#ifdef PORT
+                    gfx = Course_GdxDashPadDraw(gfx, dashVtx, GDX_EFFECT_DRAW_INDEX(effectDrawData));
+#else
                     gSPVertex(gfx++, dashVtx, 6, 0);
                     gSP2Triangles(gfx++, 0, 4, 1, 0, 0, 3, 4, 0);
                     gSP2Triangles(gfx++, 0, 2, 3, 0, 2, 5, 3, 0);
+#endif
                     dashVtx += 6;
                     continue;
                 }
@@ -776,6 +943,9 @@ Gfx* Course_GadgetsDraw(Gfx* gfx, s32 arg1) {
         // geometry (road, decorations) is not tinted.
         gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
     }
+#ifdef PORT
+    gfx = Course_WindArrowsDraw(gfx);
+#endif
     gSPSetGeometryMode(gfx++, G_CULL_BACK);
     gSPTexture(gfx++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
     gSPFogPosition(gfx++, 980, 1000);
@@ -1584,6 +1754,81 @@ f32 sDashArrowPointScale = 50.0f;
 #define EFFECT_TC_SCALE 1
 #endif
 
+#ifdef PORT
+static void Course_GdxDashVertex(Vtx* vtx, const Vec3f* pos, const Mtx3F* basis, f32 lateral, f32 forward, s32 s,
+                                 s32 t) {
+    vtx->v.ob[0] = Math_Round(((lateral * basis->z.x) + pos->x) + (basis->x.x * forward));
+    vtx->v.ob[1] = Math_Round(((lateral * basis->z.y) + pos->y) + (basis->x.y * forward));
+    vtx->v.ob[2] = Math_Round(((lateral * basis->z.z) + pos->z) + (basis->x.z * forward));
+    vtx->v.tc[0] = s * EFFECT_TC_SCALE;
+    vtx->v.tc[1] = t * EFFECT_TC_SCALE;
+}
+
+// The flat plate with the pad's own width and kind (port/gdx_dash_pad.h). A stock pad comes out as the stock
+// function builds it. A Brake plate's arrow points backward: notch in front, tip behind.
+static void Course_GdxFlatDashVerticesInit(s32 effectIndex, CourseEffect* effect, Vtx** vtxs) {
+    Vtx* vtx = *vtxs;
+    f32 t = effect->segmentTValueStart;
+    f32 forwardMagnitude;
+    f32 lengthFromStart;
+    f32 proportion;
+    f32 roadWidth;
+    f32 offset;
+    f32 half;
+    f32 arrow = sDashArrowPointScale;
+    s32 point;
+    s32 kind;
+    s32 sSpan;
+    Vec3f pos;
+    Vec3f forward;
+    Mtx3F segmentBasis;
+    CourseSegment* segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
+
+    point = gdx_course_branch_settings_point(segment);
+    kind = gdx_settings_view_pad_kind(point);
+    gdx_dash_pad_set_effect_kind(effectIndex, kind);
+
+    forwardMagnitude = Course_SplineGetTangent(segment, t, &forward);
+    proportion = Course_SplineGetLengthInfo(segment, effect->segmentTValueStart, &lengthFromStart);
+    Course_SplineGetBasis(segment, effect->segmentTValueStart, &segmentBasis, proportion);
+    Course_SegmentGetCenterPosition(segment, effect->segmentTValueStart, &pos);
+    pos.x += 5.0f * segmentBasis.y.x;
+    pos.y += 5.0f * segmentBasis.y.y;
+    pos.z += 5.0f * segmentBasis.y.z;
+
+    roadWidth = segment->radiusLeft + segment->radiusRight;
+    roadWidth += ((segment->next->radiusLeft + segment->next->radiusRight) - roadWidth) * proportion;
+    gdx_dash_pad_span(DASH_LATERAL_OFFSET(effect), sDashScaleWidth, gdx_settings_view_pad_width(point), roadWidth,
+                      &offset, &half);
+    sSpan = gdx_dash_pad_s_span(kind, half, sDashScaleWidth);
+
+    if (kind == GDX_DASH_PAD_BRAKE) {
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset, 0.0f, sSpan / 2, 0);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset + half, arrow, 0, 0x100);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset - half, arrow, sSpan, 0x100);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset, sDashScaleForward - arrow, sSpan / 2, 0x300);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset + half, sDashScaleForward, 0, 0x400);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset - half, sDashScaleForward, sSpan, 0x400);
+    } else {
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset, arrow, sSpan / 2, 0x100);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset + half, 0.0f, 0, 0);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset - half, 0.0f, sSpan, 0);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset, sDashScaleForward, sSpan / 2, 0x400);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset + half, sDashScaleForward - arrow, 0, 0x300);
+        Course_GdxDashVertex(vtx++, &pos, &segmentBasis, offset - half, sDashScaleForward - arrow, sSpan, 0x300);
+    }
+
+    t += sDashScaleForward / forwardMagnitude;
+    gEffects[effectIndex].segmentTValueEnd = t;
+    gEffects[effectIndex].unk_0C.x = offset - half;
+    gEffects[effectIndex].unk_18.x = offset + half;
+#ifndef EXPANSION_KIT
+    gEffectsDrawData[effectIndex].effectType = effect->effectType;
+#endif
+    *vtxs = vtx;
+}
+#endif
+
 void Course_FlatDashVerticesInit(s32 effectIndex, CourseEffect* effect, Vtx** vtxs) {
     Vtx* vtx;
     f32 t;
@@ -1595,6 +1840,12 @@ void Course_FlatDashVerticesInit(s32 effectIndex, CourseEffect* effect, Vtx** vt
     Mtx3F segmentBasis;
     CourseSegment* segment;
 
+#ifdef PORT
+    if (effectIndex >= 0) {
+        Course_GdxFlatDashVerticesInit(effectIndex, effect, vtxs);
+        return;
+    }
+#endif
     t = effect->segmentTValueStart;
     segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
     vtx = *vtxs;
@@ -1687,6 +1938,10 @@ void Course_CurvedDashVerticesInit(s32 effectIndex, CourseEffect* effect, Vtx** 
     t = effect->segmentTValueStart;
     segment = GDX_GADGET_SEGMENT(gCourseIndex, effect->segmentIndex);
     vtx = *vtxs;
+#ifdef PORT
+    // Curved shapes keep the stock plate; only the art and the race follow the pad's kind.
+    gdx_dash_pad_set_effect_kind(effectIndex, gdx_settings_view_pad_kind(gdx_course_branch_settings_point(segment)));
+#endif
 
     forwardMagnitude = Course_SplineGetTangent(segment, t, &vec);
     lengthProportionAlongSegment = Course_SplineGetLengthInfo(segment, effect->segmentTValueStart, &lengthFromStart);

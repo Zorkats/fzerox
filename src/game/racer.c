@@ -19,6 +19,11 @@ extern int CVarGetInteger(const char* name, int defaultValue); // libultraship c
 extern float CVarGetFloat(const char* name, float defaultValue); // libultraship consolevariablebridge.h
 extern float gdx_steering_curve_for_port(int port, float steering);
 #include "../../../port/gdx_course_settings_view.h"
+#include "../../../port/gdx_dash_pad.h"
+#include "../../../port/gdx_wind.h"
+#include "../../../port/gdx_test_drive.h"
+#include "../../../port/gdx_death_race.h"
+#include "../../../port/gdx_split_gp.h"
 
 // Emits the menu's packed 0xRRGGBB effect-color override when set (>= 0), else stock.
 #define GDX_ENV_COLOR_OVERRIDE(cVar, stockR, stockG, stockB, stockA)                                       \
@@ -687,7 +692,12 @@ void Racer_SetupStartPositions(void) {
             racer->segmentPositionInfo.pos.y + (height * racer->segmentBasis.y.y) + (var_fv0 * racer->segmentBasis.z.y),
             racer->segmentPositionInfo.pos.z + (height * racer->segmentBasis.y.z) + (var_fv0 * racer->segmentBasis.z.z),
             100, 1.0f);
+#ifdef PORT
+        /* Split-screen GP spaces its field as the one-player GP does; the VS rows would stack it. */
+        if ((gNumPlayers == 1) || gdx_split_gp_active()) {
+#else
         if (gNumPlayers == 1) {
+#endif
             var_fv0 = 100.0f;
 #ifdef EXPANSION_KIT
         } else if (var_fs1 <= 23.0f) {
@@ -732,6 +742,109 @@ extern void gdx_splits_view_player_moved(int lap, int lapsCompleted, float lapSh
                                          int completedLapsTime);
 extern void gdx_course_branch_racer_walked(s32 racerId, RacerSegmentPositionInfo* info);
 extern s32 gdx_course_branch_settings_point(const CourseSegment* segment);
+
+/* Split-screen Grand Prix (plan item MP2, port/gdx_split_gp.h). The rules live in the port module; this is
+   the cup state they act on, kept next to the lives and race-end code that reads it. */
+static u32 sGdxSplitOut;                             /* players out of the cup, one bit per slot */
+static s32 sGdxSplitKOs[GDX_SPLIT_GP_MAX_PLAYERS];    /* each player's KOs in this race */
+static s32 sGdxSplitOutcome = -1;                     /* GDX_SPLIT_GP_* once this race is resolved */
+static s32 sGdxSplitField = GDX_SPLIT_GP_FIELD_DEFAULT; /* machines in this cup, set on its first race */
+
+int gdx_split_gp_active(void) {
+    return (gGameMode == GAMEMODE_GP_RACE) && (gNumPlayers >= 2) && (gTitleDemoState == TITLE_DEMO_INACTIVE);
+}
+
+int gdx_split_gp_player_out(int player) {
+    return (player >= 0) && (player < GDX_SPLIT_GP_MAX_PLAYERS) && ((sGdxSplitOut >> player) & 1);
+}
+
+/* One bit per player slot whose machine has any of `flags`. */
+static u32 gdx_split_gp_players_with(u32 flags) {
+    u32 mask = 0;
+    s32 i;
+
+    for (i = 0; (i < gNumPlayers) && (i < GDX_SPLIT_GP_MAX_PLAYERS); i++) {
+        if (gRacers[i].stateFlags & flags) {
+            mask |= 1u << i;
+        }
+    }
+    return mask;
+}
+
+/* The life icons of every player in `mask` flash from `delta` lives ago. */
+static void gdx_split_gp_lives_flash(u32 mask, s32 delta) {
+    s32 i;
+
+    for (i = 0; i < GDX_SPLIT_GP_MAX_PLAYERS; i++) {
+        if ((mask >> i) & 1) {
+            gdx_split_gp_hud_lives_changed(i, gPlayerLives[i] - delta);
+        }
+    }
+}
+
+int gdx_split_gp_race_outcome(void) {
+    u32 lost = 0;
+
+    if ((sGdxSplitOutcome < 0) && (D_800E5FBC != 0) && gdx_split_gp_active()) {
+        sGdxSplitOutcome =
+            gdx_split_gp_resolve(gNumPlayers, gdx_split_gp_players_with(RACER_STATE_FINISHED),
+                                 gdx_split_gp_players_with(RACER_STATE_RETIRED), &sGdxSplitOut, gPlayerLives, &lost);
+        if (lost != 0) {
+            gdx_split_gp_lives_flash(lost, -1);
+            if (gEnableRaceSfx) {
+                Audio_TriggerSystemSE(NA_SE_44);
+            }
+        }
+    }
+    return sGdxSplitOutcome;
+}
+
+int gdx_split_gp_pause_retry_allowed(void) {
+    return gdx_split_gp_retry_allowed(gNumPlayers, gdx_split_gp_players_with(RACER_STATE_FINISHED), sGdxSplitOut,
+                                      gPlayerLives);
+}
+
+void gdx_split_gp_pause_retry_pay(void) {
+    u32 lost = 0;
+
+    gdx_split_gp_retry_cost(gNumPlayers, gdx_split_gp_players_with(RACER_STATE_FINISHED), sGdxSplitOut, gPlayerLives,
+                            &lost);
+    gdx_split_gp_lives_flash(lost, -1);
+}
+
+/* func_80089800 deals the CPU characters into slots 1 .. 29 around player one only, so it also fills the
+   other players' slots. Each character it put there goes back to a CPU slot holding a player's character,
+   and the players then take their own (func_8008969C). */
+static void gdx_split_gp_seat_players(void) {
+    s32 p;
+    s32 k;
+    s32 q;
+    s32 taken;
+
+    for (p = 1; p < gNumPlayers; p++) {
+        taken = 0;
+        for (q = 0; q < gNumPlayers; q++) {
+            if (gPlayerCharacters[q] == gRacers[p].character) {
+                taken = 1;
+            }
+        }
+        if (taken) {
+            continue;
+        }
+        for (k = gNumPlayers; k < 30; k++) {
+            for (q = 0; q < gNumPlayers; q++) {
+                if (gRacers[k].character == gPlayerCharacters[q]) {
+                    break;
+                }
+            }
+            if (q < gNumPlayers) {
+                gRacers[k].character = gRacers[p].character;
+                break;
+            }
+        }
+    }
+    func_8008969C();
+}
 #endif
 
 void Racer_UpdateRivalRacer(void) {
@@ -845,6 +958,9 @@ void Racer_RetireRacer(Racer* racer) {
                 gRacers[0].raceTime += Math_Rand2() % 16;
                 gRacers[0].energy = gRacers[0].maxEnergy;
                 D_800F5DE8 = D_800E5FBC = 1;
+#ifdef PORT
+                gdx_death_race_cleared();
+#endif
                 Audio_PlayerFinished(gRacers[0].id);
                 Audio_PlayerEngineStop(gRacers[0].id);
                 func_8007E0CC();
@@ -1285,6 +1401,11 @@ void func_8008AA8C(void) {
     /* Racer.lapTimes holds three laps. A finite Single Race can run more, so the per-racer
        estimate stops at three; the extra laps only live in the Single Race lap table. */
     s32 gdxStructLapLimit = (gTotalLapCount < 3) ? gTotalLapCount : 3;
+
+    /* Split-screen GP reads who finished before the estimate below marks every machine still racing. */
+    if (gdx_split_gp_active()) {
+        gdx_split_gp_race_outcome();
+    }
 #endif
 
     for (racer = sLastRacer; racer >= gRacers; racer--) {
@@ -1348,7 +1469,14 @@ void func_8008AA8C(void) {
         }
     }
     Racer_UpdateRacePositions();
+#ifdef PORT
+    /* Split-screen GP scores the race when any player still in the cup finished it. */
+    if ((gGameMode == GAMEMODE_GP_RACE) &&
+        (gdx_split_gp_active() ? (gdx_split_gp_race_outcome() == GDX_SPLIT_GP_COUNTS)
+                               : ((gRacers[0].stateFlags & RACER_STATE_FINISHED) != 0))) {
+#else
     if ((gGameMode == GAMEMODE_GP_RACE) && (gRacers[0].stateFlags & RACER_STATE_FINISHED)) {
+#endif
         var_v1 = gTotalRacers - 1;
         while (var_v1 >= 0) {
             if (gRacersByPosition[var_v1]->raceTime != 0) {
@@ -1358,6 +1486,11 @@ void func_8008AA8C(void) {
         }
 
         while (var_v1 >= 0) {
+#ifdef PORT
+            /* A player out of the cup scores nothing; their place's points go unclaimed. */
+            if (!(gdx_split_gp_active() && (gRacersByPosition[var_v1]->id < gNumPlayers) &&
+                  gdx_split_gp_player_out(gRacersByPosition[var_v1]->id)))
+#endif
             gRacersByPosition[var_v1]->points += gRacePositionPoints[var_v1];
             var_v1--;
         }
@@ -1535,6 +1668,10 @@ void func_8008B1CC(void) {
     }
 
     gPlayerLives[0] = gPlayerLives[1] = gPlayerLives[2] = gPlayerLives[3] = gTotalLives[gDifficulty];
+#ifdef PORT
+    /* A new cup: every split-screen player is back in. */
+    sGdxSplitOut = 0;
+#endif
 }
 
 s32 func_8008B23C(MachineInfo* arg0, MachineInfo* arg1) {
@@ -1700,6 +1837,12 @@ void Racer_InitRacer(Racer* racer) {
 
     racer->shadowType = machine->shadowType;
     racer->boostersType = machine->boostersType;
+#ifdef PORT
+    gdx_dash_pad_racer_reset(racer->id);
+    if (racer->id == 0) {
+        gdx_wind_streaks_reset();
+    }
+#endif
     racer->bodyRF = racer->bodyR = machine->red[racer->machineSkinIndex];
     racer->bodyGF = racer->bodyG = machine->green[racer->machineSkinIndex];
     racer->bodyBF = racer->bodyB = machine->blue[racer->machineSkinIndex];
@@ -1733,6 +1876,12 @@ void Racer_InitRacer(Racer* racer) {
         (gGameMode == GAMEMODE_GP_END_CS) || (gTitleDemoState != TITLE_DEMO_INACTIVE)) {
         racer->stateFlags |= RACER_STATE_CPU_CONTROLLED;
     }
+#ifdef PORT
+    /* Split-screen GP: a player out of the cup watches their machine race on autopilot. */
+    if (gdx_split_gp_active() && gdx_split_gp_player_out(racer->id)) {
+        racer->stateFlags |= RACER_STATE_CPU_CONTROLLED;
+    }
+#endif
     racer->segmentPositionInfo.segmentLengthProportion = Course_SplineGetLengthInfo(
         racer->segmentPositionInfo.courseSegment, racer->segmentPositionInfo.segmentTValue, &racer->lapDistance);
 
@@ -1871,17 +2020,40 @@ void Racer_Init(void) {
                                (gTitleDemoState == TITLE_DEMO_INACTIVE));
     gTotalLapCount = gdx_single_race_lap_count();
     gdx_gp_resume_on_race_start();
+    /* Death Race lap limit and outcome for this start (port/gdx_death_race.h). 0 laps is the stock
+       endless run, and the title demo always runs stock. */
+    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gTitleDemoState == TITLE_DEMO_INACTIVE)) {
+        gdx_death_race_begin(gCurrentCourseInfo->courseIndex, CVarGetInteger("gEnhancements.Gameplay.DeathRaceLaps", 0));
+    } else {
+        gdx_death_race_end();
+    }
+    /* Split-screen GP: nobody has resolved or scored a KO in this race yet. */
+    sGdxSplitOutcome = -1;
+    sGdxSplitKOs[0] = sGdxSplitKOs[1] = sGdxSplitKOs[2] = sGdxSplitKOs[3] = 0;
 #endif
 
     if (gNumPlayers == 1) {
         switch (gGameMode) {
             case GAMEMODE_RECORDS:
             case GAMEMODE_TIME_ATTACK:
-#ifdef EXPANSION_KIT
+#if defined(EXPANSION_KIT) && !defined(PORT)
             case GAMEMODE_COURSE_EDIT:
 #endif
                 gTotalRacers = 1;
                 break;
+#if defined(EXPANSION_KIT) && defined(PORT)
+            case GAMEMODE_COURSE_EDIT:
+                /* A test drive races the CPUs set in the menu (port/gdx_test_drive.h); 0 is the stock solo run. */
+                gTotalRacers = gdx_test_drive_total_racers();
+                if (gTotalRacers > 1) {
+                    func_80089800();
+                    for (i = 1; i < gTotalRacers; i++) {
+                        gRacers[i].character = gdx_test_drive_cpu_character(
+                            gRacers[i].character, gRacers[0].character, gPlayerCharacters[0]);
+                    }
+                }
+                break;
+#endif
             case GAMEMODE_GP_END_CS:
                 if (gPlayer1OverallPosition < 4) {
                     gTotalRacers = 3;
@@ -1914,6 +2086,20 @@ void Racer_Init(void) {
                 break;
         }
     } else {
+#ifdef PORT
+        /* Split-screen GP races a full GP field. The cup's first race sets its size and deals the CPU
+           characters, as the one-player GP does; changing the setting mid-cup waits for the next cup. */
+        if (gdx_split_gp_active()) {
+            if (D_800E5FF0 == 1) {
+                sGdxSplitField = gdx_split_gp_field(
+                    gNumPlayers,
+                    CVarGetInteger("gEnhancements.Multiplayer.SplitGrandPrixField", GDX_SPLIT_GP_FIELD_DEFAULT));
+                func_80089800();
+                gdx_split_gp_seat_players();
+            }
+            gTotalRacers = sGdxSplitField;
+        } else {
+#endif
         if (gSettingVsCom != 0) {
             gTotalRacers = 4;
             func_80089934();
@@ -1927,6 +2113,9 @@ void Racer_Init(void) {
                 gVsRacePlayerVictoryCount[i] = gVsRacePlayerPoints[i] = 0;
             }
         }
+#ifdef PORT
+        }
+#endif
     }
     sLastRacer = &gRacers[gTotalRacers - 1];
     if (gTitleDemoState != TITLE_DEMO_INACTIVE) {
@@ -1943,7 +2132,12 @@ void Racer_Init(void) {
             gRacers[j].character = var_t0;
         }
     }
+#ifdef PORT
+    /* Split-screen GP keeps the GP grid that func_i3_80115E74 lays out. */
+    if ((gNumPlayers >= 2) && !gdx_split_gp_active()) {
+#else
     if (gNumPlayers >= 2) {
+#endif
         for (i = 0; i < gTotalRacers; i++) {
             gRacers[i].position = i + 1;
         }
@@ -1960,7 +2154,11 @@ void Racer_Init(void) {
     for (i = 0; i < gTotalRacers; i++) {
         gRacers[i].id = i;
 #ifdef EXPANSION_KIT
+#ifdef PORT
+        if ((gGameMode != GAMEMODE_COURSE_EDIT) || gdx_test_drive_cpus()) {
+#else
         if (gGameMode != GAMEMODE_COURSE_EDIT) {
+#endif
 #endif
             Cpu_InitRacer(&gRacers[i]);
 #ifdef EXPANSION_KIT
@@ -2489,6 +2687,19 @@ void func_8008DBB8(Racer* arg0, s32 arg1) {
 
     D_800E5FD4++;
     gRacersKOd++;
+#ifdef PORT
+    /* Split-screen GP counts each player's KOs on their own, and a player out of the cup earns no life. */
+    if (gdx_split_gp_active()) {
+        if ((temp_v0->id < gNumPlayers) && (temp_v0->id < GDX_SPLIT_GP_MAX_PLAYERS) &&
+            (++sGdxSplitKOs[temp_v0->id] == GDX_SPLIT_GP_KO_LIFE) && !gdx_split_gp_player_out(temp_v0->id)) {
+            gPlayerLives[temp_v0->id]++;
+            gdx_split_gp_lives_flash(1u << temp_v0->id, 1);
+            if (gEnableRaceSfx) {
+                Audio_TriggerSystemSE(NA_SE_NONE);
+            }
+        }
+    } else
+#endif
     if ((gGameMode == GAMEMODE_GP_RACE) && (gRacersKOd == 5)) {
         gPlayerLives[0]++;
         func_i3_80128D8C();
@@ -3680,6 +3891,41 @@ static f32 Racer_MagnetPullStrength(Racer* racer) {
                                               MAGNET_PULL_STRENGTH_MIN, MAGNET_PULL_STRENGTH_MAX);
 }
 
+// The dash pad under the racer: stock, Super or Brake (port/gdx_dash_pad.h). The kind is part of the track's
+// shape, so it applies even when the player races on the menu's values; a Super pad's boost is a value and does not.
+static s32 Racer_DashPadKind(Racer* racer) {
+    return gdx_settings_view_pad_kind(Racer_ControlPoint(racer));
+}
+
+// After the stock dash setup: a Super pad raises the speed floor, boosts a little longer and glows blue.
+static void Racer_DashPadSuper(Racer* racer) {
+    f32 boost = 1.0f;
+
+    if (Racer_DashPadKind(racer) == GDX_DASH_PAD_SUPER) {
+        boost = Racer_UsesCourseSettings() ? gdx_settings_view_pad_boost(Racer_ControlPoint(racer))
+                                           : GDX_DASH_PAD_DEFAULT_BOOST;
+        racer->boostTimer = gdx_dash_pad_boost_frames(sInitialBoostTimer, boost);
+        racer->shadowBaseR = 64.0f;
+        racer->shadowBaseG = 160.0f;
+        racer->shadowBaseB = 255.0f;
+    }
+    gdx_dash_pad_set_boost(racer->id, boost);
+}
+
+// A Brake pad instead of the dash: the first frame on it cuts the speed along the current heading, and the
+// drive stays down for a moment (see the var_fs1 scaling below). No A press, no dash flag, no boost sound.
+static void Racer_DashPadBrake(Racer* racer) {
+    if (gdx_dash_pad_brake_begin(racer->id)) {
+        racer->velocity.x *= GDX_DASH_PAD_BRAKE_SPEED_SHARE;
+        racer->velocity.y *= GDX_DASH_PAD_BRAKE_SPEED_SHARE;
+        racer->velocity.z *= GDX_DASH_PAD_BRAKE_SPEED_SHARE;
+    }
+    racer->shadowColorStrength = 1.3f;
+    racer->shadowBaseR = 255.0f;
+    racer->shadowBaseG = 48.0f;
+    racer->shadowBaseB = 32.0f;
+}
+
 static bool Racer_LavaNeverKills(void) {
     bool menuValue = CVarGetInteger("gEnhancements.Gameplay.LavaNoKill", 0) != 0;
 
@@ -3757,6 +4003,58 @@ static void Racer_ApplyMagnetPull(Racer* racer, s32 effectType) {
     racer->acceleration.x += force * (pullX - (upward * racer->gravityUp.x));
     racer->acceleration.y += force * (pullY - (upward * racer->gravityUp.y));
     racer->acceleration.z += force * (pullZ - (upward * racer->gravityUp.z));
+}
+
+// The wind on the racer's segment (port/gdx_wind.h), set per segment, and none in a tunnel.
+// The HUD's streaks read it too (hud.c).
+s32 Racer_WindStrength(Racer* racer, s32* angle) {
+    CourseSegment* segment = racer->segmentPositionInfo.courseSegment;
+    s32 point;
+    s32 blocked;
+    int resolved = 0;
+    s32 strength;
+
+    *angle = 0;
+    if (!Racer_UsesCourseSettings() || (segment == NULL)) {
+        return 0;
+    }
+    point = Racer_ControlPoint(racer);
+    blocked = (segment->trackSegmentInfo & TRACK_SHAPE_MASK) == TRACK_SHAPE_TUNNEL;
+    strength = gdx_wind_resolve(gdx_settings_view_wind_strength(point), gdx_settings_view_wind_angle(point), blocked,
+                                &resolved);
+    *angle = resolved;
+    return strength;
+}
+
+// Pushes the racer with the wind, on the ground and in the air, CPUs too.
+static void Racer_ApplyWind(Racer* racer) {
+    s32 angle;
+    s32 strength;
+    float up[3];
+    float forward[3];
+    float velocity[3];
+    float push[3];
+
+    if (racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FALLING_OFF_TRACK | RACER_STATE_RETIRED)) {
+        return;
+    }
+    strength = Racer_WindStrength(racer, &angle);
+    if (strength == 0) {
+        return;
+    }
+    up[0] = racer->gravityUp.x;
+    up[1] = racer->gravityUp.y;
+    up[2] = racer->gravityUp.z;
+    forward[0] = racer->trueBasis.x.x;
+    forward[1] = racer->trueBasis.x.y;
+    forward[2] = racer->trueBasis.x.z;
+    velocity[0] = racer->velocity.x;
+    velocity[1] = racer->velocity.y;
+    velocity[2] = racer->velocity.z;
+    gdx_wind_push(strength, angle, up, forward, velocity, (racer->stateFlags & RACER_STATE_AIRBORNE) != 0, push);
+    racer->acceleration.x += push[0];
+    racer->acceleration.y += push[1];
+    racer->acceleration.z += push[2];
 }
 #endif
 
@@ -4057,6 +4355,11 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         if ((racer->stateFlags & (RACER_STATE_CRASHED | COURSE_EFFECT_MASK)) == COURSE_EFFECT_DASH &&
             racer->stateFlags & RACER_STATE_FLAGS_400000) {
 #endif
+#ifdef PORT
+            if (Racer_DashPadKind(racer) == GDX_DASH_PAD_BRAKE) {
+                Racer_DashPadBrake(racer);
+            } else {
+#endif
             buttonCurrent |= BTN_A;
             racer->shadowColorStrength = 1.3f;
 #ifdef PORT
@@ -4068,12 +4371,18 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
 #endif
             racer->stateFlags |= RACER_STATE_DASH_PAD_BOOST;
             racer->boostTimer = sInitialBoostTimer;
+#ifdef PORT
+            Racer_DashPadSuper(racer);
+#endif
             if (!(racer->soundEffectFlags & RACER_SE_FLAGS_BOOST)) {
                 racer->soundEffectFlags |= RACER_SE_FLAGS_BOOST;
                 if (gEnableRaceSfx) {
                     Audio_PlayerTriggerSEStart(racer->id, NA_SE_7);
                 }
             }
+#ifdef PORT
+            }
+#endif
         } else {
             racer->soundEffectFlags &= ~RACER_SE_FLAGS_BOOST;
         }
@@ -4470,7 +4779,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         var_fs0 = racer->unk_1B8;
         var_ft4 = 1.0f;
     }
+#ifdef PORT
+    /* The VS handicap settings stay out of a split-screen GP. */
+    if ((gNumPlayers >= 2) && (gSettingVsHandicap == 2) && !gdx_split_gp_active()) {
+#else
     if ((gNumPlayers >= 2) && (gSettingVsHandicap == 2)) {
+#endif
         var_fv1 = (gRacersByPosition[0]->raceDistance - racer->raceDistance);
         var_fv1 /= D_800CE4D8;
         if (var_fv1 >= 1.0f) {
@@ -4483,9 +4797,18 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
     }
     if (racer->boostTimer != 0) {
         if (racer->stateFlags & RACER_STATE_DASH_PAD_BOOST) {
+#ifdef PORT
+            // A Super pad raises the stock dash floor by its boost; 1.0 on a stock pad.
+            f32 dashFloor = racer->unk_1C4 * gdx_dash_pad_boost(racer->id);
+
+            if (var_ft4 < dashFloor) {
+                var_ft4 = dashFloor;
+            }
+#else
             if (var_ft4 < racer->unk_1C4) {
                 var_ft4 = racer->unk_1C4;
             }
+#endif
         } else {
             if (var_ft4 < racer->unk_1C0) {
                 var_ft4 = racer->unk_1C0;
@@ -4493,7 +4816,11 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
 #ifdef EXPANSION_KIT
             if (gGameMode != GAMEMODE_COURSE_EDIT) {
 #endif
+#ifdef PORT
+                if ((gNumPlayers == 1) || (gSettingVsHandicap == 0) || gdx_split_gp_active()) {
+#else
                 if ((gNumPlayers == 1) || (gSettingVsHandicap == 0)) {
+#endif
                     sp128 = racer->boostEnergyUsage;
                 } else {
                     sp128 = (gRacersByPosition[0]->raceDistance - racer->raceDistance);
@@ -4521,6 +4848,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
     }
     var_fs1 *= var_ft4;
     var_fs0 *= var_ft4;
+#ifdef PORT
+    if (gdx_dash_pad_brake_tick(racer->id)) {
+        var_fs1 *= GDX_DASH_PAD_BRAKE_DRIVE;
+        var_fs0 *= GDX_DASH_PAD_BRAKE_DRIVE;
+    }
+#endif
 
     if ((racer->stateFlags & COURSE_EFFECT_MASK) == COURSE_EFFECT_ICE) {
         if (racer->id < gNumPlayers) {
@@ -4606,6 +4939,7 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                                                      RACER_STATE_SPINNING_OUT | COURSE_EFFECT_MASK))) {
         Racer_ApplyMagnetPull(racer, racer->stateFlags & COURSE_EFFECT_MASK);
     }
+    Racer_ApplyWind(racer);
 #endif
     racer->velocity.x += racer->acceleration.x;
     racer->velocity.y += racer->acceleration.y;
@@ -4815,6 +5149,20 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                                     gStartNewBestLap = true;
                                 }
                             }
+#ifdef PORT
+                            /* A Death Race lap limit counts the player's laps itself, since the lap number wraps.
+                               Running out of laps with machines left ends the run as a loss, the way a full
+                               clear ends it as a win. */
+                            if ((racer == gRacers) && (gGameMode == GAMEMODE_DEATH_RACE) && (D_800E5FBC == 0) &&
+                                gdx_death_race_check_laps(gdx_death_race_lap_done())) {
+                                racer->stateFlags |= RACER_STATE_FINISHED | RACER_STATE_CPU_CONTROLLED;
+                                racer->energy = racer->maxEnergy;
+                                D_800F5DE8 = D_800E5FBC = 1;
+                                Audio_PlayerFinished(racer->id);
+                                Audio_PlayerEngineStop(racer->id);
+                                func_8007E0CC();
+                            }
+#endif
                             if (racer->lap == (gTotalLapCount + 1)) {
                                 racer->lap = racer->lapsCompleted = 1;
                                 racer->lapsCompletedDistance = 0;
@@ -5492,6 +5840,15 @@ void func_80095144(void) {
         gControllers[gPlayerControlPorts[i]].unk_72 = 0;
     }
 
+#ifdef PORT
+    /* Split-screen GP settles every player's lives at once when the race ends. This also runs on each menu
+       change, so the outcome getter resolves a race only once. */
+    if (gdx_split_gp_active()) {
+        gdx_split_gp_race_outcome();
+        D_800F80C4 = 0;
+        return;
+    }
+#endif
     if (D_800F80C4 == 1) {
         Racer_IncreaseLife(0);
     } else if (D_800F80C4 == -1) {
@@ -6049,6 +6406,15 @@ void Racer_Update(void) {
             if (gRacers[0].stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) {
                 D_800E5FBC = 1;
             }
+#ifdef PORT
+        } else if (gdx_split_gp_active()) {
+            /* Split-screen GP ends once every player still in the cup finished or retired. The CPUs race
+               on, as they do after the one-player GP ends, and nobody scores VS points. */
+            if (gdx_split_gp_race_over(gNumPlayers, gdx_split_gp_players_with(RACER_STATE_FINISHED),
+                                       gdx_split_gp_players_with(RACER_STATE_RETIRED), sGdxSplitOut)) {
+                D_800E5FBC = 1;
+            }
+#endif
         } else {
             i = gRacersRetired + gRacersFinished;
 
@@ -6147,6 +6513,32 @@ int gdx_racer_course_file_id(char* out, int outCap) {
         return gdx_course_music_course_id(name, "CRSD", out, outCap);
     }
     return 0;
+}
+
+/* CM3: the ghost of the race that just finished, for the staff ghost of a custom track (port/gdx_staff_ghost.h).
+   Reads the recording buffers, not gGhosts: the run is kept there only when it beats a ghost already held.
+   Returns 1 and fills the outputs when the run was recorded to its end, 0 otherwise. Valid until the next race
+   starts (Racer_Init resets the recording). machine takes 0x14 bytes and lapTimes 3 values. */
+int gdx_racer_last_ghost(unsigned int* raceTime, unsigned int* lapTimes, unsigned int* replayEnd,
+                         unsigned int* replaySize, unsigned char* machine, unsigned char* replay, int replayCap) {
+    MachineInfo machineInfo;
+    s32 i;
+
+    if (!D_800F5DEA || gUnableToRecordGhost || (sGhostReplayRecordingSize < 1) ||
+        (sGhostReplayRecordingSize > (s32) sizeof(sGhostReplayRecordingBuffer)) ||
+        (sGhostReplayRecordingSize > replayCap) || (gRacers[0].raceTime <= 0)) {
+        return 0;
+    }
+    *raceTime = (unsigned int) gRacers[0].raceTime;
+    for (i = 0; i < 3; i++) {
+        lapTimes[i] = (unsigned int) gRacers[0].lapTimes[i];
+    }
+    *replayEnd = (unsigned int) sGhostReplayRecordingEnd;
+    *replaySize = (unsigned int) sGhostReplayRecordingSize;
+    func_80089A74(&machineInfo);
+    memcpy(machine, &machineInfo, sizeof(machineInfo));
+    memcpy(replay, sGhostReplayRecordingBuffer, (size_t) sGhostReplayRecordingSize);
+    return 1;
 }
 
 static void gdx_racer_arm_course_music(void) {
@@ -6295,7 +6687,13 @@ Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
 #ifndef EXPANSION_KIT
     if (gGameMode != GAMEMODE_GP_END_CS) {
 #else
+#ifdef PORT
+    /* A test drive with CPUs draws far machines simpler, as a race does, so it costs no more than an Edit
+       Cup race on the same track. */
+    if (gGameMode == GAMEMODE_GP_END_CS || (gGameMode == GAMEMODE_COURSE_EDIT && !gdx_test_drive_cpus())) {
+#else
     if (gGameMode == GAMEMODE_GP_END_CS || gGameMode == GAMEMODE_COURSE_EDIT) {
+#endif
         for (racer = sLastRacer; racer >= gRacers; racer--) {
             racer->machineLod = racer->unk_2B2 = 1;
             racer->unk_2B3 = 2;
@@ -6827,7 +7225,11 @@ block_115:
             sp574 += (7.5f * sqrtf(temp_fs0));
             if (racer->stateFlags & RACER_STATE_DASH_PAD_BOOST) {
 #ifdef PORT
-                GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.DashPadColor", 255, 223, 0, 255);
+                if (gdx_dash_pad_boost(racer->id) > 1.0f) {
+                    gDPSetEnvColor(gfx++, 64, 160, 255, 255);
+                } else {
+                    GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.DashPadColor", 255, 223, 0, 255);
+                }
 #else
                 gDPSetEnvColor(gfx++, 255, 223, 0, 255);
 #endif
@@ -6840,7 +7242,13 @@ block_115:
             }
         } else {
 #ifdef PORT
-            GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.BoostIdleColor", 0, 255, 255, 255);
+            if (gdx_dash_pad_brake_share(racer->id) > 0.0f) {
+                // A Brake pad's red trail, fading as the brake lets go.
+                sp574 += 7.5f * sqrtf(gdx_dash_pad_brake_share(racer->id));
+                gDPSetEnvColor(gfx++, 255, 48, 32, 255);
+            } else {
+                GDX_ENV_COLOR_OVERRIDE("gEnhancements.Gameplay.BoostIdleColor", 0, 255, 255, 255);
+            }
 #else
             gDPSetEnvColor(gfx++, 0, 255, 255, 255);
 #endif

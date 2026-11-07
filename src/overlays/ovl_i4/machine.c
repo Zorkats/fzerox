@@ -479,6 +479,55 @@ extern f32 D_800CE74C;
 extern f32 D_800CE750;
 extern s32 gNumPlayers;
 
+#ifdef PORT
+extern s16 gGameModeChangeState;
+extern s32 gModeSubOption[];
+
+/* Drop-in: Start on a controller with no player joins a VS race at machine select. Machine select is
+ * entered again through the stock mode change, so the larger split layout and its assets load as if the
+ * main menu had picked the new count. The players already in keep their machine and their lock. With
+ * Enhancements > Multiplayer > Split-screen Grand Prix on, a Grand Prix takes joins the same way, from one
+ * player up (port/gdx_split_gp.h). */
+static s8 sGdxDropInLocks[4];
+static s32 sGdxDropInRestore;
+
+static s32 gdx_drop_in_mode_ok(void) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+
+    if (gSelectedMode == MODE_VS_BATTLE) {
+        return gNumPlayers >= 2;
+    }
+    return (gSelectedMode == MODE_GP_RACE) && (gNumPlayers >= 1) &&
+           CVarGetInteger("gEnhancements.Multiplayer.SplitGrandPrix", 0);
+}
+
+static s32 gdx_drop_in_join(s32 slot) {
+    s32 port;
+
+    if (!gdx_drop_in_mode_ok() || (gNumPlayers >= 4) || (gMachineSelectState != MACHINE_SELECT_ACTIVE) || (gGameModeChangeState != GAMEMODE_UPDATE) ||
+        (slot < gNumPlayers) || (gPlayerControlPorts[slot] == PORT_DISCONNECTED) ||
+        (MACHINE_MINI_STATE(Object_Get(OBJECT_MACHINE_SELECT_MACHINE)) != 0)) {
+        return false;
+    }
+    /* The controller that pressed Start becomes the next player, whichever slot it had. */
+    port = gPlayerControlPorts[slot];
+    gPlayerControlPorts[slot] = gPlayerControlPorts[gNumPlayers];
+    gPlayerControlPorts[gNumPlayers] = port;
+
+    for (slot = 0; slot < 4; slot++) {
+        sGdxDropInLocks[slot] = gPlayerSelectionLock[slot];
+    }
+    sGdxDropInLocks[gNumPlayers] = SELECTION_FREE;
+    sGdxDropInRestore = true;
+    gNumPlayers++;
+    if (gSelectedMode == MODE_VS_BATTLE) {
+        gModeSubOption[MODE_VS_BATTLE] = gNumPlayers - 2;
+    }
+    gGameModeChangeState = GAMEMODE_CHANGE_START;
+    return true;
+}
+#endif
+
 void MachineSelect_Init(void) {
     s32 i;
 
@@ -492,6 +541,14 @@ void MachineSelect_Init(void) {
         gPlayerSelectionLock[i] = SELECTION_FREE;
         sMachineSelectIndex[i] = Character_GetSlotFromCharacter(gRacers[i].character);
     }
+#ifdef PORT
+    if (sGdxDropInRestore) {
+        sGdxDropInRestore = false;
+        for (i = 0; i < gNumPlayers; i++) {
+            gPlayerSelectionLock[i] = sGdxDropInLocks[i];
+        }
+    }
+#endif
     sMachinesUnlocked = ((func_8007E008() / 3) * 6) + 6;
     if (gSettingEverythingUnlocked) {
         sMachinesUnlocked = 30;
@@ -613,10 +670,21 @@ s32 MachineSelect_Update(void) {
 
         Controller_SetGlobalInputs(&gControllers[gPlayerControlPorts[i]]);
         if (i >= gNumPlayers) {
+#ifdef PORT
+            if ((gInputButtonPressed & BTN_START) && gdx_drop_in_join(i)) {
+                Audio_TriggerSystemSE(NA_SE_33);
+                return gGameMode;
+            }
+#endif
             if ((gInputButtonPressed & BTN_B) && (gMachineSelectState == MACHINE_SELECT_ACTIVE)) {
                 Audio_TriggerSystemSE(NA_SE_16);
                 gMachineSelectState = MACHINE_SELECT_EXIT;
+#ifdef PORT
+                /* A Death Race picked on the course screen goes back to it. */
+                if ((gSelectedMode == MODE_DEATH_RACE) && (gCourseIndex == COURSE_DEATH_RACE)) {
+#else
                 if (gSelectedMode == MODE_DEATH_RACE) {
+#endif
                     return GAMEMODE_FLX_MAIN_MENU;
                 }
                 // FAKE
@@ -682,7 +750,11 @@ s32 MachineSelect_Update(void) {
                         gPlayerSelectionLock[i] = SELECTION_FREE;
                     } else {
                         gMachineSelectState = MACHINE_SELECT_EXIT;
+#ifdef PORT
+                        if ((gSelectedMode == MODE_DEATH_RACE) && (gCourseIndex == COURSE_DEATH_RACE)) {
+#else
                         if (gSelectedMode == MODE_DEATH_RACE) {
+#endif
                             return GAMEMODE_FLX_MAIN_MENU;
                         }
                         return GAMEMODE_FLX_COURSE_SELECT;
