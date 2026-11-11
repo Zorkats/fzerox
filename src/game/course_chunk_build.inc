@@ -103,11 +103,19 @@ f32 Course_ChunkPositionDistance(Vec3f* vec1, Vec3f* vec2) {
 s32 func_800A18FC(s32 trackSegmentInfo, f32 distance) {
 
     if ((trackSegmentInfo & TRACK_TYPE_MASK) != TRACK_TYPE_NONE) {
+#ifdef PORT
+        return (s32) (Course_GdxRowScale(TRACK_TYPE_ROW(TRACK_SHAPE_INDEX(trackSegmentInfo & TRACK_SHAPE_MASK),
+                                                        trackSegmentInfo & TRACK_TYPE_MASK),
+                                         sGdxBuildTheme) *
+                      distance) -
+               0x8000;
+#else
         return (s32) (TRACK_TYPE_ROW(TRACK_SHAPE_INDEX(trackSegmentInfo & TRACK_SHAPE_MASK),
                                      trackSegmentInfo & TRACK_TYPE_MASK)
                                         ->textureScale *
                       distance) -
                0x8000;
+#endif
     }
     return -0x8000;
 }
@@ -228,6 +236,9 @@ s32 func_800A1954(CourseInfo* courseInfo) {
     gSegmentChunks[0].leftTextureCorrection = gSegmentChunks[0].rightTextureCorrection =
         gSegmentChunks[0].topTextureCorrection = gSegmentChunks[0].bottomTextureCorrection = -0x8000;
     gSegmentChunks[0].segmentIndex = (s32) (segment - courseInfo->courseSegments);
+#ifdef PORT
+    gSegmentChunks[0].gdxRoadTheme = (u8) Course_GdxSegmentTheme(segment);
+#endif
 
     leftFaceDistance = rightFaceDistance = topFaceDistance = bottomFaceDistance = 0.0f;
     var_fs3 = 0.0f;
@@ -240,6 +251,11 @@ s32 func_800A1954(CourseInfo* courseInfo) {
 
     while (true) {
         trackSegmentInfo = segment->trackSegmentInfo;
+#ifdef PORT
+        /* Taken with trackSegmentInfo, before the segment may advance: the chunk that ends a segment gets its
+           texture coordinate from that segment's scale. */
+        sGdxBuildTheme = Course_GdxSegmentTheme(segment);
+#endif
         sp274 = D_800F89E0 / forwardMagnitude;
         if (D_800F8524 != 0) {
             var_fs3 += D_800F89E0;
@@ -433,7 +449,11 @@ s32 func_800A1954(CourseInfo* courseInfo) {
                                          trackSegmentInfo & TRACK_TYPE_MASK);
 
                 var_v1 = temp_a3->textureCoordinateMask;
+#ifdef PORT
+                temp_fv0_5 = Course_GdxRowScale(temp_a3, sGdxBuildTheme);
+#else
                 temp_fv0_5 = temp_a3->textureScale;
+#endif
                 segmentChunk->leftTextureCorrection = (segmentChunk->leftTextureCoord & var_v1) - 0x8000;
                 nextSegmentChunk->leftTextureCoord =
                     (leftTextureCoord - segmentChunk->leftTextureCoord) + segmentChunk->leftTextureCorrection;
@@ -458,6 +478,9 @@ s32 func_800A1954(CourseInfo* courseInfo) {
                 segment->trackSegmentInfo &
                 ~(TRACK_JOIN_MASK | TRACK_CHUNK_JOIN_TRANSITION_END_MASK | TRACK_CHUNK_JOIN_TRANSITION_START_MASK);
             nextSegmentChunk->segmentIndex = segment - courseInfo->courseSegments;
+#ifdef PORT
+            nextSegmentChunk->gdxRoadTheme = (u8) Course_GdxSegmentTheme(segment);
+#endif
             nextSegmentChunk->segmentTValue = t;
 
             if ((segment->previousJoinEndTValue <= t) && (t <= segment->nextJoinStartTValue)) {

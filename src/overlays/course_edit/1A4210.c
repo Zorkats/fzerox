@@ -724,6 +724,10 @@ char* gdx_ek_help_text(s32 index);
 static char sGdxInsertHelpText[] = "Insert a point halfway to the next";
 static char sGdxSplitHelpText[] = "Fork the track into two paths";
 static char sGdxLinkHelpText[] = "Join a fork path to a point";
+/* The same for the port-only TRACK row of the MOVE menu. */
+static char sGdxMoveTrackHelpText[] = "Z: grab track. Hold Z: up or down";
+/* The same for the port-only HORIZON row of the Create menu. */
+static char sGdxHorizonHelpText[] = "Choose the images on the horizon";
 
 /* Top-strip help for the Point, Move, Design and Parts screens. The mouse wording follows the mouse mode setting, the
  * same gate as help screens 25 to 28, so it does not flicker back to the stock Z text when the cursor leaves the game
@@ -789,6 +793,11 @@ void func_xk2_800F3600(Gfx** gfxP) {
             case 5:
                 func_xk2_800F335C(&gfx, 24, D_xk2_80105064);
                 break;
+#ifdef PORT
+            case 6:
+                func_xk2_800F335C(&gfx, 24, (s8*) sGdxHorizonHelpText);
+                break;
+#endif
         }
     }
     if (sp2C == &gPointWidget) {
@@ -881,6 +890,11 @@ void func_xk2_800F3600(Gfx** gfxP) {
                 func_xk2_800F335C(&gfx, 24, D_xk2_801051A8);
 #endif
                 break;
+#ifdef PORT
+            case 7: // MOVE_OPTION_TRACK
+                func_xk2_800F335C(&gfx, 24, (s8*) sGdxMoveTrackHelpText);
+                break;
+#endif
         }
     }
     if (sp2C == &gCourseEditFileWidget) {

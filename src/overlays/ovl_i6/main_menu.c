@@ -10,6 +10,14 @@
 #ifdef PORT
 #include "../../../../port/gdx_gnet_sign.h"
 #include "../../../../port/gdx_main_menu_grid.h"
+#include "../../../../port/gdx_net_machine_select.h"
+#include "../../../../port/gdx_net_room_screen.h"
+#include "../../../../port/gdx_net_track_choice.h"
+
+/* D_800CD384 while the G-NET room screen is up (port/gdx_net_room_screen.h). The stock menu uses 0 to 6. */
+#define GDX_MAIN_MENU_ROOM_STATE 7
+/* The room screen stays drawn and takes no input while the menu fades into the lock-in screen. */
+#define GDX_MAIN_MENU_ROOM_HOLD_STATE 8
 #endif
 
 #ifndef EXPANSION_KIT
@@ -116,6 +124,19 @@ void MainMenu_Init(void) {
     D_800CE748 = D_800CE74C = D_800CE750 = 0.1f;
 #endif
     D_800CD384 = 0;
+#ifdef PORT
+    /* Whatever led here, the course select is not a room's any more (port/gdx_net_track_choice.h). */
+    gdx_net_track_choice_close();
+    /* A room is open, a search is running or a room closed with a reason not yet read: the menu comes up on
+       the room screen, as it does after a race of the room. */
+    if (gdx_net_room_screen_wanted()) {
+        extern s32 gSelectedMode;
+
+        gSelectedMode = GDX_MAIN_MENU_GNET_CARD;
+        gdx_net_room_screen_open();
+        D_800CD384 = GDX_MAIN_MENU_ROOM_STATE;
+    }
+#endif
     gNumPlayers = 1;
     if ((gGameFrameCount % 4) == 0) {
         Object_Init(OBJECT_MAIN_MENU_UNLOCK_EVERYTHING, 0, 0, 0);
@@ -260,10 +281,9 @@ static s32 gdx_main_menu_continue_row(void) {
     return sGdxContinueAvailable ? gdx_main_menu_class_limit(MODE_GP_RACE) + 1 : -1;
 }
 
-/* O2-9: a ninth card, G-NET, opens Online > LAN Lobby in the port menu (port/gdx_menu.cpp). The nine cards sit in
-   a 3x3 grid at three quarters of their size (port/gdx_main_menu_grid.h), and the cursor skips the cards that
-   cannot be picked, as the stock redirects below do in the 4x2 grid. */
-extern void gdx_menu_request_lan_lobby(void);
+/* O2-9: a ninth card, G-NET, opens the room screen (port/gdx_net_room_screen.h). The nine cards sit in a 3x3
+   grid at three quarters of their size (port/gdx_main_menu_grid.h), and the cursor skips the cards that cannot
+   be picked, as the stock redirects below do in the 4x2 grid. */
 
 /* The card is a stock sign with new text and colours, by Heebeejeebees, built from the loaded signs
    (port/gdx_gnet_sign.h). The scaled draw loads 16-row blocks, and its last block reads rows 80 to 95, so the
@@ -352,6 +372,152 @@ static Gfx* gdx_main_menu_gnet_draw(Gfx* gfx, s32 counter) {
                          gdx_main_menu_grid_top(GDX_MAIN_MENU_GNET_CARD), (TexturePtr) sGdxGnetSignStorage, 4, 0, 0,
                          GDX_MAIN_MENU_GRID_SCALE, GDX_MAIN_MENU_GRID_SCALE);
 }
+
+/* G-NET lock-in screen (port/gdx_net_machine_select.h): the room has a track and every racer now picks a
+   machine. Machine select is entered straight from the main menu, as the stock Death Race does, with one
+   player and the room's course. The card stays on G-NET, so no mode-specific part of the next two screens
+   (the cups, the drop-in join) switches on. True when the caller must return GAMEMODE_FLX_MACHINE_SELECT. */
+static bool gdx_main_menu_lock_in_opens(void) {
+    if (!gdx_net_machine_select_poll_open()) {
+        return false;
+    }
+    gSelectedMode = GDX_MAIN_MENU_GNET_CARD;
+    /* From the room screen the cards stay out during the fade; from the cards, the stock leaving state. */
+    D_800CD384 = (D_800CD384 == GDX_MAIN_MENU_ROOM_STATE) ? GDX_MAIN_MENU_ROOM_HOLD_STATE : 5;
+    gCourseIndex = gdx_net_machine_select_track();
+    gCurrentTrackName = gTrackNames[gCourseIndex];
+    gNumPlayers = 1;
+    Audio_SetPlayerMode(gNumPlayers - 1);
+    return true;
+}
+
+/* G-NET vote and pick (port/gdx_net_track_choice.h): the room asks this player for a ballot or for the pick,
+   and the stock course select opens for it, with one player. The card stays on G-NET and the menu stays in
+   its room state, so the cards do not show while the screen changes. True when the room screen must not run
+   this tick. The poll answers the same on the next tick when the screen cannot change on this one. */
+static bool gdx_main_menu_track_choice_opens(void) {
+    if (!gdx_net_track_choice_poll_open()) {
+        return false;
+    }
+    gSelectedMode = GDX_MAIN_MENU_GNET_CARD;
+    gNumPlayers = 1;
+    Audio_SetPlayerMode(gNumPlayers - 1);
+    if (gGameModeChangeState == GAMEMODE_UPDATE) {
+        gMenuChangeMode = MENU_CHANGE_TO_COURSE_SELECT;
+    }
+    return true;
+}
+
+/* The cards slide out and the room screen takes their place. */
+static void gdx_main_menu_room_enter(void) {
+    gSelectedMode = GDX_MAIN_MENU_GNET_CARD;
+    gdx_net_room_screen_open();
+    D_800CD384 = GDX_MAIN_MENU_ROOM_STATE;
+}
+
+/* One tick of the room screen: the buttons go to its model, which says when to go back to the cards and
+   which stock menu sound to play. */
+static void gdx_main_menu_room_update(void) {
+    unsigned input = 0;
+
+    if (gInputPressed & BTN_UP) {
+        input |= GDX_NET_ROOM_IN_UP;
+    }
+    if (gInputPressed & BTN_DOWN) {
+        input |= GDX_NET_ROOM_IN_DOWN;
+    }
+    if (gInputPressed & BTN_LEFT) {
+        input |= GDX_NET_ROOM_IN_LEFT;
+    }
+    if (gInputPressed & BTN_RIGHT) {
+        input |= GDX_NET_ROOM_IN_RIGHT;
+    }
+    /* START closes the unlock-everything code (MainMenu_UnlockEverythingUpdate); that press is not a pick. */
+    if ((gInputButtonPressed & BTN_A) ||
+        ((gInputButtonPressed & BTN_START) &&
+         (OBJECT_STATE(Object_Get(OBJECT_MAIN_MENU_UNLOCK_EVERYTHING)) != 7))) {
+        input |= GDX_NET_ROOM_IN_CONFIRM;
+    }
+    if (gInputButtonPressed & BTN_B) {
+        input |= GDX_NET_ROOM_IN_BACK;
+    }
+    if (gdx_net_room_screen_update(input) == GDX_NET_ROOM_SCREEN_LEAVE) {
+        D_800CD384 = 0;
+    }
+    switch (gdx_net_room_screen_take_sound()) {
+        case GDX_NET_ROOM_SOUND_MOVE:
+            Audio_TriggerSystemSE(NA_SE_30);
+            break;
+        case GDX_NET_ROOM_SOUND_CONFIRM:
+            Audio_TriggerSystemSE(NA_SE_62);
+            break;
+        case GDX_NET_ROOM_SOUND_BACK:
+            Audio_TriggerSystemSE(NA_SE_16);
+            break;
+        case GDX_NET_ROOM_SOUND_REFUSE:
+            Audio_TriggerSystemSE(NA_SE_32);
+            break;
+        default:
+            break;
+    }
+}
+
+/* Frames the room screen takes to come up, the time the cards take to slide out. */
+#define GDX_MAIN_MENU_ROOM_FADE 12
+static s32 sGdxRoomFade = 0;
+
+/* Draws what the room screen's model lists, over the menu's background. A text's row is the row its glyphs
+   stand on, which is the "top" Font_DrawString takes. */
+static Gfx* gdx_main_menu_room_draw(Gfx* gfx) {
+    static const u8 kColours[][3] = {
+        { 255, 255, 255 }, /* GDX_NET_ROOM_COLOUR_WHITE */
+        { 170, 170, 170 }, /* GDX_NET_ROOM_COLOUR_DIM */
+        { 250, 250, 0 },   /* GDX_NET_ROOM_COLOUR_GOLD, the yellow of SELECT MODE */
+        { 255, 80, 80 },   /* GDX_NET_ROOM_COLOUR_RED */
+        { 0, 255, 0 },     /* GDX_NET_ROOM_COLOUR_GREEN, the green of a confirmed row */
+    };
+    const GdxNetRoomDrawItem* items;
+    int count = 0;
+    s32 i;
+
+    if ((D_800CD384 != GDX_MAIN_MENU_ROOM_STATE) && (D_800CD384 != GDX_MAIN_MENU_ROOM_HOLD_STATE)) {
+        sGdxRoomFade = 0;
+        return gfx;
+    }
+    if (sGdxRoomFade < GDX_MAIN_MENU_ROOM_FADE) {
+        sGdxRoomFade++;
+    }
+    items = gdx_net_room_screen_draw(&count);
+    for (i = 0; i < count; i++) {
+        const GdxNetRoomDrawItem* item = &items[i];
+        s32 fontSet = (item->font == GDX_NET_ROOM_FONT_TITLE) ? FONT_SET_3 : FONT_SET_4;
+        s32 left = item->x;
+        s32 alpha;
+
+        if (item->kind == GDX_NET_ROOM_DRAW_RECT) {
+            alpha = ((s32) (item->rgba & 0xFF) * sGdxRoomFade) / GDX_MAIN_MENU_ROOM_FADE;
+            gfx = func_8007A440(gfx, item->x, item->y, item->x + item->w, item->y + item->h,
+                                (item->rgba >> 24) & 0xFF, (item->rgba >> 16) & 0xFF, (item->rgba >> 8) & 0xFF,
+                                alpha);
+            continue;
+        }
+        if (item->align == GDX_NET_ROOM_ALIGN_CENTRE) {
+            left -= Font_GetStringWidth((s8*) item->text, fontSet, 0) / 2;
+        } else if (item->align == GDX_NET_ROOM_ALIGN_RIGHT) {
+            left -= Font_GetStringWidth((s8*) item->text, fontSet, 0);
+        }
+        alpha = (255 * sGdxRoomFade) / GDX_MAIN_MENU_ROOM_FADE;
+        if ((item->colour == GDX_NET_ROOM_COLOUR_CURSOR) && (sGdxRoomFade == GDX_MAIN_MENU_ROOM_FADE)) {
+            gfx = func_8007DB28(gfx, 0);
+        } else {
+            const u8* colour = kColours[(item->colour < ARRAY_COUNT(kColours)) ? item->colour : 0];
+
+            gDPSetPrimColor(gfx++, 0, 0, colour[0], colour[1], colour[2], alpha);
+        }
+        gfx = Font_DrawString(gfx, left, item->y, (s8*) item->text, 0, fontSet, 0);
+    }
+    return gfx;
+}
 #endif
 
 s32 MainMenu_Update(void) {
@@ -368,6 +534,16 @@ s32 MainMenu_Update(void) {
     }
     switch (D_800CD384) {
         case 0:
+#ifdef PORT
+            if (gdx_main_menu_lock_in_opens()) {
+                return GAMEMODE_FLX_MACHINE_SELECT;
+            }
+            /* A room opened from the port menu's page while the cards were up. */
+            if (gdx_net_room_screen_wanted()) {
+                gdx_main_menu_room_enter();
+                break;
+            }
+#endif
             previous = gSelectedMode;
 #ifdef PORT
             gSelectedMode = gdx_main_menu_navigate(gSelectedMode);
@@ -503,7 +679,7 @@ s32 MainMenu_Update(void) {
                         return GAMEMODE_CREATE_MACHINE;
 #ifdef PORT
                     case GDX_MAIN_MENU_GNET_CARD:
-                        gdx_menu_request_lan_lobby();
+                        gdx_main_menu_room_enter();
                         break;
 #endif
                     default:
@@ -696,6 +872,17 @@ s32 MainMenu_Update(void) {
                 gMenuChangeMode = MENU_CHANGE_TO_COURSE_SELECT;
             }
             break;
+#ifdef PORT
+        case GDX_MAIN_MENU_ROOM_STATE:
+            if (gdx_main_menu_track_choice_opens()) {
+                break;
+            }
+            if (gdx_main_menu_lock_in_opens()) {
+                return GAMEMODE_FLX_MACHINE_SELECT;
+            }
+            gdx_main_menu_room_update();
+            break;
+#endif
         default:
             break;
     }
@@ -703,7 +890,12 @@ s32 MainMenu_Update(void) {
 }
 
 Gfx* MainMenu_Draw(Gfx* gfx) {
+#ifdef PORT
+    gfx = Object_UpdateAndDrawAll(gfx);
+    return gdx_main_menu_room_draw(gfx);
+#else
     return Object_UpdateAndDrawAll(gfx);
+#endif
 }
 
 extern s8 D_800CD3C4;
@@ -744,6 +936,12 @@ void MainMenu_SignInit(Object* signObj) {
     if (gGameModeChangeState == GAMEMODE_CHANGE_INSTANT(GAMEMODE_CHANGE_INIT)) {
         OBJECT_COUNTER(signObj) = 12;
     }
+#ifdef PORT
+    /* The menu comes up on the room screen: the cards start off screen. */
+    if (D_800CD384 == GDX_MAIN_MENU_ROOM_STATE) {
+        OBJECT_COUNTER(signObj) = 12;
+    }
+#endif
 }
 
 void MainMenu_HeaderInit(Object* headerObj) {
@@ -752,6 +950,11 @@ void MainMenu_HeaderInit(Object* headerObj) {
     if (gGameModeChangeState == GAMEMODE_CHANGE_INSTANT(GAMEMODE_CHANGE_INIT)) {
         OBJECT_COUNTER(headerObj) = 12;
     }
+#ifdef PORT
+    if (D_800CD384 == GDX_MAIN_MENU_ROOM_STATE) {
+        OBJECT_COUNTER(headerObj) = 12;
+    }
+#endif
 }
 
 void MainMenu_NumPlayersInit(void) {
@@ -860,6 +1063,10 @@ Gfx* MainMenu_SignDraw(Gfx* gfx, Object* signObj) {
     switch (D_800CD384) {
         case 3:
         case 4:
+#ifdef PORT
+        case GDX_MAIN_MENU_ROOM_STATE:
+        case GDX_MAIN_MENU_ROOM_HOLD_STATE:
+#endif
             if (++OBJECT_COUNTER(signObj) > 12) {
                 OBJECT_COUNTER(signObj) = 12;
             }
@@ -1071,6 +1278,10 @@ Gfx* MainMenu_HeaderDraw(Gfx* gfx, Object* headerObj) {
     switch (D_800CD384) {
         case 3:
         case 4:
+#ifdef PORT
+        case GDX_MAIN_MENU_ROOM_STATE:
+        case GDX_MAIN_MENU_ROOM_HOLD_STATE:
+#endif
             if (++OBJECT_COUNTER(headerObj) > 12) {
                 OBJECT_COUNTER(headerObj) = 12;
             }

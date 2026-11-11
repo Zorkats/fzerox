@@ -373,6 +373,11 @@ typedef struct SegmentChunk {
     /* 0x5A */ s16 bottomTextureCorrection;
     /* 0x5C */ s16 leftTextureCorrection;
     /* 0x5E */ s16 rightTextureCorrection;
+#ifdef PORT
+    /* The road theme of the chunk's segment (port/gdx_course_settings.h): 0 for the road of the course's
+       venue, or a venue + 1. After the stock fields, so their offsets hold. */
+    u8 gdxRoadTheme;
+#endif
 } SegmentChunk; // size = 0x60
 
 typedef struct Ghost {

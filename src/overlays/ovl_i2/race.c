@@ -123,10 +123,27 @@ void Race_Init(void) {
     Hud_InitRacePortraits();
     RI_CK(P_done)
 #undef RI_CK
+#ifdef PORT
+    /* A G-NET room's race: the room hears that this copy has the track (port/gdx_net_race_bridge.c). */
+    { extern void gdx_net_race_loaded(void); gdx_net_race_loaded(); }
+#endif
 }
 
 s32 Race_Update(void) {
 #ifdef PORT
+    /* A G-NET room's race (port/gdx_net_race_bridge.c). The world waits on its first frame until the
+       room's start time, and the race ends for this copy when the room says so. 0 in every other race. */
+    {
+        extern s32 gdx_net_race_frame(void);
+        s32 gdxNetFrame = gdx_net_race_frame();
+
+        if (gdxNetFrame == 2) {
+            return GAMEMODE_FLX_MAIN_MENU;
+        }
+        if (gdxNetFrame == 1) {
+            return gGameMode;
+        }
+    }
     if (gSegmentChunkCount < 3) {
         return GAMEMODE_FLX_COURSE_SELECT;
     }

@@ -129,6 +129,15 @@ extern s32 gCourseIndex;
 extern s8 gSettingEverythingUnlocked;
 extern s8 gUnlockableLevel;
 
+#ifdef PORT
+#include "../../../../port/gdx_net_machine_select.h"
+#include "../../../../port/gdx_net_track_choice.h"
+
+/* G-NET vote and pick (port/gdx_net_track_choice.h). A room races the 24 stock tracks whatever this save has
+   unlocked, so every cup is open while the course select is the room's. This file only reads the flag. */
+#define gSettingEverythingUnlocked (gSettingEverythingUnlocked || gdx_net_track_choice_active())
+#endif
+
 #ifdef EXPANSION_KIT
 void func_i5_80077D60(void) {
     s32 var_v0;
@@ -375,6 +384,13 @@ void CourseSelect_Init(void) {
     s32 var_v1;
 
     D_800CCFE8 = 3;
+#ifdef PORT
+    /* A room's screen that left for the machine select was held as the room's while it faded. It is over
+       now, and this screen is the room's only when the main menu just opened it for the room. */
+    if (gdx_net_track_choice_update() == GDX_NET_TRACK_CHOICE_HOLD) {
+        gdx_net_track_choice_close();
+    }
+#endif
 #ifdef EXPANSION_KIT
     sCourseSelectState = COURSE_SELECT_CUP_SELECT;
 #endif
@@ -418,6 +434,12 @@ void CourseSelect_Init(void) {
     } else {
         k = gLastRecordsCourseIndex;
     }
+#ifdef PORT
+    /* A room has no Edit Cup: its course select opens on the first cup in place of one. */
+    if (gdx_net_track_choice_active() && (k >= COURSE_EDIT_1) && (k < COURSE_X_1)) {
+        k = 0;
+    }
+#endif
     if (k >= COURSE_X_1) {
         gCupSelectOption = 4;
         sCourseSelectTrackNo = 0;
@@ -487,9 +509,15 @@ void CourseSelect_Init(void) {
     Object_Init(OBJECT_COURSE_SELECT_OK, 0, 0, 10);
     Object_Init(OBJECT_COURSE_SELECT_MODEL, 0, 0, 8);
 #ifdef EXPANSION_KIT
-    Object_Init(OBJECT_COURSE_SELECT_CUP_7, 128, 0, 6);
-    Object_Init(OBJECT_COURSE_SELECT_CUP_5, 128, 0, 6);
-    Object_Init(OBJECT_COURSE_SELECT_CUP_6, 128, 0, 6);
+#ifdef PORT
+    /* A room races the stock tracks, so its cup screen has no second row. */
+    if (!gdx_net_track_choice_active())
+#endif
+    {
+        Object_Init(OBJECT_COURSE_SELECT_CUP_7, 128, 0, 6);
+        Object_Init(OBJECT_COURSE_SELECT_CUP_5, 128, 0, 6);
+        Object_Init(OBJECT_COURSE_SELECT_CUP_6, 128, 0, 6);
+    }
 #endif
     if ((gSettingEverythingUnlocked || (gUnlockableLevel >= 2)) && (gGameMode != GAMEMODE_FLX_RECORDS_COURSE_SELECT) &&
         (gSelectedMode != MODE_TIME_ATTACK)) {
@@ -589,6 +617,72 @@ extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 #include "../../../../port/gdx_course_meta_view.h"
 #endif
 
+#ifdef PORT
+/* The room has its track: the cup screen, or a track of any cup, turns to it. Safe to run every tick. */
+static void CourseSelect_GdxShowTrack(s32 track) {
+    s32 cup = track / 6;
+    bool placeModel = (sCourseSelectState == COURSE_SELECT_CUP_SELECT);
+
+    if (sCourseSelectCup != cup) {
+        gCupSelectOption = cup;
+        sCourseSelectCup = cup;
+        gCupType = cup;
+        CourseModel_Init(cup);
+        placeModel = true;
+    }
+    if (placeModel) {
+        /* As the stock screen does when a cup is confirmed: the row slides in from the right. */
+        OBJECT_LEFT(Object_Get(OBJECT_COURSE_SELECT_MODEL)) = 400 - ((track % 6) * 0x500);
+    }
+    sCourseSelectTrackNo = track % 6;
+    gCourseIndex = track;
+    sCourseSelectState = COURSE_SELECT_CONTINUE;
+    /* The drawn track turns for every racer. The stock screen stops the camera once a track is confirmed, so
+       without this it would turn only for those who voted from the cups. */
+    D_i5_801190D0 = 1;
+}
+
+/* One tick of the room's course select (port/gdx_net_track_choice.h), after the buttons are read. The room
+   says what the screen is. While the player still chooses, the stock screen runs as it is. Once the choice is
+   sent the buttons do nothing. When the lottery has drawn a track the screen turns to it. When nothing is
+   left to choose the screen goes on to machine select if the room is locking machines in, and back to the
+   room screen otherwise. True when the caller must return GAMEMODE_FLX_MACHINE_SELECT. */
+static bool CourseSelect_GdxTrackChoice(void) {
+    switch (sCourseSelectState) {
+        case COURSE_SELECT_START_EXIT:
+        case COURSE_SELECT_EXIT:
+            /* On the way out. A room's course select is not called back with A. */
+            break;
+        default:
+            switch (gdx_net_track_choice_update()) {
+                case GDX_NET_TRACK_CHOICE_CHOOSE:
+                    return false;
+                case GDX_NET_TRACK_CHOICE_SHOW:
+                    CourseSelect_GdxShowTrack(gdx_net_track_choice_shown_track());
+                    break;
+                case GDX_NET_TRACK_CHOICE_LEAVE:
+                    /* The lock-in poll is asked only here, where its answer is acted on: a 1 commits it. */
+                    if (gdx_net_machine_select_poll_open()) {
+                        /* Still the room's while it fades out, so the cups and the lines do not change. */
+                        gdx_net_track_choice_hold();
+                        gCourseIndex = gdx_net_machine_select_track();
+                        gCurrentTrackName = gTrackNames[gCourseIndex];
+                        sCourseSelectState = COURSE_SELECT_CONTINUE;
+                        return true;
+                    }
+                    sCourseSelectState = COURSE_SELECT_START_EXIT;
+                    break;
+                default:
+                    break;
+            }
+            break;
+    }
+    gInputPressed = 0;
+    gInputButtonPressed = 0;
+    return false;
+}
+#endif
+
 s32 CourseSelect_Update(void) {
     s32 originalCupSelectOption;
     bool sp110;
@@ -620,6 +714,11 @@ s32 CourseSelect_Update(void) {
         CourseSelect_UpdateUnlockedGhosts();
     }
     Controller_SetGlobalInputs(&gSharedController);
+#ifdef PORT
+    if (gdx_net_track_choice_active() && CourseSelect_GdxTrackChoice()) {
+        return GAMEMODE_FLX_MACHINE_SELECT;
+    }
+#endif
     switch (sCourseSelectState) {
         case COURSE_SELECT_CUP_SELECT:
             D_i5_801190D0 = 1;
@@ -750,6 +849,10 @@ s32 CourseSelect_Update(void) {
                 if (gGameMode == GAMEMODE_FLX_COURSE_SELECT) {
                     gLastCourseSelectCourseIndex = gCourseIndex;
                     sCourseSelectState = COURSE_SELECT_START_EXIT;
+#ifdef PORT
+                    /* In a room: back to the room screen, which can open this screen again. */
+                    gdx_net_track_choice_back();
+#endif
                 } else {
                     gLastRecordsCourseIndex = gCourseIndex;
                     sCourseSelectState = COURSE_SELECT_EXIT_RECORDS;
@@ -867,6 +970,13 @@ s32 CourseSelect_Update(void) {
                 sCourseSelectState = COURSE_SELECT_CUP_SELECT;
                 Audio_TriggerSystemSE(NA_SE_16);
             } else if (gInputButtonPressed & (BTN_A | BTN_START)) {
+#ifdef PORT
+                /* A room takes the tracks of its pool only. */
+                if (gdx_net_track_choice_active() && !gdx_net_track_choice_allowed(gCourseIndex)) {
+                    Audio_TriggerSystemSE(NA_SE_32);
+                    break;
+                }
+#endif
 #ifdef EXPANSION_KIT
                 if ((gSelectedMode == MODE_TIME_ATTACK) && (gCupType == EDIT_CUP) &&
                     (gEditCupTrackNames[gCourseIndex - COURSE_EDIT_1][0] == '\0')) {
@@ -890,6 +1000,21 @@ s32 CourseSelect_Update(void) {
                 }
                 Audio_TriggerSystemSE(NA_SE_16);
             } else if (gInputButtonPressed & (BTN_A | BTN_START)) {
+#ifdef PORT
+                if (gdx_net_track_choice_active()) {
+                    /* In a room the second OK sends the ballot or the pick. The player stays on this screen
+                       until the room moves on; the X Cup's place is the ballot that lets the room draw. */
+                    if (gdx_net_track_choice_confirm((gCupSelectOption == GDX_NET_TRACK_CHOICE_RANDOM_CUP)
+                                                         ? GDX_NET_ROOM_TRACK_RANDOM
+                                                         : gCourseIndex)) {
+                        Audio_TriggerSystemSE(NA_SE_62);
+                        sCourseSelectState = COURSE_SELECT_CONTINUE;
+                    } else {
+                        Audio_TriggerSystemSE(NA_SE_32);
+                    }
+                    break;
+                }
+#endif
                 Audio_TriggerSystemSE(NA_SE_62);
                 sCourseSelectState = COURSE_SELECT_CONTINUE;
                 if (gGameMode == GAMEMODE_FLX_COURSE_SELECT) {
@@ -1369,6 +1494,57 @@ Gfx* CourseSelect_ArrowsDraw(Gfx* gfx, Object* arrowsObj) {
 #endif
 }
 
+#ifdef PORT
+/* The room's lines over the stock course select (port/gdx_net_track_choice.h): the timer, what the player is
+   asked to do, and the votes. The model lays them out; this draws its list. A text's row is the row its
+   glyphs stand on, which is the "top" Font_DrawString takes. */
+static Gfx* CourseSelect_GdxRoomLinesDraw(Gfx* gfx) {
+    static const u8 kColours[][3] = {
+        { 255, 255, 255 }, /* GDX_NET_ROOM_COLOUR_WHITE */
+        { 170, 170, 170 }, /* GDX_NET_ROOM_COLOUR_DIM */
+        { 250, 250, 0 },   /* GDX_NET_ROOM_COLOUR_GOLD, the yellow of SELECT COURSE */
+        { 255, 80, 80 },   /* GDX_NET_ROOM_COLOUR_RED */
+        { 0, 255, 0 },     /* GDX_NET_ROOM_COLOUR_GREEN */
+    };
+    const GdxNetRoomDrawItem* items;
+    int count = 0;
+    s32 trackNo = -1;
+    s32 i;
+
+    switch (sCourseSelectState) {
+        case COURSE_SELECT_START_EXIT:
+        case COURSE_SELECT_EXIT:
+            return gfx;
+        case COURSE_SELECT_CHOOSE_COURSE:
+        case COURSE_SELECT_AWAIT_OK:
+        case COURSE_SELECT_CONTINUE:
+            trackNo = sCourseSelectTrackNo;
+            break;
+        default:
+            break;
+    }
+    items = gdx_net_track_choice_draw(gCupSelectOption, trackNo, &count);
+    for (i = 0; i < count; i++) {
+        const GdxNetRoomDrawItem* item = &items[i];
+        s32 fontSet = (item->font == GDX_NET_ROOM_FONT_TITLE) ? FONT_SET_3 : FONT_SET_4;
+        s32 left = item->x;
+        const u8* colour = kColours[(item->colour < ARRAY_COUNT(kColours)) ? item->colour : 0];
+
+        if (item->kind != GDX_NET_ROOM_DRAW_TEXT) {
+            continue;
+        }
+        if (item->align == GDX_NET_ROOM_ALIGN_CENTRE) {
+            left -= Font_GetStringWidth((s8*) item->text, fontSet, 0) / 2;
+        } else if (item->align == GDX_NET_ROOM_ALIGN_RIGHT) {
+            left -= Font_GetStringWidth((s8*) item->text, fontSet, 0);
+        }
+        gDPSetPrimColor(gfx++, 0, 0, colour[0], colour[1], colour[2], 255);
+        gfx = Font_DrawString(gfx, left, item->y, (s8*) item->text, 0, fontSet, 0);
+    }
+    return gfx;
+}
+#endif
+
 Gfx* CourseSelect_NameDraw(Gfx* gfx) {
     char cupTrackNoStr[4];
     s32 cupTrackNoWidth;
@@ -1414,6 +1590,17 @@ Gfx* CourseSelect_NameDraw(Gfx* gfx) {
             cupTrackNoStr[2] = ' ';
             cupTrackNoStr[3] = '\0';
             cupTrackNoWidth = Font_GetStringWidth(cupTrackNoStr, FONT_SET_3, 0);
+#ifdef PORT
+            if (gdx_net_track_choice_active() && (sCourseSelectCup == NUM_COMPETITIVE_CUPS)) {
+                /* In a room the X Cup's place is the ballot that lets the room draw, and it is named so. */
+                s8* title = (s8*) gdx_net_track_choice_random_title();
+
+                gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+                gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(title, FONT_SET_3, 0) / 2), 200, title, 0,
+                                      FONT_SET_3, 0);
+                break;
+            }
+#endif
             if (sCourseSelectCup == NUM_COMPETITIVE_CUPS) {
                 trackNameWidth = Font_GetStringWidth(gCurrentTrackName, FONT_SET_3, 0);
                 gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
@@ -1477,6 +1664,11 @@ Gfx* CourseSelect_NameDraw(Gfx* gfx) {
             }
             break;
     }
+#ifdef PORT
+    if (gdx_net_track_choice_active()) {
+        gfx = CourseSelect_GdxRoomLinesDraw(gfx);
+    }
+#endif
     return gfx;
 }
 
@@ -1796,6 +1988,13 @@ void CourseSelect_CupUpdate(Object* cupObj) {
 }
 
 void CourseSelect_OkUpdate(Object* okObj) {
+#ifdef PORT
+    /* In a room the second OK sends the choice and the player stays on the screen, so the sign leaves. */
+    if (gdx_net_track_choice_active() && (sCourseSelectState == COURSE_SELECT_CONTINUE)) {
+        Object_LerpPosXToClampedTargetMaxStep(okObj, 50, 192);
+        return;
+    }
+#endif
     switch (sCourseSelectState) {
         case COURSE_SELECT_AWAIT_OK:
         case COURSE_SELECT_CONTINUE:

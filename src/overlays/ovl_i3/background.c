@@ -15,6 +15,9 @@ typedef enum BackgroundSpriteSelection {
     BACKGROUND_SPRITE_SELECTION_COURSE,
     BACKGROUND_SPRITE_SELECTION_RANDOM,
     BACKGROUND_SPRITE_SELECTION_ENDING,
+#ifdef PORT
+    BACKGROUND_SPRITE_SELECTION_CUSTOM, // the track's own list (port/gdx_course_settings_view.h)
+#endif
 } BackgroundSpriteSelection;
 
 static BackgroundSpriteSelection Background_SelectSpriteSelection(s32 courseIndex, s32 venueType,
@@ -434,6 +437,28 @@ BackgroundSpriteInitData* sBackgroundSpriteCourseInitData[] = {
     sBackgroundSpriteInitPortTown2,     // COURSE_PORT_TOWN_2
     sBackgroundSpriteInitBigHand,       // COURSE_BIG_HAND
 };
+
+#ifdef PORT
+// A cup course's horizon list as images and compass angles (0 north, 90 east), for the course editor's copy
+// (port/gdx_course_branch_editor.c). The lists here turn the other way: an image at angle a stands at
+// (-sin a, -cos a), and the compass angle c stands at (sin c, -cos c), so c is 360 - a. Returns the count, or -1 for
+// a course without a list.
+s32 Background_GdxStockList(s32 courseIndex, s32* images, s32* angles, s32 max) {
+    const BackgroundSpriteInitData* data;
+    s32 count = 0;
+
+    if ((courseIndex < 0) || (courseIndex >= (s32) ARRAY_COUNT(sBackgroundSpriteCourseInitData))) {
+        return -1;
+    }
+    for (data = sBackgroundSpriteCourseInitData[courseIndex]; (data->spriteId != BG_SPRITE_END) && (count < max);
+         data++) {
+        images[count] = data->spriteId;
+        angles[count] = (360 - ((s32) data->angle % 360)) % 360;
+        count++;
+    }
+    return count;
+}
+#endif
 
 s16 sDaytimeBackgroundSprites[] = {
     BG_SPRITE_CITY_SKYLINE_1,
@@ -1262,6 +1287,9 @@ extern s32 gCupType;
 // port/gdx_xcup_random.c: an X Cup slot racing a real course uses that course's background sprites.
 extern int gdx_xcup_real_course(int courseIndex);
 #define BACKGROUND_COURSE() gdx_xcup_real_course(gCourseIndex)
+// port/gdx_course_settings_view.c: the horizon images the track being raced lists, at compass angles.
+extern int gdx_settings_view_background_count(void);
+extern int gdx_settings_view_background(int slot, int* image, int* angle);
 #else
 #define BACKGROUND_COURSE() gCourseIndex
 #endif
@@ -1282,6 +1310,9 @@ void Background_InitBackgroundSprites(void) {
     void** texturePalettePair;
     BackgroundSpriteInitData spriteInitDataBuffer[8];
     bool inCourseEditTestRun;
+#ifdef PORT
+    BackgroundSpriteSelection selection;
+#endif
 
     sBackgroundSpriteCount = 0;
     if (gNumPlayers != 1) {
@@ -1294,8 +1325,33 @@ void Background_InitBackgroundSprites(void) {
     inCourseEditTestRun = false;
 #endif
 
+#ifdef PORT
+    selection = Background_SelectSpriteSelection(BACKGROUND_COURSE(), gVenueType, inCourseEditTestRun,
+                                                 gPlayer1OverallPosition);
+    // A track that lists its own horizon images shows those, in a race and in a test run, whatever its venue.
+    if ((gdx_settings_view_background_count() > 0) && (gCourseIndex != COURSE_ENDING)) {
+        selection = BACKGROUND_SPRITE_SELECTION_CUSTOM;
+    }
+    switch (selection) {
+        case BACKGROUND_SPRITE_SELECTION_CUSTOM:
+            j = gdx_settings_view_background_count();
+            for (i = 0; (i < j) && (i < (s32) ARRAY_COUNT(sBackgroundSprites)); i++) {
+                int image = BG_SPRITE_END;
+                int angle = 0;
+
+                gdx_settings_view_background(i, &image, &angle);
+                spriteInitDataBuffer[i].spriteId = image;
+                // The list holds compass angles, which turn the other way (see Background_GdxStockList).
+                spriteInitDataBuffer[i].angle = (f32) ((360 - angle) % 360);
+            }
+            spriteInitDataBuffer[i].spriteId = BG_SPRITE_END;
+            spriteInitDataBuffer[i].angle = 0.0f;
+            bgSpriteInitData = spriteInitDataBuffer;
+            break;
+#else
     switch (Background_SelectSpriteSelection(BACKGROUND_COURSE(), gVenueType, inCourseEditTestRun,
                                              gPlayer1OverallPosition)) {
+#endif
         case BACKGROUND_SPRITE_SELECTION_COURSE:
             bgSpriteInitData = sBackgroundSpriteCourseInitData[BACKGROUND_COURSE()];
             break;
@@ -1333,7 +1389,13 @@ void Background_InitBackgroundSprites(void) {
     backgroundSprite = sBackgroundSprites;
     while (bgSpriteInitData->spriteId != BG_SPRITE_END) {
         backgroundSprite->spriteId = bgSpriteInitData->spriteId;
+#ifdef PORT
+        // A track's own list shows the image its author picked, whatever the cup.
+        if ((selection != BACKGROUND_SPRITE_SELECTION_CUSTOM) &&
+            (backgroundSprite->spriteId == BG_SPRITE_JACK_CUP_BUILDING)) {
+#else
         if (backgroundSprite->spriteId == BG_SPRITE_JACK_CUP_BUILDING) {
+#endif
             switch (gCupType) {
                 case QUEEN_CUP:
                     backgroundSprite->spriteId = BG_SPRITE_QUEEN_CUP_BUILDING;

@@ -18,6 +18,9 @@ typedef enum CreateOption {
     /* 3 */ CREATE_OPTION_PARTS,
     /* 4 */ CREATE_OPTION_BACKGROUND,
     /* 5 */ CREATE_OPTION_BGM,
+#ifdef PORT
+    /* 6 */ CREATE_OPTION_HORIZON, // the track's own horizon images (port/gdx_course_branch_edit.h)
+#endif
 } CreateOption;
 
 typedef enum PointOption {
@@ -36,6 +39,9 @@ typedef enum MoveOption {
     /* 4 */ MOVE_OPTION_CENTER,
     /* 5 */ MOVE_OPTION_CLEAR,
     /* 6 */ MOVE_OPTION_STRAIGHT,
+#ifdef PORT
+    /* 7 */ MOVE_OPTION_TRACK, // the whole track at once (course_edit/188850.c)
+#endif
 } MoveOption;
 
 typedef enum TrackDesignStyle {

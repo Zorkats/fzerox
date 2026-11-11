@@ -241,9 +241,111 @@ s32 Course_GdxRoadTextureCoords(s32 trackInfo, s16* coords) {
     return 1;
 }
 
+/* Road themes (port/gdx_course_settings.h): a Course Edit segment can wear another venue's road. A theme is 0
+ * for the road of the course's venue, or a venue + 1. The chunk build stores each chunk's theme and scales
+ * its texture with that venue's values, and the draw loads that venue's texture. */
+#define GDX_ROAD_THEME_COUNT (VENUE_ENDING + 1)
+#define GDX_ROAD_THEME_SCALES 7
+
+extern s32 gdx_course_branch_segment_road_theme(const CourseSegment* segment);
+extern void* gdx_venue_road_bank(s32 venue);
+void func_8009CED0(s32 venue);
+
+/* The theme of the segment the chunk build is on. */
+static s32 sGdxBuildTheme;
+
+static s32 Course_GdxSegmentTheme(const CourseSegment* segment) {
+    s32 theme = gdx_course_branch_segment_road_theme(segment);
+
+    return ((theme > 0) && (theme <= GDX_ROAD_THEME_COUNT)) ? theme : 0;
+}
+
+/* The rows func_8009CED0 gives a texture scale by venue. */
+static unk_800CF528* Course_GdxVenueScaledRow(s32 index) {
+    switch (index) {
+        case 0:
+            return &D_800CF528[ROAD_2];
+        case 1:
+            return &D_800CF528[ROAD_3];
+        case 2:
+            return &D_800CF528[ROAD_4];
+        case 3:
+            return &D_800CF528[ROAD_5];
+        case 4:
+            return &D_800CF528[ROAD_6];
+        case 5:
+            return &D_800CF868[BORDERLESS_ROAD_0];
+        default:
+            return &D_800CF608[WALLED_ROAD_0];
+    }
+}
+
+/* The row's texture scale under a theme. func_8009CED0 is the one place that holds each venue's scales, so
+ * the table is read out of it once and the live values are put back. */
+static f32 Course_GdxRowScale(const unk_800CF528* row, s32 theme) {
+    static f32 sScales[GDX_ROAD_THEME_COUNT][GDX_ROAD_THEME_SCALES];
+    static s32 sReady;
+    s32 venue;
+    s32 i;
+
+    if ((theme <= 0) || (theme > GDX_ROAD_THEME_COUNT)) {
+        return row->textureScale;
+    }
+    if (!sReady) {
+        f32 live[GDX_ROAD_THEME_SCALES];
+
+        for (i = 0; i < GDX_ROAD_THEME_SCALES; i++) {
+            live[i] = Course_GdxVenueScaledRow(i)->textureScale;
+        }
+        for (venue = 0; venue < GDX_ROAD_THEME_COUNT; venue++) {
+            func_8009CED0(venue);
+            for (i = 0; i < GDX_ROAD_THEME_SCALES; i++) {
+                sScales[venue][i] = Course_GdxVenueScaledRow(i)->textureScale;
+            }
+        }
+        for (i = 0; i < GDX_ROAD_THEME_SCALES; i++) {
+            Course_GdxVenueScaledRow(i)->textureScale = live[i];
+        }
+        sReady = 1;
+    }
+    for (i = 0; i < GDX_ROAD_THEME_SCALES; i++) {
+        if (row == Course_GdxVenueScaledRow(i)) {
+            return sScales[theme - 1][i];
+        }
+    }
+    return row->textureScale;
+}
+
+/* The row's texture under a theme: the same bank of the theme's venue when the row's texture is one of the
+ * venue banks, else the row's own. gdx_venue_road_bank returns NULL for the course's own venue, whose road
+ * keeps the stock path. */
+static void* Course_GdxRowTexture(const unk_800CF528* row, s32 theme) {
+    static void* const sBanks[] = {
+        D_A000000, D_A001000, D_A002000, D_A003000, D_A004000, D_A005000, D_A006000, D_A007000, D_A008000,
+    };
+    u8* bank;
+    s32 i;
+
+    if ((theme <= 0) || (theme > GDX_ROAD_THEME_COUNT)) {
+        return row->texture;
+    }
+    bank = gdx_venue_road_bank(theme - 1);
+    if (bank == NULL) {
+        return row->texture;
+    }
+    for (i = 0; i < ARRAY_COUNT(sBanks); i++) {
+        if (row->texture == sBanks[i]) {
+            return bank + (i * 0x1000);
+        }
+    }
+    return row->texture;
+}
+
 #define TRACK_TYPE_ROW(shape, type) Course_GetTrackTypeRow(shape, type)
+#define COURSE_ROW_TEXTURE(row, chunk) Course_GdxRowTexture(row, (chunk)->gdxRoadTheme)
 #else
 #define TRACK_TYPE_ROW(shape, type) (&D_800CF8C8[shape][type])
+#define COURSE_ROW_TEXTURE(row, chunk) ((row)->texture)
 #endif
 
 f32 gTrackJoinUpperLength[] = {
@@ -3937,9 +4039,14 @@ void Course_DrawBackwardChunkGroup(SegmentChunkGroup* chunkGroup) {
             }
 
             trackType = sWorkingSegmentChunk->trackSegmentInfo & (TRACK_SHAPE_MASK | TRACK_TYPE_MASK);
+#ifdef PORT
+            /* The same road type under another theme is another texture. */
+            trackType |= sWorkingSegmentChunk->gdxRoadTheme << 9;
+#endif
             if (trackType != sLastTrackShapeType) {
                 gDPLoadSync(sCourseDisp++);
-                gDPSetTextureImage(sCourseDisp++, G_IM_FMT_RGBA, G_IM_SIZ_16b, temp_a1->width, temp_a1->texture);
+                gDPSetTextureImage(sCourseDisp++, G_IM_FMT_RGBA, G_IM_SIZ_16b, temp_a1->width,
+                                   COURSE_ROW_TEXTURE(temp_a1, sWorkingSegmentChunk));
                 gDPLoadBlock(sCourseDisp++, temp_a1->tile, 0, 0, 2047, CALC_DXT(temp_a1->width, G_IM_SIZ_16b));
 
                 sLastTrackShapeType = trackType;
@@ -4029,9 +4136,14 @@ void Course_DrawForwardChunkGroup(SegmentChunkGroup* chunkGroup) {
             }
 
             trackType = sWorkingSegmentChunk->trackSegmentInfo & (TRACK_SHAPE_MASK | TRACK_TYPE_MASK);
+#ifdef PORT
+            /* The same road type under another theme is another texture. */
+            trackType |= sWorkingSegmentChunk->gdxRoadTheme << 9;
+#endif
             if (trackType != sLastTrackShapeType) {
                 gDPLoadSync(sCourseDisp++);
-                gDPSetTextureImage(sCourseDisp++, G_IM_FMT_RGBA, G_IM_SIZ_16b, temp_a2->width, temp_a2->texture);
+                gDPSetTextureImage(sCourseDisp++, G_IM_FMT_RGBA, G_IM_SIZ_16b, temp_a2->width,
+                                   COURSE_ROW_TEXTURE(temp_a2, sWorkingSegmentChunk));
                 gDPLoadBlock(sCourseDisp++, temp_a2->tile, 0, 0, 2047, CALC_DXT(temp_a2->width, G_IM_SIZ_16b));
                 sLastTrackShapeType = trackType;
                 D_800F8930[0] = temp_a2->unk_16;
@@ -4140,9 +4252,14 @@ Gfx* func_800A95B4(Gfx* gfx) {
             }
 
             trackType = sWorkingSegmentChunk->trackSegmentInfo & (TRACK_SHAPE_MASK | TRACK_TYPE_MASK);
+#ifdef PORT
+            /* The same road type under another theme is another texture. */
+            trackType |= sWorkingSegmentChunk->gdxRoadTheme << 9;
+#endif
             if (trackType != sLastTrackShapeType) {
                 gDPLoadSync(sCourseDisp++);
-                gDPSetTextureImage(sCourseDisp++, G_IM_FMT_RGBA, G_IM_SIZ_16b, temp_a1->width, temp_a1->texture);
+                gDPSetTextureImage(sCourseDisp++, G_IM_FMT_RGBA, G_IM_SIZ_16b, temp_a1->width,
+                                   COURSE_ROW_TEXTURE(temp_a1, sWorkingSegmentChunk));
                 gDPLoadBlock(sCourseDisp++, temp_a1->tile, 0, 0, 2047, CALC_DXT(temp_a1->width, G_IM_SIZ_16b));
 
                 sLastTrackShapeType = trackType;

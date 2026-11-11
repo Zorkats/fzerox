@@ -656,6 +656,19 @@ extern u16 gInputPressed;
 extern u16 gInputButtonPressed;
 extern s8 D_800CD3AC[];
 
+#ifdef PORT
+/* The G-NET lock-in screen (port/gdx_net_machine_select.h), declared inline because this overlay compiles
+   with only the decomp include paths. While it is active, machine select and machine settings belong to the
+   room: nothing leads back out of them, the second OK on the settings screen sends the machine to the room
+   in place of starting a race, and the room ends them when its lock-in state is over. */
+extern int gdx_net_machine_select_active(void);
+extern int gdx_net_machine_select_should_leave(void);
+extern int gdx_net_machine_select_waiting(void);
+extern void gdx_net_machine_select_confirm(int character, int skin, float engine);
+extern const char* gdx_net_machine_select_status_text(void);
+extern const char* gdx_net_machine_select_wait_text(void);
+#endif
+
 s32 MachineSelect_Update(void) {
     s32 i;
     s32 j;
@@ -666,11 +679,33 @@ s32 MachineSelect_Update(void) {
 
     Camera_Update();
 
+#ifdef PORT
+    if (gdx_net_machine_select_active()) {
+        s32 gdxLeave = gdx_net_machine_select_should_leave();
+
+        if (gdxLeave == 2) {
+            /* The room's race is next. A racer still on this screen races the machine the room has for
+               them, so the settings screen is passed over. */
+            func_8007E0CC();
+            gMachineSelectState = MACHINE_SELECT_CONTINUE;
+            return GAMEMODE_PRACTICE;
+        }
+        if (gdxLeave != 0) {
+            gMachineSelectState = MACHINE_SELECT_EXIT;
+            return GAMEMODE_FLX_MAIN_MENU;
+        }
+    }
+#endif
+
     for (i = 3; i >= 0; i--) {
 
         Controller_SetGlobalInputs(&gControllers[gPlayerControlPorts[i]]);
         if (i >= gNumPlayers) {
 #ifdef PORT
+            /* A spare controller can neither join the lock-in screen nor back out of it. */
+            if (gdx_net_machine_select_active()) {
+                continue;
+            }
             if ((gInputButtonPressed & BTN_START) && gdx_drop_in_join(i)) {
                 Audio_TriggerSystemSE(NA_SE_33);
                 return gGameMode;
@@ -693,6 +728,13 @@ s32 MachineSelect_Update(void) {
             }
             continue;
         }
+
+#ifdef PORT
+        /* Locked in: the machine is with the room and cannot change. */
+        if (gdx_net_machine_select_waiting()) {
+            continue;
+        }
+#endif
 
         // Setup Mini Cars
         if (gInputButtonPressed & (BTN_L | BTN_R | BTN_CLEFT | BTN_CDOWN)) {
@@ -744,6 +786,12 @@ s32 MachineSelect_Update(void) {
                 }
 
                 if (gInputButtonPressed & BTN_B) {
+#ifdef PORT
+                    /* B still undoes a pick on the lock-in screen. With nothing picked it does nothing. */
+                    if (gdx_net_machine_select_active() && (gPlayerSelectionLock[i] == SELECTION_FREE)) {
+                        break;
+                    }
+#endif
                     Audio_PlayerTriggerSEStart(i, NA_SE_16);
 
                     if (gPlayerSelectionLock[i] != SELECTION_FREE) {
@@ -831,9 +879,33 @@ s32 MachineSettings_Update(void) {
         return gGameMode;
     }
 
+#ifdef PORT
+    if (gdx_net_machine_select_active()) {
+        s32 gdxLeave = gdx_net_machine_select_should_leave();
+
+        if (gdxLeave == 2) {
+            /* The room's race is next: what the stock OK does for a Practice race. */
+            func_8007E0CC();
+            gMachineSettingsState = MACHINE_SETTINGS_CONTINUE;
+            return GAMEMODE_PRACTICE;
+        }
+        if (gdxLeave != 0) {
+            gMachineSettingsState = MACHINE_SETTINGS_EXIT;
+            return GAMEMODE_FLX_MAIN_MENU;
+        }
+    }
+#endif
+
     for (i = gNumPlayers - 1; i >= 0; i--) {
         temp_s1 = &gControllers[gPlayerControlPorts[i]];
         Controller_SetGlobalInputs(temp_s1);
+
+#ifdef PORT
+        /* Locked in: the machine is with the room and cannot change. */
+        if (gdx_net_machine_select_waiting()) {
+            continue;
+        }
+#endif
 
         switch (gMachineSettingsState) {
             case MACHINE_SETTINGS_ACTIVE:
@@ -918,6 +990,16 @@ s32 MachineSettings_Update(void) {
                     Audio_PlayerTriggerSEStart(i, NA_SE_16);
                 } else if (gInputButtonPressed & (BTN_A | BTN_START)) {
                     Audio_PlayerTriggerSEStart(i, NA_SE_62);
+#ifdef PORT
+                    /* The lock-in screen starts no race: the machine goes to the room and the screen stays up,
+                       music and all, until the room moves on. Leaving the OK state slides "OK?" away. */
+                    if (gdx_net_machine_select_active()) {
+                        gdx_net_machine_select_confirm(gRacers[i].character, gRacers[i].machineSkinIndex,
+                                                       gPlayerEngine[i]);
+                        gMachineSettingsState = MACHINE_SETTINGS_ACTIVE;
+                        break;
+                    }
+#endif
                     func_8007E0CC();
                     gMachineSettingsState = MACHINE_SETTINGS_CONTINUE;
                     switch (gSelectedMode) {
@@ -1553,6 +1635,32 @@ Gfx* MachineSelect_MachineDraw(Gfx* gfx, Object* machineObj) {
     return gfx;
 }
 
+#ifdef PORT
+/* The lock-in screen's readout, in the lower left corner of machine select and of machine settings: the
+   room's timer, and beside it the count of locked racers once the player has locked in. It is drawn with the
+   "OK?" sign because that is drawn on both screens whether the sign is there or not. FONT_SET_2 glyphs are 8
+   high and are drawn upwards from the row given. White is set here because the sign's own colour cycles; the
+   callers set that next. */
+#define GDX_NET_LOCK_IN_LEFT 24
+#define GDX_NET_LOCK_IN_ROW 226
+
+static Gfx* gdx_net_lock_in_draw(Gfx* gfx) {
+    if (!gdx_net_machine_select_active()) {
+        return gfx;
+    }
+    gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+    if (gdx_widescreen_ui_active()) {
+        gSPSetExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+    gfx = Font_DrawString(gfx, GDX_NET_LOCK_IN_LEFT, GDX_NET_LOCK_IN_ROW, gdx_net_machine_select_status_text(), 0,
+                          FONT_SET_2, 0);
+    if (gdx_widescreen_ui_active()) {
+        gSPClearExtraGeometryMode(gfx++, G_EX_WIDESCREEN_ANCHOR_LEFT);
+    }
+    return gfx;
+}
+#endif
+
 Gfx* MachineSelect_OkDraw(Gfx* gfx, Object* okObj) {
     s32 var_v1;
 
@@ -1562,6 +1670,9 @@ Gfx* MachineSelect_OkDraw(Gfx* gfx, Object* okObj) {
         var_v1 = 144;
     }
 
+#ifdef PORT
+    gfx = gdx_net_lock_in_draw(gfx);
+#endif
     gfx = func_8007DB28(gfx, 0);
 #ifdef PORT
     if ((gNumPlayers == 1) && gdx_widescreen_ui_active()) {
@@ -1595,6 +1706,11 @@ Gfx* MachineSettings_NameDraw(Gfx* gfx) {
 #endif
             machineName = gMachineNames[MachineSettings_GetCharacter(gRacers[0].character)];
 #ifdef EXPANSION_KIT
+        }
+#endif
+#ifdef PORT
+        if (gdx_net_machine_select_waiting()) {
+            machineName = gdx_net_machine_select_wait_text();
         }
 #endif
         gfx = Font_DrawString(gfx, 290 - Font_GetStringWidth(machineName, FONT_SET_1, 0), 34, machineName, 0,
@@ -2007,6 +2123,11 @@ Gfx* MachineSelect_NameDraw(Gfx* gfx, Object* nameObj) {
 #ifdef EXPANSION_KIT
     }
 #endif
+#ifdef PORT
+    if (gdx_net_machine_select_waiting()) {
+        machineName = gdx_net_machine_select_wait_text();
+    }
+#endif
 
     gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(machineName, FONT_SET_2, 0) / 2), 218, machineName, 0,
                           FONT_SET_2, 0);
@@ -2027,6 +2148,9 @@ Gfx* MachineSelect_NameDraw(Gfx* gfx, Object* nameObj) {
 }
 
 Gfx* MachineSettings_OkDraw(Gfx* gfx, Object* okObj) {
+#ifdef PORT
+    gfx = gdx_net_lock_in_draw(gfx);
+#endif
     gfx = func_8007DB28(gfx, 0);
 #ifdef PORT
     if (gdx_widescreen_ui_active()) {

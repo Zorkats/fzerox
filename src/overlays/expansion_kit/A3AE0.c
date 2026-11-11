@@ -1,5 +1,7 @@
 #include "global.h"
 #ifdef PORT
+#include "../../../../port/gdx_course_branch_edit.h"
+#include "../../../../port/gdx_course_branch_editor.h"
 #include "../../../../port/gdx_course_edit_menu.h"
 #include "../../../../port/gdx_course_music.h"
 #include "../../../../port/gdx_course_packs.h"
@@ -364,8 +366,9 @@ MenuWidget sSignTypeWidget = { 6,   INVALID_OPTION,  INVALID_OPTION, 120, 36, 0,
                                128, &gSignTypeOption };
 
 #ifdef PORT
-// The WIND part (port/gdx_wind.h): Weak, Mid, Strong and Gale, then CLEAR, which takes the segment's wind away.
-// The icons and the WIND label are drawn at run time by CourseEdit_InitWindArt.
+// The WIND part (port/gdx_wind.h): Weak, Mid, Strong and Gale, then CLEAR, which takes the segment's wind away, then
+// TRACK and TURN, which step and turn the wind of the whole track. The icons and the WIND, TRACK and TURN labels are
+// drawn at run time by CourseEdit_InitWindArt, so the last two rows are blank until the font is loaded.
 MenuDropItem sWindTypeMenuItems[] = {
     { aExpansionKitMenuGoldBorderSplitBackgroundTex, aExpansionKitMenuGoldBorderSplitHighlightBackgroundTex,
       aExpansionKitMenu1Tex, NULL, NULL, NULL, 16, 16, NULL, NULL },
@@ -377,6 +380,10 @@ MenuDropItem sWindTypeMenuItems[] = {
       aExpansionKitMenu4Tex, NULL, NULL, NULL, 16, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditClearTex,
       NULL, NULL, NULL, 48, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, NULL, NULL, NULL,
+      NULL, 48, 16, NULL, NULL },
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, NULL, NULL, NULL,
+      NULL, 48, 16, NULL, NULL },
 };
 
 MenuWidget sWindTypeWidget = { GDX_WIND_PART_ROWS, INVALID_OPTION, INVALID_OPTION, 120, 36, 0, 16, sWindTypeMenuItems,
@@ -864,10 +871,20 @@ MenuDropItem sCreateMenuItems[] = {
       aCourseEditBackgroundTex, NULL, NULL, NULL, 48, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, D_xk1_800302F0, NULL,
       NULL, NULL, 48, 16, NULL, NULL },
+#ifdef PORT
+    // HORIZON: its label is composed at run time (CourseEdit_InitHorizonArt).
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, NULL, NULL, NULL,
+      NULL, 48, 16, NULL, NULL },
+#endif
 };
 
+#ifdef PORT
+MenuWidget gCreateWidget = { 7,   INVALID_OPTION, INVALID_OPTION, 24, 36, 0, 16, sCreateMenuItems, 64, 48, 64,
+                             144, &gCreateOption };
+#else
 MenuWidget gCreateWidget = { 6,   INVALID_OPTION, INVALID_OPTION, 24, 36, 0, 16, sCreateMenuItems, 64, 48, 64,
                              128, &gCreateOption };
+#endif
 
 MenuDropItem sPointMenuItems[] = {
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, aCourseEditSetTex,
@@ -900,10 +917,20 @@ MenuDropItem sMoveMenuItems[] = {
       NULL, NULL, NULL, 48, 16, NULL, NULL },
     { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex,
       aCourseEditStraightTex, NULL, NULL, NULL, 48, 16, NULL, NULL },
+#ifdef PORT
+    // TRACK, which moves the whole track. CourseEdit_InitWindArt writes its label, so it is blank until then.
+    { aExpansionKitMenuGoldBorderBackgroundTex, aExpansionKitMenuGoldBorderHighlightBackgroundTex, NULL, NULL, NULL,
+      NULL, 48, 16, NULL, NULL },
+#endif
 };
 
+#ifdef PORT
+MenuWidget gMoveWidget = { MOVE_OPTION_TRACK + 1, INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sMoveMenuItems, 112,
+                           48, 112, 48 + (16 * MOVE_OPTION_TRACK), &gMoveOption };
+#else
 MenuWidget gMoveWidget = { 7,   INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sMoveMenuItems, 112, 48, 112,
                            144, &gMoveOption };
+#endif
 
 #ifdef PORT
 extern u8 aCourseEditInsertTex[];
@@ -988,20 +1015,60 @@ extern void gdx_invalidate_texture_address(const void* addr);
 #define GDX_WIND_LABEL_WIDTH 48
 #define GDX_WIND_LABEL_HEIGHT 16
 #define GDX_WIND_LABEL_TOP 4 // the font's 8 rows, in the middle of the 16-row label
+#define GDX_WIND_LABEL_BYTES (GDX_WIND_LABEL_WIDTH * GDX_WIND_LABEL_HEIGHT / 2)
+
+// The labels the WIND part writes: its own name in the Parts menu, and its two track rows.
+#define GDX_WIND_LABEL_PART 0
+#define GDX_WIND_LABEL_TRACK 1
+#define GDX_WIND_LABEL_TURN 2
+#define GDX_WIND_LABEL_COUNT 3
 
 static u64 sWindIconTex[GDX_WIND_PART_GALE + 1][GDX_WIND_ICON_BYTES / sizeof(u64)];
-static u64 sWindLabelTex[(GDX_WIND_LABEL_WIDTH * GDX_WIND_LABEL_HEIGHT / 2) / sizeof(u64)];
+static u64 sWindLabelTex[GDX_WIND_LABEL_COUNT][GDX_WIND_LABEL_BYTES / sizeof(u64)];
 static bool sWindIconsReady = false;
 static bool sWindLabelReady = false;
 
-// The WIND part's art, none of it from the ROM's data but the font: the submenu icons are drawn by
-// gdx_wind_part_icon, and the WIND label is written in the Expansion Kit font (port/gdx_ek_text.h), so it waits
-// until the Expansion Kit textures hold their data.
-static void CourseEdit_InitWindArt(void) {
+// Writes text into a label in the Expansion Kit font (port/gdx_ek_text.h), centred. False for text that does not
+// fit and while the font sheet holds no data.
+static bool CourseEdit_ComposeWindLabel(const char* text, u8* label) {
     u8 line[GDX_EK_TEXT_BYTES(GDX_WIND_LABEL_WIDTH)];
-    u8* label = (u8*) sWindLabelTex;
     s32 rowBytes = GDX_WIND_LABEL_WIDTH / 2;
-    s32 ink;
+    s32 ink = gdx_ek_text_measure(aExpansionKitFontCharacterSheet1Tex, text);
+    s32 i;
+
+    if ((ink <= 0) || (ink > GDX_WIND_LABEL_WIDTH)) {
+        return false;
+    }
+    gdx_ek_text_compose(aExpansionKitFontCharacterSheet1Tex, text, (GDX_WIND_LABEL_WIDTH - ink) / 2, line,
+                        GDX_WIND_LABEL_WIDTH);
+    // An empty line means the font sheet is not loaded yet.
+    for (i = 0; i < (s32) sizeof(line); i++) {
+        if (line[i] != 0) {
+            break;
+        }
+    }
+    if (i == (s32) sizeof(line)) {
+        return false;
+    }
+    for (i = 0; i < GDX_WIND_LABEL_BYTES; i++) {
+        label[i] = 0;
+    }
+    for (i = 0; i < GDX_EK_TEXT_HEIGHT; i++) {
+        s32 j;
+
+        for (j = 0; j < rowBytes; j++) {
+            label[((GDX_WIND_LABEL_TOP + i) * rowBytes) + j] = line[(i * rowBytes) + j];
+        }
+    }
+    gdx_invalidate_texture_address(label);
+    return true;
+}
+
+// The WIND part's art, none of it from the ROM's data but the font: the submenu icons are drawn by
+// gdx_wind_part_icon, and the labels are written in the Expansion Kit font, so they wait until the Expansion Kit
+// textures hold their data.
+static void CourseEdit_InitWindArt(void) {
+    static const char* const kLabels[GDX_WIND_LABEL_COUNT] = { "WIND", "TRACK", "TURN" };
     s32 i;
 
     if (!sWindIconsReady) {
@@ -1014,33 +1081,16 @@ static void CourseEdit_InitWindArt(void) {
     if (sWindLabelReady) {
         return;
     }
-    ink = gdx_ek_text_measure(aExpansionKitFontCharacterSheet1Tex, "WIND");
-    if ((ink <= 0) || (ink > GDX_WIND_LABEL_WIDTH)) {
-        return;
-    }
-    gdx_ek_text_compose(aExpansionKitFontCharacterSheet1Tex, "WIND", (GDX_WIND_LABEL_WIDTH - ink) / 2, line,
-                        GDX_WIND_LABEL_WIDTH);
-    // An empty line means the font sheet is not loaded yet.
-    for (i = 0; i < (s32) sizeof(line); i++) {
-        if (line[i] != 0) {
-            break;
+    for (i = 0; i < GDX_WIND_LABEL_COUNT; i++) {
+        if (!CourseEdit_ComposeWindLabel(kLabels[i], (u8*) sWindLabelTex[i])) {
+            return;
         }
     }
-    if (i == (s32) sizeof(line)) {
-        return;
-    }
-    for (i = 0; i < (s32) sizeof(sWindLabelTex); i++) {
-        label[i] = 0;
-    }
-    for (i = 0; i < GDX_EK_TEXT_HEIGHT; i++) {
-        s32 j;
-
-        for (j = 0; j < rowBytes; j++) {
-            label[((GDX_WIND_LABEL_TOP + i) * rowBytes) + j] = line[(i * rowBytes) + j];
-        }
-    }
-    gdx_invalidate_texture_address(label);
-    sPartsStyleMenuItems[TRACK_PART_STYLE_WIND].contentsTex = label;
+    sPartsStyleMenuItems[TRACK_PART_STYLE_WIND].contentsTex = sWindLabelTex[GDX_WIND_LABEL_PART];
+    sWindTypeMenuItems[GDX_WIND_PART_TRACK].contentsTex = sWindLabelTex[GDX_WIND_LABEL_TRACK];
+    sWindTypeMenuItems[GDX_WIND_PART_TURN].contentsTex = sWindLabelTex[GDX_WIND_LABEL_TURN];
+    // The MOVE menu's TRACK row is the same word.
+    sMoveMenuItems[MOVE_OPTION_TRACK].contentsTex = sWindLabelTex[GDX_WIND_LABEL_TRACK];
     sWindLabelReady = true;
 }
 #endif
@@ -1668,10 +1718,355 @@ void gdx_course_edit_restore_custom_rows(void) {
 }
 #endif
 
+#ifdef PORT
+// HORIZON: the track's own horizon images (port/gdx_course_branch_edit.h), six at most, each a stock image at a
+// compass angle. The bar's second entry, SLOT, lists the images and a row that adds one; its third, EDIT, changes the
+// picked slot's image or angle, takes the slot away, or copies the list of a stock course. Every label is written in
+// the Expansion Kit font at run time, so the rows are blank until the font is loaded.
+#define GDX_HORIZON_LABEL_HORIZON 0
+#define GDX_HORIZON_LABEL_SLOT 1
+#define GDX_HORIZON_LABEL_EDIT 2
+#define GDX_HORIZON_LABEL_ADD 3
+#define GDX_HORIZON_LABEL_IMAGE 4
+#define GDX_HORIZON_LABEL_ANGLE 5
+#define GDX_HORIZON_LABEL_COPY 6
+#define GDX_HORIZON_LABEL_COUNT 7
+
+#define GDX_HORIZON_EDIT_IMAGE 0
+#define GDX_HORIZON_EDIT_ANGLE 1
+#define GDX_HORIZON_EDIT_CLEAR 2
+#define GDX_HORIZON_EDIT_COPY 3
+#define GDX_HORIZON_EDIT_ROWS 4
+
+#define GDX_HORIZON_ANGLE_STEP 30
+#define GDX_HORIZON_ANGLE_ROWS (360 / GDX_HORIZON_ANGLE_STEP)
+#define GDX_HORIZON_COURSE_ROWS 24
+
+typedef u64 GdxHorizonLabel[GDX_WIND_LABEL_BYTES / sizeof(u64)];
+
+static GdxHorizonLabel sHorizonLabelTex[GDX_HORIZON_LABEL_COUNT];
+static GdxHorizonLabel sHorizonImageTex[GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX];
+static GdxHorizonLabel sHorizonAngleTex[GDX_HORIZON_ANGLE_ROWS];
+static GdxHorizonLabel sHorizonCourseTex[GDX_HORIZON_COURSE_ROWS];
+static bool sHorizonWired = false;
+static bool sHorizonArtReady = false;
+
+static MenuDropItem sHorizonSlotMenuItems[GDX_BRANCH_EDIT_BACKGROUND_MAX];
+static MenuDropItem sHorizonEditMenuItems[GDX_HORIZON_EDIT_ROWS];
+static MenuDropItem sHorizonImageMenuItems[GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX];
+static MenuDropItem sHorizonAngleMenuItems[GDX_HORIZON_ANGLE_ROWS];
+static MenuDropItem sHorizonCourseMenuItems[GDX_HORIZON_COURSE_ROWS];
+
+// The slot the EDIT rows change, or INVALID_OPTION on a track without images.
+static s32 sHorizonSlotOption = INVALID_OPTION;
+// Never set, so the bar draws no current row under EDIT.
+static s32 sHorizonEditOption = INVALID_OPTION;
+static s32 sHorizonImageOption = INVALID_OPTION;
+static s32 sHorizonAngleOption = INVALID_OPTION;
+static s32 sHorizonCourseOption = INVALID_OPTION;
+
+static MenuWidget sHorizonSlotWidget = { 1,   INVALID_OPTION, INVALID_OPTION, 72, 36, 0, 16, sHorizonSlotMenuItems,
+                                         112, 48,             112,            48, &sHorizonSlotOption };
+static MenuWidget sHorizonImageWidget = { GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX,
+                                          INVALID_OPTION,
+                                          INVALID_OPTION,
+                                          120,
+                                          36,
+                                          0,
+                                          16,
+                                          sHorizonImageMenuItems,
+                                          160,
+                                          48,
+                                          160,
+                                          48 + (16 * (GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX - 1)),
+                                          &sHorizonImageOption };
+static MenuWidget sHorizonAngleWidget = { GDX_HORIZON_ANGLE_ROWS,
+                                          INVALID_OPTION,
+                                          INVALID_OPTION,
+                                          120,
+                                          36,
+                                          0,
+                                          16,
+                                          sHorizonAngleMenuItems,
+                                          160,
+                                          48,
+                                          160,
+                                          48 + (16 * (GDX_HORIZON_ANGLE_ROWS - 1)),
+                                          &sHorizonAngleOption };
+static MenuWidget sHorizonCourseWidget = { GDX_HORIZON_COURSE_ROWS,
+                                           INVALID_OPTION,
+                                           INVALID_OPTION,
+                                           120,
+                                           36,
+                                           0,
+                                           16,
+                                           sHorizonCourseMenuItems,
+                                           160,
+                                           48,
+                                           160,
+                                           48 + (16 * (GDX_HORIZON_COURSE_ROWS - 1)),
+                                           &sHorizonCourseOption };
+static MenuWidget sHorizonEditWidget = { GDX_HORIZON_EDIT_ROWS,
+                                         INVALID_OPTION,
+                                         INVALID_OPTION,
+                                         120,
+                                         36,
+                                         0,
+                                         16,
+                                         sHorizonEditMenuItems,
+                                         160,
+                                         48,
+                                         160,
+                                         48 + (16 * (GDX_HORIZON_EDIT_ROWS - 1)),
+                                         NULL };
+
+// Short names of the horizon images, in BackgroundSpriteId order from 1, each narrow enough for a 48 pixel label.
+static const char* const sHorizonImageNames[GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX] = {
+    "CITY 1",  "CITY 2",  "CITY 3",  "CITY 4",  "MOUNT 1", "SKULL",   "TREE",    "MT CITY", "CITY 5",  "CITY 6",
+    "CITY 7",  "CITY 8",  "NIGHT 5", "NIGHT 6", "NIGHT 7", "NIGHT 8", "MOUNT 2", "MOUNT 3", "MT TW 1", "MT TW 2",
+    "TOWR 1",  "PYRAMD",  "TOWR 2",  "MOON 1",  "STATUE",  "MT TW 3", "CASTLE",  "MT TW 4", "RCKT 1",  "RCKT 2",
+    "RCKT 3",  "RADAR",   "RAISE 1", "DOME",    "RAISE 2", "LINKED",  "MOON 2",  "FLYING",  "NIGHT 1", "NIGHT 2",
+    "NIGHT 3", "NIGHT 4", "NINTEN",  "JACK",    "N BLDG",  "FZERO X", "SPHER 2", "QUEEN",   "KING",    "JOKER",
+    "X CUP",   "EDIT",    "MAN",     "MOON 3",  "SPHER 1",
+};
+
+// Short names of the cup courses, in course order.
+static const char* const sHorizonCourseNames[GDX_HORIZON_COURSE_ROWS] = {
+    "MUTE 1", "SILEN 1", "SAND 1",  "DEVIL 1", "BLUE 1",  "PORT 1", "SECT A", "RED 1",
+    "DEVIL 2", "MUTE 2", "BLUE 2",  "WHITE 1", "FIRE",    "SILEN 2", "SECT B", "RED 2",
+    "WHITE 2", "MUTE 3", "RAINBW",  "DEVIL 3", "SPACE",   "SAND 2", "PORT 2", "BIGHAND",
+};
+
+// Writes text into a label, dropping characters off its end until it fits. False while the font holds no data.
+static bool CourseEdit_ComposeHorizonLabel(const char* text, u8* label) {
+    char fitted[16];
+    s32 length = 0;
+
+    while ((text[length] != '\0') && (length < (s32) sizeof(fitted) - 1)) {
+        fitted[length] = text[length];
+        length++;
+    }
+    fitted[length] = '\0';
+    while ((length > 1) &&
+           (gdx_ek_text_measure(aExpansionKitFontCharacterSheet1Tex, fitted) > GDX_WIND_LABEL_WIDTH)) {
+        length--;
+        fitted[length] = '\0';
+    }
+    return CourseEdit_ComposeWindLabel(fitted, label);
+}
+
+static void CourseEdit_InitHorizonArt(void) {
+    static const char* const kLabels[GDX_HORIZON_LABEL_COUNT] = { "HORIZON", "SLOT",  "EDIT", "ADD",
+                                                                  "IMAGE",   "ANGLE", "COPY" };
+    s32 i;
+
+    if (sHorizonArtReady) {
+        return;
+    }
+    for (i = 0; i < GDX_HORIZON_LABEL_COUNT; i++) {
+        if (!CourseEdit_ComposeHorizonLabel(kLabels[i], (u8*) sHorizonLabelTex[i])) {
+            return;
+        }
+    }
+    for (i = 0; i < GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX; i++) {
+        if (!CourseEdit_ComposeHorizonLabel(sHorizonImageNames[i], (u8*) sHorizonImageTex[i])) {
+            return;
+        }
+    }
+    for (i = 0; i < GDX_HORIZON_ANGLE_ROWS; i++) {
+        s32 angle = i * GDX_HORIZON_ANGLE_STEP;
+        char digits[4];
+        s32 length = 0;
+
+        if (angle >= 100) {
+            digits[length++] = (char) ('0' + (angle / 100));
+        }
+        if (angle >= 10) {
+            digits[length++] = (char) ('0' + ((angle / 10) % 10));
+        }
+        digits[length++] = (char) ('0' + (angle % 10));
+        digits[length] = '\0';
+        if (!CourseEdit_ComposeHorizonLabel(digits, (u8*) sHorizonAngleTex[i])) {
+            return;
+        }
+    }
+    for (i = 0; i < GDX_HORIZON_COURSE_ROWS; i++) {
+        if (!CourseEdit_ComposeHorizonLabel(sHorizonCourseNames[i], (u8*) sHorizonCourseTex[i])) {
+            return;
+        }
+    }
+    sHorizonArtReady = true;
+}
+
+// Opening a list puts the cursor on the picked slot's value, or on its first row.
+static void CourseEdit_HorizonOpenImage(void) {
+    int image = 0;
+
+    sHorizonImageOption =
+        gdx_branch_edit_background(sHorizonSlotOption, &image, NULL) ? (image - 1) : INVALID_OPTION;
+}
+
+static void CourseEdit_HorizonOpenAngle(void) {
+    int angle = 0;
+
+    sHorizonAngleOption = INVALID_OPTION;
+    if (gdx_branch_edit_background(sHorizonSlotOption, NULL, &angle)) {
+        sHorizonAngleOption = ((angle + (GDX_HORIZON_ANGLE_STEP / 2)) / GDX_HORIZON_ANGLE_STEP) % GDX_HORIZON_ANGLE_ROWS;
+    }
+}
+
+static void CourseEdit_HorizonOpenCopy(void) {
+    sHorizonCourseOption = INVALID_OPTION;
+}
+
+static void CourseEdit_HorizonRow(MenuDropItem* item, void* label) {
+    item->backgroundTex = aExpansionKitMenuGoldBorderBackgroundTex;
+    item->backgroundSelectedTex = aExpansionKitMenuGoldBorderHighlightBackgroundTex;
+    item->contentsTex = label;
+    item->subContentsRGBATex = NULL;
+    item->widget = NULL;
+    item->action = NULL;
+    item->contentsWidth = 48;
+    item->contentsHeight = 16;
+    item->unk_1C = NULL;
+    item->subContentsI4Tex = NULL;
+}
+
+// The rows point at their labels before the labels are written; a label of zeroes draws nothing.
+static void CourseEdit_HorizonWire(void) {
+    s32 i;
+
+    if (sHorizonWired) {
+        return;
+    }
+    for (i = 0; i < GDX_BRANCH_EDIT_BACKGROUND_MAX; i++) {
+        CourseEdit_HorizonRow(&sHorizonSlotMenuItems[i], sHorizonLabelTex[GDX_HORIZON_LABEL_ADD]);
+    }
+    for (i = 0; i < GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX; i++) {
+        CourseEdit_HorizonRow(&sHorizonImageMenuItems[i], sHorizonImageTex[i]);
+    }
+    for (i = 0; i < GDX_HORIZON_ANGLE_ROWS; i++) {
+        CourseEdit_HorizonRow(&sHorizonAngleMenuItems[i], sHorizonAngleTex[i]);
+    }
+    for (i = 0; i < GDX_HORIZON_COURSE_ROWS; i++) {
+        CourseEdit_HorizonRow(&sHorizonCourseMenuItems[i], sHorizonCourseTex[i]);
+    }
+    CourseEdit_HorizonRow(&sHorizonEditMenuItems[GDX_HORIZON_EDIT_IMAGE], sHorizonLabelTex[GDX_HORIZON_LABEL_IMAGE]);
+    sHorizonEditMenuItems[GDX_HORIZON_EDIT_IMAGE].widget = &sHorizonImageWidget;
+    sHorizonEditMenuItems[GDX_HORIZON_EDIT_IMAGE].action = CourseEdit_HorizonOpenImage;
+    CourseEdit_HorizonRow(&sHorizonEditMenuItems[GDX_HORIZON_EDIT_ANGLE], sHorizonLabelTex[GDX_HORIZON_LABEL_ANGLE]);
+    sHorizonEditMenuItems[GDX_HORIZON_EDIT_ANGLE].widget = &sHorizonAngleWidget;
+    sHorizonEditMenuItems[GDX_HORIZON_EDIT_ANGLE].action = CourseEdit_HorizonOpenAngle;
+    CourseEdit_HorizonRow(&sHorizonEditMenuItems[GDX_HORIZON_EDIT_CLEAR], aCourseEditClearTex);
+    CourseEdit_HorizonRow(&sHorizonEditMenuItems[GDX_HORIZON_EDIT_COPY], sHorizonLabelTex[GDX_HORIZON_LABEL_COPY]);
+    sHorizonEditMenuItems[GDX_HORIZON_EDIT_COPY].widget = &sHorizonCourseWidget;
+    sHorizonEditMenuItems[GDX_HORIZON_EDIT_COPY].action = CourseEdit_HorizonOpenCopy;
+    sCreateMenuItems[CREATE_OPTION_HORIZON].contentsTex = sHorizonLabelTex[GDX_HORIZON_LABEL_HORIZON];
+    sHorizonWired = true;
+}
+
+// Makes the SLOT rows match the track's list: one row for each image, then a row that adds one while there is room.
+// The bar calls it every frame it is drawn (course_edit/191080.c), since an undo or the settings panel can change
+// the list at any time.
+void CourseEdit_HorizonSync(void) {
+    s32 count = gdx_branch_edit_background_count();
+    s32 rows = count + ((count < GDX_BRANCH_EDIT_BACKGROUND_MAX) ? 1 : 0);
+    s32 i;
+
+    CourseEdit_HorizonWire();
+    for (i = 0; i < GDX_BRANCH_EDIT_BACKGROUND_MAX; i++) {
+        int image = 0;
+
+        if (gdx_branch_edit_background(i, &image, NULL) && (image >= 1) &&
+            (image <= GDX_BRANCH_EDIT_BACKGROUND_IMAGE_MAX)) {
+            sHorizonSlotMenuItems[i].contentsTex = sHorizonImageTex[image - 1];
+        } else {
+            sHorizonSlotMenuItems[i].contentsTex = sHorizonLabelTex[GDX_HORIZON_LABEL_ADD];
+        }
+    }
+    sHorizonSlotWidget.numItems = rows;
+    sHorizonSlotWidget.cursorMaxPosY = 48 + (16 * (rows - 1));
+    if (count == 0) {
+        sHorizonSlotOption = INVALID_OPTION;
+    } else if (sHorizonSlotOption < 0) {
+        sHorizonSlotOption = 0;
+    } else if (sHorizonSlotOption >= count) {
+        sHorizonSlotOption = count - 1;
+    }
+}
+
+// Closes the menus as the stock handlers do, and takes the pick out of every HORIZON menu so it is acted on once.
+static void CourseEdit_HorizonClose(void) {
+    func_xk1_80027C80(&gCourseEditWidget);
+    sHorizonSlotWidget.openIndex = INVALID_OPTION;
+    sHorizonEditWidget.openIndex = INVALID_OPTION;
+    sHorizonImageWidget.openIndex = INVALID_OPTION;
+    sHorizonAngleWidget.openIndex = INVALID_OPTION;
+    sHorizonCourseWidget.openIndex = INVALID_OPTION;
+}
+
+// Acts on a pick in the HORIZON menus. The changes go through the editor (port/gdx_course_branch_editor.h), which
+// backs the course up for undo and refuses them in a test run.
+static void CourseEdit_HorizonMenuUpdate(void) {
+    s32 count;
+    s32 slot;
+    s32 pick;
+
+    CourseEdit_HorizonWire();
+    CourseEdit_InitHorizonArt();
+    if (gCreateOption != CREATE_OPTION_HORIZON) {
+        return;
+    }
+    count = gdx_branch_edit_background_count();
+    slot = ((sHorizonSlotOption >= 0) && (sHorizonSlotOption < count)) ? sHorizonSlotOption : INVALID_OPTION;
+
+    if (sHorizonSlotWidget.openIndex != INVALID_OPTION) {
+        pick = sHorizonSlotWidget.openIndex;
+        CourseEdit_HorizonClose();
+        if (pick < count) {
+            sHorizonSlotOption = pick;
+        } else if (gdx_course_branch_editor_horizon_change(GDX_BRANCH_EDITOR_HORIZON_IMAGE + count, 1)) {
+            // The row after the last image added one, which is now the picked slot.
+            sHorizonSlotOption = count;
+        }
+    } else if (sHorizonImageWidget.openIndex != INVALID_OPTION) {
+        pick = sHorizonImageWidget.openIndex;
+        CourseEdit_HorizonClose();
+        if (slot != INVALID_OPTION) {
+            gdx_course_branch_editor_horizon_change(GDX_BRANCH_EDITOR_HORIZON_IMAGE + slot, pick + 1);
+        } else if (gdx_course_branch_editor_horizon_change(GDX_BRANCH_EDITOR_HORIZON_IMAGE + count, pick + 1)) {
+            // On a track without images, a picked image is the first one.
+            sHorizonSlotOption = count;
+        }
+    } else if (sHorizonAngleWidget.openIndex != INVALID_OPTION) {
+        pick = sHorizonAngleWidget.openIndex;
+        CourseEdit_HorizonClose();
+        if (slot != INVALID_OPTION) {
+            gdx_course_branch_editor_horizon_change(GDX_BRANCH_EDITOR_HORIZON_ANGLE + slot,
+                                                    pick * GDX_HORIZON_ANGLE_STEP);
+        } else {
+            Audio_TriggerSystemSE(NA_SE_32);
+        }
+    } else if (sHorizonCourseWidget.openIndex != INVALID_OPTION) {
+        pick = sHorizonCourseWidget.openIndex;
+        CourseEdit_HorizonClose();
+        if (gdx_course_branch_editor_horizon_change(GDX_BRANCH_EDITOR_HORIZON_COPY, pick)) {
+            sHorizonSlotOption = 0;
+        }
+    } else if (sHorizonEditWidget.openIndex == GDX_HORIZON_EDIT_CLEAR) {
+        CourseEdit_HorizonClose();
+        // Without a slot the editor refuses, with its sound.
+        gdx_course_branch_editor_horizon_change(GDX_BRANCH_EDITOR_HORIZON_REMOVE, slot);
+    }
+    CourseEdit_HorizonSync();
+}
+#endif
+
 void func_xk1_80028250(void) {
 #ifdef PORT
     CourseEdit_InitLavaIcons();
     CourseEdit_InitWindArt();
+    CourseEdit_HorizonMenuUpdate();
 #endif
     MenuWidget* sCourseDesignTypeWidgets[] = {
         &gRoadTypeWidget,
@@ -1858,6 +2253,16 @@ void func_xk1_80028250(void) {
             gCourseEditMenuItems[2].contentsTex = NULL;
             gCourseEditMenuItems[2].widget = NULL;
             break;
+#ifdef PORT
+        case CREATE_OPTION_HORIZON:
+            gCourseEditMenuItems[1].contentsTex = sHorizonLabelTex[GDX_HORIZON_LABEL_SLOT];
+            gCourseEditMenuItems[1].widget = &sHorizonSlotWidget;
+            gCourseEditMenuOptions[1] = &sHorizonSlotOption;
+            gCourseEditMenuItems[2].contentsTex = sHorizonLabelTex[GDX_HORIZON_LABEL_EDIT];
+            gCourseEditMenuItems[2].widget = &sHorizonEditWidget;
+            gCourseEditMenuOptions[2] = &sHorizonEditOption;
+            break;
+#endif
     }
 }
 
@@ -1954,6 +2359,9 @@ void func_xk1_800287BC(void) {
         case MOVE_OPTION_CENTER:
         case MOVE_OPTION_CLEAR:
         case MOVE_OPTION_STRAIGHT:
+#ifdef PORT
+        case MOVE_OPTION_TRACK:
+#endif
             break;
     }
 }

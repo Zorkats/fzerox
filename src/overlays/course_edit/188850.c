@@ -1358,6 +1358,16 @@ void func_xk2_800D950C(void) {
 extern unk_807B3C20 D_807B6528;
 extern CourseInfo* gCurrentCourseInfo;
 
+#ifdef PORT
+// 1 while MOVE's TRACK row is the tool: Z takes hold of every point, the stick slides the whole track, and the stick
+// with Z held raises or lowers it. A confirms and B cancels, as for a point.
+static s32 gdx_course_edit_track_tool(void) {
+    extern s32 gMoveOption;
+
+    return (gCreateOption == CREATE_OPTION_POINT) && (gMoveOption == MOVE_OPTION_TRACK);
+}
+#endif
+
 void func_xk2_800D9670(void) {
     CourseSegment* temp_s0_2;
     CourseSegment* temp_s1_2;
@@ -1641,7 +1651,12 @@ void func_xk2_800DA288(void) {
         Audio_TriggerSystemSE(NA_SE_32);
         return;
     }
+#ifdef PORT
+    // In MOVE's TRACK row Z picks the height instead of the fast speed (func_xk2_800DBEE4).
+    if ((D_80119720->buttonCurrent & BTN_Z) && !gdx_course_edit_track_tool()) {
+#else
     if (D_80119720->buttonCurrent & BTN_Z) {
+#endif
         sp50 = D_xk2_800F6834 * 6.0f;
     } else {
         sp50 = D_xk2_800F6834;
@@ -2309,6 +2324,16 @@ void func_xk2_800DBEE4(void) {
                         case MOVE_OPTION_CENTER:
                             func_xk2_800DB154();
                             break;
+#ifdef PORT
+                        case MOVE_OPTION_TRACK:
+                            // Every point is held (func_xk2_800DC2D0), so the point movers move the track.
+                            if (D_80119720->buttonCurrent & BTN_Z) {
+                                func_xk2_800DA288();
+                            } else {
+                                func_xk2_800D9670();
+                            }
+                            break;
+#endif
                         default:
                             break;
                     }
@@ -2411,6 +2436,30 @@ void func_xk2_800DC2D0(void) {
     Audio_TriggerSystemSE(NA_SE_69);
     D_xk2_800F704C = -1;
     func_xk2_800DC3F8();
+#ifdef PORT
+    if (gMoveOption == MOVE_OPTION_TRACK) {
+        // The TRACK row holds every point, wherever the cursor is. The backup comes first, so undo and B bring
+        // back the course with nothing held.
+        s32 i;
+
+        if (D_802CB6D0.controlPointCount < 1) {
+            Audio_TriggerSystemSE(NA_SE_32);
+            return;
+        }
+        func_xk2_800EF78C();
+        for (i = 0; i < D_802CB6D0.controlPointCount; i++) {
+            D_80128690[i].unk_08 = 1;
+        }
+        D_xk2_80119730 = 0.0f;
+        D_xk2_80119734 = 0.0f;
+        D_xk2_80119738 = 0.0f;
+        D_xk2_8011973C = 0;
+        D_xk2_80119740 = 0;
+        D_800D6CA0.unk_00 = 1;
+        D_xk2_800F7040 = 3;
+        return;
+    }
+#endif
     temp_v0 = func_xk2_800DC0F8();
     if (temp_v0 != 0) {
         D_xk2_800F7040 = 3;
@@ -3018,6 +3067,10 @@ void func_xk2_800DCCD8(void) {
         commitRequested = (D_80119720->buttonPressed & BTN_A) != 0;
     }
     if ((gMoveOption != MOVE_OPTION_CLEAR) && commitRequested) {
+        if (gMoveOption == MOVE_OPTION_TRACK) {
+            // The nodes of the paths not showing are not in the ring, so they take the move here.
+            gdx_course_branch_editor_track_moved();
+        }
 #else
     if ((gMoveOption != MOVE_OPTION_CLEAR) && (D_80119720->buttonPressed & BTN_A)) {
 #endif

@@ -620,6 +620,10 @@ void Racer_SetupStartPositions(void) {
     s32 index;
 
     func_i3_80115E74();
+#ifdef PORT
+    /* A G-NET room's race takes the room's grid order (port/gdx_net_race_bridge.c). */
+    { extern void gdx_net_race_grid_positions(void); gdx_net_race_grid_positions(); }
+#endif
 
     racerStartSegment = gCurrentCourseInfo->courseSegments[0].prev;
     t = 1.0f;
@@ -727,6 +731,7 @@ extern void gdx_single_race_begin_race(int eligible);
 extern int gdx_single_race_active(void);
 extern int gdx_single_race_finite(void);
 extern int gdx_single_race_lap_count(void);
+extern int gdx_single_race_practice_lap_done(void);
 /* Save GP in progress (decomp/src/game/game.c): a fresh cup's first race drops an older record. */
 extern void gdx_gp_resume_on_race_start(void);
 extern int gdx_single_race_racer_count(void);
@@ -742,6 +747,24 @@ extern void gdx_splits_view_player_moved(int lap, int lapsCompleted, float lapSh
                                          int completedLapsTime);
 extern void gdx_course_branch_racer_walked(s32 racerId, RacerSegmentPositionInfo* info);
 extern s32 gdx_course_branch_settings_point(const CourseSegment* segment);
+/* G-NET online race (port/gdx_net_race_bridge.c): racers that belong to other players. */
+extern s32 gdx_net_race_begin(s32 stockRacers);
+extern int gdx_net_race_is_puppet(int slot);
+extern int gdx_net_race_online(void);         // the race is a G-NET room's
+extern int gdx_net_race_box_holds_input(void); // its quit box is open: the player's machine gets no input
+extern void gdx_net_race_puppet_update(Racer* racer);
+extern void gdx_net_race_tick(void);
+extern void gdx_net_race_contact(s32 racerId, s32 otherId, f32 gap, f32 closingSpeed);
+extern void gdx_net_race_pushed(s32 racerId, s32 otherId, f32 share, f32 otherShare, f32 x, f32 y, f32 z);
+/* The intro of a room's race runs on the host clock, so every copy reaches GO together. */
+extern s32 gdx_net_race_intro_gate(void);
+extern s32 gdx_net_race_intro_after(s32 timer);
+/* The rules of a room's race are the host's (port/net/gdx_net_race.h). Each takes the player's own value
+   and gives it back unless a room's race is running. */
+extern int gdx_net_race_rule_ignore_track_settings(int own);
+extern int gdx_net_race_rule_lava_no_kill(int own);
+extern float gdx_net_race_rule_magnet_range(float own);
+extern float gdx_net_race_rule_magnet_strength(float own);
 
 /* Split-screen Grand Prix (plan item MP2, port/gdx_split_gp.h). The rules live in the port module; this is
    the cup state they act on, kept next to the lives and race-end code that reads it. */
@@ -2117,6 +2140,10 @@ void Racer_Init(void) {
         }
 #endif
     }
+#ifdef PORT
+    /* Every race and scene passes here, so a race that is not online forgets the last one's remote racers. */
+    gTotalRacers = gdx_net_race_begin(gTotalRacers);
+#endif
     sLastRacer = &gRacers[gTotalRacers - 1];
     if (gTitleDemoState != TITLE_DEMO_INACTIVE) {
         for (i = 29; i >= 0; i--) {
@@ -2727,6 +2754,13 @@ void Racer_ReceiveDamage(Racer* racer, f32 damageStrength) {
     s32 temp_s7;
     s32 i;
 
+#ifdef PORT
+    /* Another player's machine: only its owner knows what a hit did to it. */
+    if (gdx_net_race_is_puppet(racer->id)) {
+        return;
+    }
+#endif
+
     if (racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED)) {
         if (((racer->stateFlags & (RACER_STATE_ACTIVE | RACER_STATE_CRASHED)) ==
              (RACER_STATE_ACTIVE | RACER_STATE_CRASHED)) &&
@@ -2816,6 +2850,13 @@ void Racer_HitWall(Racer* racer, f32 lateralVelocity, f32 wallDirection, f32 edg
     s32 pad;
     Racer* var;
     f32 var_fv0;
+
+#ifdef PORT
+    /* Another player's machine: its owner's walls already acted on the pose it sent. */
+    if (gdx_net_race_is_puppet(racer->id)) {
+        return;
+    }
+#endif
 
     var_fv0 = racer->segmentBasis.z.x * edgeDisplacement;
     racer->segmentPositionInfo.segmentDisplacement.x -= var_fv0;
@@ -3866,7 +3907,8 @@ static f32 Racer_MagnetSetting(const char* cVarName, f32 defaultValue, f32 min, 
 
 // The player can race every course on the menu's values. Part widths are the course's shape and always apply.
 static bool Racer_UsesCourseSettings(void) {
-    return CVarGetInteger("gEnhancements.Gameplay.IgnoreTrackSettings", 0) == 0;
+    return gdx_net_race_rule_ignore_track_settings(
+               CVarGetInteger("gEnhancements.Gameplay.IgnoreTrackSettings", 0) != 0) == 0;
 }
 
 // The control point under the racer, which the values Course Edit stores are keyed by.
@@ -3879,16 +3921,18 @@ static f32 Racer_MagnetPullRange(Racer* racer) {
     f32 own = Racer_UsesCourseSettings() ? gdx_settings_view_magnet_range(Racer_ControlPoint(racer)) : 0.0f;
 
     return (own > 0.0f) ? own
-                        : Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullRange", MAGNET_PULL_RANGE_DEFAULT,
-                                              MAGNET_PULL_RANGE_MIN, MAGNET_PULL_RANGE_MAX);
+                        : gdx_net_race_rule_magnet_range(Racer_MagnetSetting(
+                              "gEnhancements.Gameplay.MagnetPullRange", MAGNET_PULL_RANGE_DEFAULT,
+                              MAGNET_PULL_RANGE_MIN, MAGNET_PULL_RANGE_MAX));
 }
 
 static f32 Racer_MagnetPullStrength(Racer* racer) {
     f32 own = Racer_UsesCourseSettings() ? gdx_settings_view_magnet_strength(Racer_ControlPoint(racer)) : 0.0f;
 
     return (own > 0.0f) ? own
-                        : Racer_MagnetSetting("gEnhancements.Gameplay.MagnetPullStrength", MAGNET_PULL_STRENGTH_DEFAULT,
-                                              MAGNET_PULL_STRENGTH_MIN, MAGNET_PULL_STRENGTH_MAX);
+                        : gdx_net_race_rule_magnet_strength(Racer_MagnetSetting(
+                              "gEnhancements.Gameplay.MagnetPullStrength", MAGNET_PULL_STRENGTH_DEFAULT,
+                              MAGNET_PULL_STRENGTH_MIN, MAGNET_PULL_STRENGTH_MAX));
 }
 
 // The dash pad under the racer: stock, Super or Brake (port/gdx_dash_pad.h). The kind is part of the track's
@@ -3926,8 +3970,63 @@ static void Racer_DashPadBrake(Racer* racer) {
     racer->shadowBaseB = 32.0f;
 }
 
+#ifdef PORT
+/* Rivals that can still race in a Death Race. A machine at zero energy spins out for 150 frames before
+   Racer_RetireRacer counts it, and one that left the road falls for a while first. Neither state is ever
+   left, so both already count as destroyed here. */
+static s32 Racer_DeathRaceRivalsStanding(void) {
+    s32 standing = 0;
+    Racer* rival;
+
+    for (rival = &gRacers[gNumPlayers]; rival < &gRacers[gTotalRacers]; rival++) {
+        if (!(rival->stateFlags & (RACER_STATE_RETIRED | RACER_STATE_CRASHED | RACER_STATE_SPINNING_OUT |
+                                   RACER_STATE_FALLING_OFF_TRACK))) {
+            standing++;
+        }
+    }
+    return standing;
+}
+#endif
+
+#if defined(PORT) && defined(EXPANSION_KIT)
+/* Pit, lava and magnet strips each loop their own sound, and the stock code starts a loop only as the force
+   field grows from nothing. A racer that drives straight from one kind of strip onto another keeps a full
+   field, so the first loop would play over the second strip. Called on entering a strip: stops the loops of
+   the other kinds and, when the field is already up, starts this strip's loop. */
+static void Racer_SwitchForceFieldSfx(Racer* racer, u32 seFlag, u8 levelSe) {
+    if (racer->id >= gNumPlayers) {
+        return;
+    }
+    if ((seFlag != RACER_SE_FLAGS_PIT) && (racer->soundEffectFlags & RACER_SE_FLAGS_PIT)) {
+        racer->soundEffectFlags &= ~RACER_SE_FLAGS_PIT;
+        if (gEnableRaceSfx) {
+            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_4);
+        }
+    }
+    if ((seFlag != RACER_SE_FLAGS_LAVA) && (racer->soundEffectFlags & RACER_SE_FLAGS_LAVA)) {
+        racer->soundEffectFlags &= ~RACER_SE_FLAGS_LAVA;
+        if (gEnableRaceSfx) {
+            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_LAVA);
+        }
+    }
+    if ((seFlag != RACER_SE_FLAGS_MAGNET) && (racer->soundEffectFlags & RACER_SE_FLAGS_MAGNET)) {
+        racer->soundEffectFlags &= ~RACER_SE_FLAGS_MAGNET;
+        if (gEnableRaceSfx) {
+            Audio_PlayerLevelSEStop(racer->id, NA_LEVEL_SE_MAGNET);
+        }
+    }
+    if (!(racer->soundEffectFlags & seFlag) && (racer->pitForceFieldSize > 0.0f)) {
+        racer->soundEffectFlags |= seFlag;
+        if (gEnableRaceSfx) {
+            Audio_PlayerLevelSEStart(racer->id, levelSe);
+        }
+    }
+}
+#endif
+
 static bool Racer_LavaNeverKills(void) {
-    bool menuValue = CVarGetInteger("gEnhancements.Gameplay.LavaNoKill", 0) != 0;
+    bool menuValue =
+        gdx_net_race_rule_lava_no_kill(CVarGetInteger("gEnhancements.Gameplay.LavaNoKill", 0) != 0) != 0;
 
     if (!Racer_UsesCourseSettings()) {
         return menuValue;
@@ -4005,7 +4104,7 @@ static void Racer_ApplyMagnetPull(Racer* racer, s32 effectType) {
     racer->acceleration.z += force * (pullZ - (upward * racer->gravityUp.z));
 }
 
-// The wind on the racer's segment (port/gdx_wind.h), set per segment, and none in a tunnel.
+// The wind on the racer's segment (port/gdx_wind.h): the segment's own, else the track's, and none in a tunnel.
 // The HUD's streaks read it too (hud.c).
 s32 Racer_WindStrength(Racer* racer, s32* angle) {
     CourseSegment* segment = racer->segmentPositionInfo.courseSegment;
@@ -4020,8 +4119,9 @@ s32 Racer_WindStrength(Racer* racer, s32* angle) {
     }
     point = Racer_ControlPoint(racer);
     blocked = (segment->trackSegmentInfo & TRACK_SHAPE_MASK) == TRACK_SHAPE_TUNNEL;
-    strength = gdx_wind_resolve(gdx_settings_view_wind_strength(point), gdx_settings_view_wind_angle(point), blocked,
-                                &resolved);
+    strength = gdx_wind_resolve_track(gdx_settings_view_wind_strength(point), gdx_settings_view_wind_angle(point),
+                                      gdx_settings_view_track_wind_strength(),
+                                      gdx_settings_view_track_wind_angle(), blocked, &resolved);
     *angle = resolved;
     return strength;
 }
@@ -5150,11 +5250,17 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                                 }
                             }
 #ifdef PORT
+                            /* An unlimited Practice run counts the player's laps for the optional HUD counter:
+                               racer->lap wraps below. */
+                            if ((racer == gRacers) && (gGameMode == GAMEMODE_PRACTICE)) {
+                                gdx_single_race_practice_lap_done();
+                            }
                             /* A Death Race lap limit counts the player's laps itself, since the lap number wraps.
                                Running out of laps with machines left ends the run as a loss, the way a full
-                               clear ends it as a win. */
+                               clear ends it as a win. A rival that is already spinning out or falling counts
+                               as destroyed: it retires only when its explosion ends, up to 150 frames later. */
                             if ((racer == gRacers) && (gGameMode == GAMEMODE_DEATH_RACE) && (D_800E5FBC == 0) &&
-                                gdx_death_race_check_laps(gdx_death_race_lap_done())) {
+                                gdx_death_race_check_laps(gdx_death_race_lap_done(), Racer_DeathRaceRivalsStanding())) {
                                 racer->stateFlags |= RACER_STATE_FINISHED | RACER_STATE_CPU_CONTROLLED;
                                 racer->energy = racer->maxEnergy;
                                 D_800F5DE8 = D_800E5FBC = 1;
@@ -5324,6 +5430,9 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
 
     if ((racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_AIRBORNE | RACER_STATE_SPINNING_OUT |
                               COURSE_EFFECT_MASK)) == COURSE_EFFECT_PIT) {
+#if defined(PORT) && defined(EXPANSION_KIT)
+        Racer_SwitchForceFieldSfx(racer, RACER_SE_FLAGS_PIT, NA_LEVEL_SE_4);
+#endif
         racer->energy += racer->energyIncrease;
         if (racer->maxEnergy < racer->energy) {
             racer->energy = racer->maxEnergy;
@@ -5344,6 +5453,9 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         racer->forceFieldType = COURSE_EFFECT_PIT;
     } else if ((racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_AIRBORNE | RACER_STATE_SPINNING_OUT |
                                      COURSE_EFFECT_MASK)) == COURSE_EFFECT_LAVA) {
+#ifdef PORT
+        Racer_SwitchForceFieldSfx(racer, RACER_SE_FLAGS_LAVA, NA_LEVEL_SE_LAVA);
+#endif
         if (racer->pitForceFieldSize < 1.0f) {
             racer->pitForceFieldSize += 0.1f;
             if (racer->pitForceFieldSize >= 1.0f) {
@@ -5375,6 +5487,9 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                                                             RACER_STATE_SPINNING_OUT | COURSE_EFFECT_MASK))) {
         // A loop of its own is the pull cue. No energy drain, and the force field draw skips magnets.
         // The pull itself is Racer_ApplyMagnetPull.
+#ifdef PORT
+        Racer_SwitchForceFieldSfx(racer, RACER_SE_FLAGS_MAGNET, NA_LEVEL_SE_MAGNET);
+#endif
         if (racer->pitForceFieldSize < 1.0f) {
             racer->pitForceFieldSize += 0.1f;
             if (racer->pitForceFieldSize >= 1.0f) {
@@ -5860,6 +5975,13 @@ void Racer_UpdateMovement(Racer* racer) {
     Controller dummyController;
     f32 preInputEnergy;
 
+#ifdef PORT
+    /* Another player's machine: its pose comes from its owner, no controller and no CPU drives it. */
+    if (gdx_net_race_is_puppet(racer->id)) {
+        gdx_net_race_puppet_update(racer);
+        return;
+    }
+#endif
     if (racer->stateFlags & RACER_STATE_CPU_CONTROLLED) {
         preInputEnergy = racer->energy;
         Cpu_GenerateInputs(racer, &dummyController);
@@ -5874,6 +5996,14 @@ void Racer_UpdateMovement(Racer* racer) {
         }
         Racer_UpdateFromControls(racer, &dummyController);
     } else {
+#ifdef PORT
+        /* The quit box of a room's race is open: the stick and the buttons belong to it, and the machine
+           coasts with no input (port/gdx_net_race_box.h). */
+        if ((racer->id == 0) && gdx_net_race_online() && gdx_net_race_box_holds_input()) {
+            bzero(&dummyController, sizeof(dummyController));
+            Racer_UpdateFromControls(racer, &dummyController);
+        } else
+#endif
         Racer_UpdateFromControls(racer, &gControllers[gPlayerControlPorts[racer->id]]);
         racer->unk_33C = -racer->segmentPositionInfo.segmentDisplacement.x * racer->segmentBasis.z.x -
                          racer->segmentPositionInfo.segmentDisplacement.y * racer->segmentBasis.z.y -
@@ -5919,7 +6049,12 @@ void Racer_Update(void) {
 #endif
 
     if (gRaceIntroTimer != 0) {
+#ifdef PORT
+        /* A room's race waits here for the room's start time, and for the host clock when it ran ahead. */
+        if (!gGamePaused && gdx_net_race_intro_gate()) {
+#else
         if (!gGamePaused) {
+#endif
             if (gRaceIntroTimer == 460) {
                 func_8007E08C();
                 /* Audio_StartDemo plays the race-intro fanfare (BGM_DEMO) through the SE
@@ -5939,6 +6074,10 @@ void Racer_Update(void) {
             }
 
             gRaceIntroTimer--;
+#ifdef PORT
+            /* A copy that fell behind the room moves on, never past a beep or GO. */
+            gRaceIntroTimer = gdx_net_race_intro_after(gRaceIntroTimer);
+#endif
             if (gRaceIntroTimer == 40) {
 #ifdef EXPANSION_KIT
                 if (func_807424CC() != 0) {
@@ -6119,6 +6258,9 @@ void Racer_Update(void) {
                         if (var_fs0 < 0.0f) {
                             var_fs0 = -var_fs0;
                         }
+#ifdef PORT
+                        gdx_net_race_contact(racer->id, racer2->id, sp128, var_fs0); /* online race: two machines touch */
+#endif
                         if ((racer2->machineLod != 0) &&
                             (Effects_SpawnCollisionSparks(
                                  ((racer->segmentPositionInfo.pos.x + racer2->segmentPositionInfo.pos.x) * 0.5f) +
@@ -6199,6 +6341,10 @@ void Racer_Update(void) {
                         racer2->recoilTilt.y = (0.15f * var_fs2) * var_fa1;
                         racer2->recoilTilt.z = (0.15f * var_fs2) * var_ft4;
                         racer2->stateFlags |= RACER_STATE_COLLISION_RECOIL;
+#ifdef PORT
+                        /* online race: a remote machine keeps the push this copy gave it */
+                        gdx_net_race_pushed(racer->id, racer2->id, var_fs1, var_fs2, var_fa0, var_fa1, var_ft4);
+#endif
                     }
                 }
             } while (--racer2 >= gRacers);
@@ -6209,6 +6355,9 @@ void Racer_Update(void) {
             Racer_UpdateMovement(racer);
         }
     }
+#ifdef PORT
+    gdx_net_race_tick(); /* online race: our own machine's pose for this tick */
+#endif
 
     for (i = 0; i < gNumPlayers; i++) {
         racer2 = &gRacers[i];

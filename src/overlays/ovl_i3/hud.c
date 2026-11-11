@@ -534,6 +534,7 @@ extern int gdx_single_race_finite(void);                            // port/gdx_
 extern int gdx_death_race_laps(void);                               // port/gdx_death_race.c
 extern int gdx_death_race_laps_done(void);                          // port/gdx_death_race.c
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
+extern int gdx_single_race_practice_laps_done(void);                // port/gdx_single_race.c
 extern u8 aLapCounterExtraDigitsTex[];                              // port/gdx_lap_digits.c
 #endif
 
@@ -1034,21 +1035,40 @@ Gfx* Hud_DrawPosition(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     return gfx;
 }
 
+#ifdef PORT
+/* The lap the player is on in a race without a lap limit, or 0 when the counter is off. Stock hides the lap box in
+   unlimited Practice and in an endless Death Race; the option shows a lap number that only goes up. */
+static s32 Hud_EndlessLap(s32 playerIndex) {
+    extern int CVarGetInteger(const char* name, int defaultValue); // libultraship consolevariablebridge.h
+
+    if ((playerIndex != 0) || !CVarGetInteger("gEnhancements.Hud.EndlessLapCounter", 0)) {
+        return 0;
+    }
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) {
+        return gdx_single_race_practice_laps_done() + 1;
+    }
+    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0)) {
+        return gdx_death_race_laps_done() + 1;
+    }
+    return 0;
+}
+#endif
+
 Gfx* Hud_DrawLapRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     s32 top;
     s32 left;
 
 #ifdef PORT
-    /* A finite Single Race shows the lap box, as GP does. Unlimited keeps it hidden. */
-    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) {
+    /* A finite Single Race shows the lap box, as GP does. Unlimited keeps it hidden unless it counts laps. */
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite() && (Hud_EndlessLap(playerIndex) == 0)) {
 #else
     if (gGameMode == GAMEMODE_PRACTICE) {
 #endif
         return gfx;
     }
 #ifdef PORT
-    /* A Death Race lap limit shows the lap box. Endless keeps it hidden. */
-    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0)) {
+    /* A Death Race lap limit shows the lap box. Endless keeps it hidden unless it counts laps. */
+    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0) && (Hud_EndlessLap(playerIndex) == 0)) {
 #else
     if (gGameMode == GAMEMODE_DEATH_RACE) {
 #endif
@@ -1101,16 +1121,17 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 #endif
 
 #ifdef PORT
-    /* A finite Single Race shows the lap counter, as GP does. Unlimited keeps it hidden. */
-    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite()) {
+    /* A finite Single Race shows the lap counter, as GP does. Unlimited keeps it hidden unless it counts laps. */
+    if ((gGameMode == GAMEMODE_PRACTICE) && !gdx_single_race_finite() && (Hud_EndlessLap(playerIndex) == 0)) {
 #else
     if (gGameMode == GAMEMODE_PRACTICE) {
 #endif
         return gfx;
     }
 #ifdef PORT
-    /* A Death Race lap limit shows the player's lap against the limit. Endless keeps it hidden. */
-    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0)) {
+    /* A Death Race lap limit shows the player's lap against the limit. Endless keeps it hidden unless it counts
+       laps. */
+    if ((gGameMode == GAMEMODE_DEATH_RACE) && (gdx_death_race_laps() == 0) && (Hud_EndlessLap(playerIndex) == 0)) {
 #else
     if (gGameMode == GAMEMODE_DEATH_RACE) {
 #endif
@@ -1124,6 +1145,25 @@ Gfx* Hud_DrawLapCounter(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     }
 
 #ifdef PORT
+    /* No lap limit: the lap number alone, up to three digits, with no slash and no total. */
+    lap = Hud_EndlessLap(playerIndex);
+    if (lap > 0) {
+        left = sLapPositions[numPlayersIndex][playerIndex][0];
+        top = sLapPositions[numPlayersIndex][playerIndex][1] + 14;
+        if (lap > 999) {
+            lap = 999;
+        }
+        if (lap >= 100) {
+            gfx = Hud_DrawLapDigit(gfx, left, top, lap / 100);
+            left += 8;
+        }
+        if (lap >= 10) {
+            gfx = Hud_DrawLapDigit(gfx, left, top, (lap / 10) % 10);
+            left += 8;
+        }
+        return Hud_DrawLapDigit(gfx, left, top, lap % 10);
+    }
+
     /* The Death Race lap number wraps every three laps, so its laps come from port/gdx_death_race.c. */
     lap = gPlayerLapNumbers[playerIndex];
     if (gGameMode == GAMEMODE_DEATH_RACE) {

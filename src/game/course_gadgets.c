@@ -525,8 +525,14 @@ static Gfx* Course_WindArrowsDraw(Gfx* gfx) {
     s32 i;
 
     // Races honor Ignore track settings, as the push does (racer.c); the editor always shows the course's wind.
-    if (!IN_COURSE_EDITOR && (CVarGetInteger("gEnhancements.Gameplay.IgnoreTrackSettings", 0) != 0)) {
-        return gfx;
+    {
+        /* In a G-NET room's race the host's value applies, as it does to the push (racer.c). */
+        extern int gdx_net_race_rule_ignore_track_settings(int own);
+
+        if (!IN_COURSE_EDITOR && (gdx_net_race_rule_ignore_track_settings(CVarGetInteger(
+                                      "gEnhancements.Gameplay.IgnoreTrackSettings", 0) != 0) != 0)) {
+            return gfx;
+        }
     }
     for (i = 0; (i < count) && (plates < WIND_ROAD_MAX_PLATES); i++) {
         s32 chevrons = Course_WindRoadPlate(GDX_GADGET_SEGMENT(gCourseIndex, i), &vtx[plates * 4]);

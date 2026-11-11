@@ -925,6 +925,7 @@ extern s16 gBestTimedLap;
 #ifdef PORT
 extern int gdx_single_race_active(void);                            // port/gdx_single_race.c
 extern int gdx_single_race_finite(void);                            // port/gdx_single_race.c
+extern int gdx_net_race_online(void);                               // the race is a G-NET room's
 extern int gdx_single_race_get_lap_time(int racerId, int lapIndex); // port/gdx_single_race.c
 extern int gdx_single_race_result_rows(int totalLaps);              // port/gdx_single_race.c
 extern int gdx_single_race_result_first_lap(int totalLaps, int frame); // port/gdx_single_race.c
@@ -4584,8 +4585,15 @@ Gfx* Menus_DrawPlayerRetire(Gfx* gfx, s32 playerIndex) {
     s32 pad[2];
     f32 scale;
 
+#ifdef PORT
+    /* A room's race goes on after the player's machine is out, and the quit box offers to watch it:
+       no fade to black there, as in a stock VS race. */
+    if ((gNumPlayers == 1) && ((gGameMode != GAMEMODE_GP_RACE) || (sPlayer1Lives > 0)) &&
+        (sPlayerRetireTimer[0] > 120) && !gdx_net_race_online()) {
+#else
     if ((gNumPlayers == 1) && ((gGameMode != GAMEMODE_GP_RACE) || (sPlayer1Lives > 0)) &&
         (sPlayerRetireTimer[0] > 120)) {
+#endif
         gControllers[gGameFrameCount % 4].unk_78 = 1;
 
         sPlayerRetireGameoverFadeTransitionTimer[0] += 2;
@@ -6092,6 +6100,94 @@ static Gfx* Menus_DrawSplitGpRace(Gfx* gfx) {
 }
 #endif
 
+#ifdef PORT
+/* A room's race has no pause and no Retry box, and nobody can end it for the others. What every racer
+   has is the quit box (port/gdx_net_race_box.h): START opens it while the race runs on behind it, and it
+   comes up by itself a little after the copy's own machine is out. It stands where the stock Retry box
+   does and is drawn like it: the same bevelled box, row pitch, cursor and sounds. Its words are in the
+   small font, and it appears whole, without the scissor that opens the stock one. */
+extern int gdx_net_race_box_frame(int start, int accept, int back, int up, int down, int stickY);
+extern int gdx_net_race_box_rows(void);
+extern int gdx_net_race_box_cursor(void);
+extern const char* gdx_net_race_box_text(int row);
+
+#define GDX_NET_RACE_BOX_RIGHT 300  /* the right and bottom edges of the stock Retry box */
+#define GDX_NET_RACE_BOX_BOTTOM 221
+#define GDX_NET_RACE_BOX_PITCH 15   /* from one row to the next, as in the stock box */
+#define GDX_NET_RACE_BOX_WORDS 20   /* from the box's left edge to its words: the stock 230 - 210 */
+#define GDX_NET_RACE_BOX_MARGIN 8   /* from the widest word to the box's right edge */
+
+static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
+    Controller* pad = &gControllers[gPlayerControlPorts[0]];
+    s32 rows;
+    s32 cursor;
+    s32 widest = 0;
+    s32 width;
+    s32 left;
+    s32 top;
+    s32 i;
+
+    if (!gdx_net_race_online() || (gTitleDemoState != TITLE_DEMO_INACTIVE)) {
+        return gfx;
+    }
+    /* The box answers this frame's presses before it is drawn. What it returns is the sound to make:
+       1 it opened, 2 the cursor moved, 3 it closed, 4 this copy leaves the race. */
+    switch (gdx_net_race_box_frame((pad->buttonPressed & BTN_START) != 0, (pad->buttonPressed & BTN_A) != 0,
+                                   (pad->buttonPressed & BTN_B) != 0, (pad->buttonPressed & BTN_UP) != 0,
+                                   (pad->buttonPressed & BTN_DOWN) != 0, pad->stickY)) {
+        case 1:
+            Audio_TriggerSystemSE(NA_SE_12);
+            break;
+        case 2:
+            Audio_TriggerSystemSE(NA_SE_30);
+            break;
+        case 3:
+            Audio_TriggerSystemSE(NA_SE_16);
+            break;
+        case 4:
+            Audio_TriggerSystemSE(NA_SE_33);
+            break;
+        default:
+            break;
+    }
+    rows = gdx_net_race_box_rows();
+    if (rows == 0) {
+        return gfx;
+    }
+    cursor = gdx_net_race_box_cursor();
+    for (i = 0; i < rows; i++) {
+        width = Font_GetStringWidth((s8*) gdx_net_race_box_text(i), FONT_SET_4, 0);
+        if (width > widest) {
+            widest = width;
+        }
+    }
+    /* The stock box is 137 to 221 for five rows: 3 above its first row and 21 below the top of its last. */
+    left = GDX_NET_RACE_BOX_RIGHT - GDX_NET_RACE_BOX_MARGIN - widest - GDX_NET_RACE_BOX_WORDS;
+    top = GDX_NET_RACE_BOX_BOTTOM - 21 - ((rows - 1) * GDX_NET_RACE_BOX_PITCH) - 3;
+
+    /* The HUD drawn before this leaves its own render state and scissor. */
+    gDPPipeSync(gfx++);
+    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+    gfx = Menus_DrawBeveledBox(gfx, left, top, GDX_NET_RACE_BOX_RIGHT, GDX_NET_RACE_BOX_BOTTOM, 0, 0, 200, 127);
+    /* The 2D set-up again, for text: the box above ends in its own combine mode, and the glyphs have no
+       palette. A string is placed by its baseline. */
+    gSPDisplayList(gfx++, D_8014940);
+    gDPPipeSync(gfx++);
+    gDPSetTextureLUT(gfx++, G_TT_NONE);
+    for (i = 0; i < rows; i++) {
+        gfx = Menus_SetOptionColor(gfx, cursor - i);
+        gfx = Font_DrawString(gfx, left + GDX_NET_RACE_BOX_WORDS, top + 3 + (i * GDX_NET_RACE_BOX_PITCH) + 12,
+                              (s8*) gdx_net_race_box_text(i), 0, FONT_SET_4, 0);
+    }
+    gDPPipeSync(gfx++);
+    gfx = func_8007DB28(gfx, 0);
+    gfx = Font_DrawScaledString(gfx, left + 5, top + 3 + (cursor * GDX_NET_RACE_BOX_PITCH) + 17, "\243\315", 1,
+                                FONT_SET_5, 0, 0.8f, 0.8f);
+    gDPPipeSync(gfx++);
+    return gfx;
+}
+#endif
+
 Gfx* Menus_Draw(Gfx* gfx) {
     s32 i = 0;
     s32 j;
@@ -6400,10 +6496,22 @@ Gfx* Menus_Draw(Gfx* gfx) {
             }
         }
 
+#ifdef PORT
+        /* A course with forks never records a ghost (Racer_Init), so gUnableToRecordGhost is set from the
+           first frame. The stock warning is for a recording that ran out of room mid-race; on a fork course
+           it would sit on the HUD for the whole run. */
+        { extern s32 gdx_course_branch_live(void);
+        if ((gGameMode == GAMEMODE_TIME_ATTACK) && !gGamePaused && gUnableToRecordGhost &&
+            !gdx_course_branch_live() &&
+            (gCameras[playerIndex].mode == CAMERA_MODE_RACE) && (sPlayerGameoverState[0] == PLAYER_GAMEOVER_NONE)) {
+            gfx = Menus_DrawCannotSaveGhost(gfx);
+        } }
+#else
         if ((gGameMode == GAMEMODE_TIME_ATTACK) && !gGamePaused && gUnableToRecordGhost &&
             (gCameras[playerIndex].mode == CAMERA_MODE_RACE) && (sPlayerGameoverState[0] == PLAYER_GAMEOVER_NONE)) {
             gfx = Menus_DrawCannotSaveGhost(gfx);
         }
+#endif
 #ifdef PORT
         if ((gGameMode != GAMEMODE_PRACTICE) || gdx_single_race_finite()) {
 #else
@@ -6479,8 +6587,16 @@ Gfx* Menus_Draw(Gfx* gfx) {
                 }
             }
         }
+#ifdef PORT
+        /* A room's race is over when the room says so, and its results are the room's: the others are
+           still driving, so nobody is given an estimated time and no results screen comes up here. */
+        if (!gdx_net_race_online() &&
+            ((sPlayerFinishState[0] == PLAYER_FINISH_SUCCESS_COMPLETE) ||
+             ((gCameras[playerIndex].mode == CAMERA_MODE_FINISHED_LOSER) && (sPlayerLoserFinishTimer[0] > 300)))) {
+#else
         if ((sPlayerFinishState[0] == PLAYER_FINISH_SUCCESS_COMPLETE) ||
             ((gCameras[playerIndex].mode == CAMERA_MODE_FINISHED_LOSER) && (sPlayerLoserFinishTimer[0] > 300))) {
+#endif
             if (!D_i3_80141B78[playerIndex]) {
                 D_i3_80141B78[playerIndex] = true;
                 if (gGameMode != GAMEMODE_TIME_ATTACK) {
@@ -6654,7 +6770,13 @@ Gfx* Menus_Draw(Gfx* gfx) {
                             sMenuIsBusy = true;
                             sMenuStateFlags |= MENU_STATE_RETIRE_RESTART;
                         }
+#ifdef PORT
+                    /* No Retry box in a room's race: the quit box (gdx_net_race_box_draw) stands in its
+                       place, and the room takes this copy back when the race ends. */
+                    } else if ((sPlayerRetireTimer[0] > 200) && !gdx_net_race_online()) {
+#else
                     } else if (sPlayerRetireTimer[0] > 200) {
+#endif
                         if (gGameMode != GAMEMODE_DEATH_RACE) {
                             gfx = Menus_DrawRetiredEndMenu(gfx);
                         } else {
@@ -6779,6 +6901,16 @@ Gfx* Menus_Draw(Gfx* gfx) {
             sPauseMenuScissorBoxTimer = 60;
             sPauseMenuOptionIndex = 0;
             for (i = 0; i < gNumPlayers; i++) {
+#ifdef PORT
+                /* A G-NET room's race has no pause: the other copies would race on. */
+                {
+                    extern int gdx_net_race_online(void);
+
+                    if (gdx_net_race_online()) {
+                        break;
+                    }
+                }
+#endif
                 if ((gControllers[gPlayerControlPorts[i]].buttonPressed & BTN_START) &&
                     (gTitleDemoState == TITLE_DEMO_INACTIVE) && (D_800E5FBC == 0) && (gRaceIntroTimer < 320)) {
                     sMenuStateFlags |= MENU_STATE_PAUSE_GAME;
@@ -6788,5 +6920,8 @@ Gfx* Menus_Draw(Gfx* gfx) {
             }
         }
     }
+#ifdef PORT
+    gfx = gdx_net_race_box_draw(gfx);
+#endif
     return gfx;
 }

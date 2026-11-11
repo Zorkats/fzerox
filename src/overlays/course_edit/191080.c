@@ -2801,6 +2801,14 @@ Gfx* func_xk2_800E8080(Gfx* gfx) {
 
     gSPDisplayList(gfx++, D_9014908);
 
+#ifdef PORT
+    {
+        extern void CourseEdit_HorizonSync(void); // expansion_kit/A3AE0.c
+
+        // The HORIZON rows follow the track's list, which an undo or the settings panel can change.
+        CourseEdit_HorizonSync();
+    }
+#endif
     for (i = 0; i < 5; i++) {
         if (gCourseEditWidget.menuItems[i].widget == NULL) {
             continue;
@@ -2887,8 +2895,15 @@ Gfx* func_xk2_800E8080(Gfx* gfx) {
                 gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 8, 308, 232);
                 gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 128);
 
+#ifdef PORT
+                // The shade covers every row but the first, however many the menu has.
+                gSPTextureRectangle(gfx++, temp_t2_2 << 2, temp_t1 << 2, (temp_t2_2 + 48) << 2,
+                                    (temp_t1 + ((temp_v0_2->numItems - 1) * temp_v0_2->itemYOffset)) << 2, 0, 0, 0,
+                                    1 << 10, 1 << 10);
+#else
                 gSPTextureRectangle(gfx++, temp_t2_2 << 2, temp_t1 << 2, (temp_t2_2 + 48) << 2, (temp_t1 + 80) << 2, 0,
                                     0, 0, 1 << 10, 1 << 10);
+#endif
 
                 gSPDisplayList(gfx++, D_3000540);
                 func_xk2_800EECD4(&gfx, temp_t2_2 + 48, temp_t1 + 16, D_xk1_800331F0[24], 24);
