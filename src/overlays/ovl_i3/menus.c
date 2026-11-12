@@ -6105,13 +6105,16 @@ static Gfx* Menus_DrawSplitGpRace(Gfx* gfx) {
    has is the quit box (port/gdx_net_race_box.h): START opens it while the race runs on behind it, and it
    comes up by itself a little after the copy's own machine is out. It stands where the stock Retry box
    does and is drawn like it: the same bevelled box, size, row pitch, cursor and sounds, and words drawn
-   as its words are (port/gdx_net_race_words.h). It appears whole, without the scissor that opens the
-   stock one. */
+   as its words are (port/gdx_net_race_words.h). It opens as the stock one does too: a scissor 5 pixels
+   wider than the box on each side shrinks by the opening timer on each side, so the box grows from its
+   centre over 60 frames (Menus_DrawRetiredEndMenu), and it takes no press until it is fully open. */
 #include "../../../../port/gdx_net_race_words.h"
 extern int gdx_net_race_box_frame(int start, int accept, int back, int up, int down, int stickY);
 extern int gdx_net_race_box_rows(void);
 extern int gdx_net_race_box_cursor(void);
+extern int gdx_net_race_box_opening(void);
 extern int gdx_net_race_box_word(int row);
+extern float gdx_get_widescreen_geometry_xscale(void);
 
 #define GDX_NET_RACE_BOX_LEFT 210   /* the edges of the stock Retry box, which is as wide as its words */
 #define GDX_NET_RACE_BOX_RIGHT 300
@@ -6119,6 +6122,7 @@ extern int gdx_net_race_box_word(int row);
 #define GDX_NET_RACE_BOX_PITCH 15   /* from one row to the next, as in the stock box */
 #define GDX_NET_RACE_BOX_WORDS 230  /* the left edge of the words, as in the stock box */
 #define GDX_NET_RACE_BOX_CURSOR 215 /* the cursor's left edge, as in the stock box */
+#define GDX_NET_RACE_BOX_REVEAL 5   /* the stock scissor stands this far outside the box when it is open */
 
 static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
     Controller* pad = &gControllers[gPlayerControlPorts[0]];
@@ -6131,6 +6135,12 @@ static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
     s32 top;
     s32 y;
     s32 i;
+    s32 timer;
+    s32 ulx;
+    s32 uly;
+    s32 lrx;
+    s32 lry;
+    f32 wsx;
 
     if (!gdx_net_race_online() || (gTitleDemoState != TITLE_DEMO_INACTIVE)) {
         return gfx;
@@ -6163,9 +6173,27 @@ static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
     /* The stock box is 137 to 221 for five rows: 3 above its first row and 21 below the top of its last. */
     top = GDX_NET_RACE_BOX_BOTTOM - 21 - ((rows - 1) * GDX_NET_RACE_BOX_PITCH) - 3;
 
-    /* The HUD drawn before this leaves its own render state and scissor. */
+    /* The HUD drawn before this leaves its own render state and scissor. The box's own scissor replaces
+       it, as in Menus_DrawRetiredEndMenu: each side moves in by the opening timer, the edges are re-centred
+       about the hor+ pivot 160 on a wide screen, and a scissor that has crossed itself is clamped shut. */
+    timer = gdx_net_race_box_opening();
+    ulx = GDX_NET_RACE_BOX_LEFT - GDX_NET_RACE_BOX_REVEAL + timer;
+    uly = top - GDX_NET_RACE_BOX_REVEAL + timer;
+    lrx = GDX_NET_RACE_BOX_RIGHT + GDX_NET_RACE_BOX_REVEAL - timer;
+    lry = GDX_NET_RACE_BOX_BOTTOM + GDX_NET_RACE_BOX_REVEAL - timer;
+    wsx = gdx_get_widescreen_geometry_xscale();
+    if (wsx != 1.0f) {
+        ulx = 160 + (s32) ((ulx - 160) * wsx);
+        lrx = 160 + (s32) ((lrx - 160) * wsx);
+    }
+    if (ulx > lrx) {
+        ulx = lrx;
+    }
+    if (uly > lry) {
+        uly = lry;
+    }
     gDPPipeSync(gfx++);
-    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
     gfx = Menus_DrawBeveledBox(gfx, GDX_NET_RACE_BOX_LEFT, top, GDX_NET_RACE_BOX_RIGHT, GDX_NET_RACE_BOX_BOTTOM, 0,
                                0, 200, 127);
     /* The words as the stock box draws its own: the menu text palette, then each row tinted and drawn as a
