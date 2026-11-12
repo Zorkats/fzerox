@@ -2927,7 +2927,12 @@ Gfx* Menus_DrawTimeAttackFinishMenu(Gfx* gfx) {
     }
 
 #ifdef EXPANSION_KIT
-    if ((sGeneralRaceMenuScissorBoxTimer == 1) && (gCourseIndex >= COURSE_EDIT_1) && (gCourseIndex < COURSE_X_1)) {
+    /* A G-NET room's race saves nothing: its Edit Cup course is the room's track, not this copy's slot. */
+    if ((sGeneralRaceMenuScissorBoxTimer == 1) && (gCourseIndex >= COURSE_EDIT_1) && (gCourseIndex < COURSE_X_1)
+#ifdef PORT
+        && !gdx_net_race_online()
+#endif
+    ) {
         Save_SaveCourseRecordProfiles(gCourseIndex);
     }
 #endif

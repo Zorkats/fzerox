@@ -24,6 +24,7 @@
 #include "../../../port/gdx_course_gadget_budget.h"
 #include "../../../port/gdx_course_settings_view.h"
 #include "../../../port/gdx_dash_pad.h"
+#include "../../../port/gdx_net_room_course.h"
 #include "../../../port/gdx_wind.h"
 
 #define GDX_GADGET_COUNT(course) gdx_course_branch_gadget_count(course)
@@ -4809,6 +4810,26 @@ static void Gdx_CourseContextSaves_FromRom(void) {
         }
     }
 }
+
+extern s32 gGameMode;
+extern s32 gNumPlayers;
+
+/* G-NET O4.8: a room's custom track, from the room's copy in memory (port/gdx_net_room_course.h). Nothing is
+ * read from the disk and nothing is saved: the slot's ghosts and records start empty, as on a slot with no
+ * file. A course that does not check out is refused, and the race bridge sends the player back to the room. */
+static void Gdx_LoadRoomCourse(s32 courseIndex) {
+    if (!gdx_net_room_course_copy(COURSE_CONTEXT(), sizeof(CourseContext))) {
+        gdx_net_room_course_refuse();
+    }
+    DDSave_ClearCachedGhostSaves();
+    Save_ClearCourseRecord(DDSave_GetCachedCourseRecord());
+    func_i2_800A8CE4(DDSave_GetCachedCourseRecord(), courseIndex);
+    if (Course_CalculateChecksum() != COURSE_CONTEXT()->courseData.checksum) {
+        gdx_dbg_logf("[net-race] the room's custom track failed its checksum\n");
+        gdx_net_room_course_refuse();
+    }
+    gCourseInfos[courseIndex].encodedCourseIndex = (Course_CalculateChecksum() << 5) | COURSE_EDIT_1;
+}
 #endif
 
 void Course_Load(s32 courseIndex) {
@@ -4817,6 +4838,11 @@ void Course_Load(s32 courseIndex) {
     s32 pad2;
     RomOffset romAddr;
     s32 pad3[2];
+#if defined(PORT) && defined(EXPANSION_KIT)
+    /* The room's own race takes the room's course; every other load drops it. */
+    s32 gdxRoomCourse = gdx_net_room_course_take(
+        courseIndex, gdx_net_race_room_course_held() && (gGameMode == GAMEMODE_PRACTICE) && (gNumPlayers == 1));
+#endif
 
 #ifdef EXPANSION_KIT
     PRINTF("============== COURSE LOAD %2d  ==============\n", courseIndex);
@@ -4842,6 +4868,10 @@ void Course_Load(s32 courseIndex) {
     } else if (courseIndex >= COURSE_X_1) {
         Course_GenerateRandomCourse();
         return;
+#if defined(PORT) && defined(EXPANSION_KIT)
+    } else if (gdxRoomCourse) {
+        Gdx_LoadRoomCourse(courseIndex);
+#endif
     } else if (courseIndex >= COURSE_EDIT_1) {
         diskCourseIndex = courseIndex - COURSE_EDIT_1;
 #ifndef EXPANSION_KIT

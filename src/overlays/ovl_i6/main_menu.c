@@ -386,6 +386,10 @@ static bool gdx_main_menu_lock_in_opens(void) {
     D_800CD384 = (D_800CD384 == GDX_MAIN_MENU_ROOM_STATE) ? GDX_MAIN_MENU_ROOM_HOLD_STATE : 5;
     gCourseIndex = gdx_net_machine_select_track();
     gCurrentTrackName = gTrackNames[gCourseIndex];
+    /* A custom track races in the first Edit Cup slot under its own title. */
+    if (gdx_net_machine_select_track_title() != NULL) {
+        gCurrentTrackName = (char*) gdx_net_machine_select_track_title();
+    }
     gNumPlayers = 1;
     Audio_SetPlayerMode(gNumPlayers - 1);
     return true;

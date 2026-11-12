@@ -435,8 +435,10 @@ void CourseSelect_Init(void) {
         k = gLastRecordsCourseIndex;
     }
 #ifdef PORT
-    /* A room has no Edit Cup: its course select opens on the first cup in place of one. */
-    if (gdx_net_track_choice_active() && (k >= COURSE_EDIT_1) && (k < COURSE_X_1)) {
+    /* A room has no second row but the Edit Cup, and that only when it takes custom tracks: its course select
+       opens on the first cup in place of another. */
+    if (gdx_net_track_choice_active() && (k >= COURSE_EDIT_1) && (k < COURSE_X_1) &&
+        !(gdx_net_track_choice_custom_tracks() && (k < COURSE_EDIT_1 + 6))) {
         k = 0;
     }
 #endif
@@ -510,8 +512,13 @@ void CourseSelect_Init(void) {
     Object_Init(OBJECT_COURSE_SELECT_MODEL, 0, 0, 8);
 #ifdef EXPANSION_KIT
 #ifdef PORT
-    /* A room races the stock tracks, so its cup screen has no second row. */
-    if (!gdx_net_track_choice_active())
+    /* A room races the stock tracks, and its racers' own Edit Cup tracks when it takes custom tracks: its second
+       row is the Edit Cup alone, or nothing. */
+    if (gdx_net_track_choice_active()) {
+        if (gdx_net_track_choice_custom_tracks()) {
+            Object_Init(OBJECT_COURSE_SELECT_CUP_5, 128, 0, 6);
+        }
+    } else
 #endif
     {
         Object_Init(OBJECT_COURSE_SELECT_CUP_7, 128, 0, 6);
@@ -621,12 +628,21 @@ extern char gEditCupTrackNames[][EDIT_CUP_TRACK_NAME_SIZE];
 /* The room has its track: the cup screen, or a track of any cup, turns to it. Safe to run every tick. */
 static void CourseSelect_GdxShowTrack(s32 track) {
     s32 cup = track / 6;
+    s32 option = cup;
+    s32 cupType = cup;
     bool placeModel = (sCourseSelectState == COURSE_SELECT_CUP_SELECT);
 
-    if (sCourseSelectCup != cup) {
-        gCupSelectOption = cup;
+#ifdef EXPANSION_KIT
+    /* A track of this copy's Edit Cup, the second row's first cup. */
+    if (track >= COURSE_EDIT_1) {
+        option = GDX_NET_TRACK_CHOICE_EDIT_CUP;
+        cupType = EDIT_CUP;
+    }
+#endif
+    if ((sCourseSelectCup != cup) || (gCupSelectOption != option)) {
+        gCupSelectOption = option;
         sCourseSelectCup = cup;
-        gCupType = cup;
+        gCupType = cupType;
         CourseModel_Init(cup);
         placeModel = true;
     }
@@ -658,7 +674,12 @@ static bool CourseSelect_GdxTrackChoice(void) {
                 case GDX_NET_TRACK_CHOICE_CHOOSE:
                     return false;
                 case GDX_NET_TRACK_CHOICE_SHOW:
-                    CourseSelect_GdxShowTrack(gdx_net_track_choice_shown_track());
+                    if (gdx_net_track_choice_shown_track() >= 0) {
+                        CourseSelect_GdxShowTrack(gdx_net_track_choice_shown_track());
+                    } else {
+                        /* A custom track this copy lacks: the screen stays where it is and names it. */
+                        sCourseSelectState = COURSE_SELECT_CONTINUE;
+                    }
                     break;
                 case GDX_NET_TRACK_CHOICE_LEAVE:
                     /* The lock-in poll is asked only here, where its answer is acted on: a 1 commits it. */
@@ -667,6 +688,10 @@ static bool CourseSelect_GdxTrackChoice(void) {
                         gdx_net_track_choice_hold();
                         gCourseIndex = gdx_net_machine_select_track();
                         gCurrentTrackName = gTrackNames[gCourseIndex];
+                        /* A custom track races in the first Edit Cup slot under its own title. */
+                        if (gdx_net_machine_select_track_title() != NULL) {
+                            gCurrentTrackName = (char*) gdx_net_machine_select_track_title();
+                        }
                         sCourseSelectState = COURSE_SELECT_CONTINUE;
                         return true;
                     }
@@ -792,6 +817,12 @@ s32 CourseSelect_Update(void) {
                 }
 #endif
             }
+#if defined(PORT) && defined(EXPANSION_KIT)
+            /* A room's second row is the Edit Cup alone: every way into the row, or along it, ends there. */
+            if (gdx_net_track_choice_active() && (gCupSelectOption > GDX_NET_TRACK_CHOICE_EDIT_CUP)) {
+                gCupSelectOption = GDX_NET_TRACK_CHOICE_EDIT_CUP;
+            }
+#endif
             if (gCupSelectOption >= 10) {
 #ifdef EXPANSION_KIT
                 if (gCupSelectOption == 10) {
@@ -1591,6 +1622,15 @@ Gfx* CourseSelect_NameDraw(Gfx* gfx) {
             cupTrackNoStr[3] = '\0';
             cupTrackNoWidth = Font_GetStringWidth(cupTrackNoStr, FONT_SET_3, 0);
 #ifdef PORT
+            if (gdx_net_track_choice_active() && (gdx_net_track_choice_foreign_title() != NULL)) {
+                /* The room drew a custom track this copy lacks: its title stands where a name would. */
+                s8* title = (s8*) gdx_net_track_choice_foreign_title();
+
+                gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+                gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(title, FONT_SET_3, 0) / 2), 200, title, 0,
+                                      FONT_SET_3, 0);
+                break;
+            }
             if (gdx_net_track_choice_active() && (sCourseSelectCup == NUM_COMPETITIVE_CUPS)) {
                 /* In a room the X Cup's place is the ballot that lets the room draw, and it is named so. */
                 s8* title = (s8*) gdx_net_track_choice_random_title();
@@ -1652,6 +1692,10 @@ Gfx* CourseSelect_NameDraw(Gfx* gfx) {
                                                    sizeof(caption)) == 0) ||
                             (Font_GetStringWidth(caption, FONT_SET_4, 0) > 300)) {
                             gdx_meta_view_caption(trackName, line, caption, sizeof(caption));
+                        }
+                        // In a room the rows under the first caption hold the room's lines.
+                        if (gdx_net_track_choice_active() && (captionY > 210)) {
+                            break;
                         }
                         if ((caption[0] != '\0') && (Font_GetStringWidth(caption, FONT_SET_4, 0) <= 300)) {
                             gfx = Font_DrawString(gfx, 160 - (Font_GetStringWidth(caption, FONT_SET_4, 0) / 2),

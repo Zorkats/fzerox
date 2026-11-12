@@ -2381,11 +2381,32 @@ void func_8008D33C(void) {
     s32 characterSlot;
     s32 i;
     CustomMachine* temp_a1;
+#ifdef PORT
+    /* G-NET O4.5: in an online race every copy builds the field from the room's machine records and the
+     * stock machines alone, so no local edit, unlock or stat override reaches the race. */
+    extern s32 gdx_net_race_machines_set(void);
+    extern s32 gdx_net_race_machine_record(s32 character, u8* out);
+    s32 netMachines = gdx_net_race_machines_set();
+    CustomMachine netRecord;
+    s8 customState;
+#endif
 
     for (i = 29; i >= 0; i--) {
         characterSlot = Character_GetSlotFromCharacter(i);
         temp_a1 = &gCustomMachinesInfo.customMachines[characterSlot];
+#ifdef PORT
+        customState = gCustomMachinesInfo.characterCustomState[characterSlot];
+        if (netMachines) {
+            customState = 0;
+            if (gdx_net_race_machine_record(i, (u8*) &netRecord)) {
+                temp_a1 = &netRecord;
+                customState = 1;
+            }
+        }
+        if (customState > 0) {
+#else
         if (gCustomMachinesInfo.characterCustomState[characterSlot] > 0) {
+#endif
             temp_a2 = &sCustomMachineInfo[i];
             temp_a2->decalR = temp_a1->decalR;
             temp_a2->decalG = temp_a1->decalG;
@@ -2422,7 +2443,11 @@ void func_8008D33C(void) {
             gMachines[i].machineStats[GRIP_STAT] = GRIP_E - temp_a1->grip;
             gMachines[i].weight =
                 D_800CF488[temp_a2->frontType] + D_800CF498[temp_a2->rearType] + D_800CF4A8[temp_a2->wingType];
+#ifdef PORT
+        } else if (customState < 0) {
+#else
         } else if (gCustomMachinesInfo.characterCustomState[characterSlot] < 0) {
+#endif
             if ((i == CAPTAIN_FALCON) && (D_i2_80111848[CAPTAIN_FALCON] != 0)) {
                 gMachines[i] = sDefaultMachines[30];
             } else {
@@ -2450,7 +2475,9 @@ void func_8008D33C(void) {
      * roster slots. Stats feed physics, so ghosts/records made under overrides desync
      * vs stock (same caveat class as BoostDuration). */
     extern void GdxMachineStats_ApplyToMachines(void);
-    GdxMachineStats_ApplyToMachines();
+    if (!netMachines) {
+        GdxMachineStats_ApplyToMachines();
+    }
 #endif
 }
 #else
@@ -6645,14 +6672,21 @@ extern int gdx_course_state_edit_file_id(char* out, int outCap);
 extern int gdx_course_music_course_id(const char* name, const char* extension, char* out, int outCap);
 extern void gdx_course_music_arm_for_course(const char* courseId, int bgmId);
 extern int gdx_course_skybox_resolve(const char* courseId);
+extern int gdx_net_room_course_active(void);
+extern int gdx_net_room_course_skybox(void);
 
 /* 7A/9D: the course file id ("NAME.EXT") of the course about to start: the editor test run, or one of the
-   six disk Edit Cup slots. Returns 1 when out holds the id. Every other course has no course file. */
+   six disk Edit Cup slots. Returns 1 when out holds the id. Every other course has no course file, and
+   neither has a G-NET room's custom track: it races in the first slot but is not that slot's file
+   (port/gdx_net_room_course.h). */
 int gdx_racer_course_file_id(char* out, int outCap) {
     s32 diskCourseIndex = gCurrentCourseInfo->courseIndex - COURSE_EDIT_1;
 
     if (gInCourseEditTestRun) {
         return gdx_course_state_edit_file_id(out, outCap);
+    }
+    if (gdx_net_room_course_active()) {
+        return 0;
     }
     if ((diskCourseIndex >= 0) && (diskCourseIndex < 6) && (gEditCupTrackNames[diskCourseIndex][0] != '\0')) {
         char name[EDIT_CUP_TRACK_NAME_SIZE + 1];
@@ -6703,10 +6737,13 @@ void gdx_racer_resolve_course_skybox(void) {
     char courseId[26]; /* GDX_COURSE_FILE_ID_MAX + 1 */
     s32 stockSkybox;
 
-    if (!gdx_racer_course_file_id(courseId, sizeof(courseId))) {
+    if (gdx_net_room_course_active()) {
+        stockSkybox = gdx_net_room_course_skybox();
+    } else if (gdx_racer_course_file_id(courseId, sizeof(courseId))) {
+        stockSkybox = gdx_course_skybox_resolve(courseId);
+    } else {
         return;
     }
-    stockSkybox = gdx_course_skybox_resolve(courseId);
     if (stockSkybox >= 0) {
         COURSE_CONTEXT()->courseData.skybox = stockSkybox;
     }
