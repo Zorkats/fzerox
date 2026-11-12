@@ -6104,27 +6104,32 @@ static Gfx* Menus_DrawSplitGpRace(Gfx* gfx) {
 /* A room's race has no pause and no Retry box, and nobody can end it for the others. What every racer
    has is the quit box (port/gdx_net_race_box.h): START opens it while the race runs on behind it, and it
    comes up by itself a little after the copy's own machine is out. It stands where the stock Retry box
-   does and is drawn like it: the same bevelled box, row pitch, cursor and sounds. Its words are in the
-   small font, and it appears whole, without the scissor that opens the stock one. */
+   does and is drawn like it: the same bevelled box, size, row pitch, cursor and sounds, and words drawn
+   as its words are (port/gdx_net_race_words.h). It appears whole, without the scissor that opens the
+   stock one. */
+#include "../../../../port/gdx_net_race_words.h"
 extern int gdx_net_race_box_frame(int start, int accept, int back, int up, int down, int stickY);
 extern int gdx_net_race_box_rows(void);
 extern int gdx_net_race_box_cursor(void);
-extern const char* gdx_net_race_box_text(int row);
+extern int gdx_net_race_box_word(int row);
 
-#define GDX_NET_RACE_BOX_RIGHT 300  /* the right and bottom edges of the stock Retry box */
+#define GDX_NET_RACE_BOX_LEFT 210   /* the edges of the stock Retry box, which is as wide as its words */
+#define GDX_NET_RACE_BOX_RIGHT 300
 #define GDX_NET_RACE_BOX_BOTTOM 221
 #define GDX_NET_RACE_BOX_PITCH 15   /* from one row to the next, as in the stock box */
-#define GDX_NET_RACE_BOX_WORDS 20   /* from the box's left edge to its words: the stock 230 - 210 */
-#define GDX_NET_RACE_BOX_MARGIN 8   /* from the widest word to the box's right edge */
+#define GDX_NET_RACE_BOX_WORDS 230  /* the left edge of the words, as in the stock box */
+#define GDX_NET_RACE_BOX_CURSOR 215 /* the cursor's left edge, as in the stock box */
 
 static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
     Controller* pad = &gControllers[gPlayerControlPorts[0]];
+    const unsigned char* texture;
     s32 rows;
     s32 cursor;
-    s32 widest = 0;
+    s32 word;
     s32 width;
-    s32 left;
+    s32 height;
     s32 top;
+    s32 y;
     s32 i;
 
     if (!gdx_net_race_online() || (gTitleDemoState != TITLE_DEMO_INACTIVE)) {
@@ -6155,34 +6160,37 @@ static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
         return gfx;
     }
     cursor = gdx_net_race_box_cursor();
-    for (i = 0; i < rows; i++) {
-        width = Font_GetStringWidth((s8*) gdx_net_race_box_text(i), FONT_SET_4, 0);
-        if (width > widest) {
-            widest = width;
-        }
-    }
     /* The stock box is 137 to 221 for five rows: 3 above its first row and 21 below the top of its last. */
-    left = GDX_NET_RACE_BOX_RIGHT - GDX_NET_RACE_BOX_MARGIN - widest - GDX_NET_RACE_BOX_WORDS;
     top = GDX_NET_RACE_BOX_BOTTOM - 21 - ((rows - 1) * GDX_NET_RACE_BOX_PITCH) - 3;
 
     /* The HUD drawn before this leaves its own render state and scissor. */
     gDPPipeSync(gfx++);
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
-    gfx = Menus_DrawBeveledBox(gfx, left, top, GDX_NET_RACE_BOX_RIGHT, GDX_NET_RACE_BOX_BOTTOM, 0, 0, 200, 127);
-    /* The 2D set-up again, for text: the box above ends in its own combine mode, and the glyphs have no
-       palette. A string is placed by its baseline. */
-    gSPDisplayList(gfx++, D_8014940);
-    gDPPipeSync(gfx++);
-    gDPSetTextureLUT(gfx++, G_TT_NONE);
+    gfx = Menus_DrawBeveledBox(gfx, GDX_NET_RACE_BOX_LEFT, top, GDX_NET_RACE_BOX_RIGHT, GDX_NET_RACE_BOX_BOTTOM, 0,
+                               0, 200, 127);
+    /* The words as the stock box draws its own: the menu text palette, then each row tinted and drawn as a
+       CI texture. CONTINUE is the stock word; the others are 16-row textures of the same kind. */
+    gSPDisplayList(gfx++, aMenuTextTlutSetupDL);
+    gDPLoadTLUT_pal256(gfx++, func_800783AC(aMenuTextTLUT));
     for (i = 0; i < rows; i++) {
+        word = gdx_net_race_box_word(i);
+        y = top + 3 + (i * GDX_NET_RACE_BOX_PITCH);
         gfx = Menus_SetOptionColor(gfx, cursor - i);
-        gfx = Font_DrawString(gfx, left + GDX_NET_RACE_BOX_WORDS, top + 3 + (i * GDX_NET_RACE_BOX_PITCH) + 12,
-                              (s8*) gdx_net_race_box_text(i), 0, FONT_SET_4, 0);
+        if (word == GDX_NET_RACE_WORD_CONTINUE) {
+            gfx = Menus_DrawRaceMenuTexture(gfx, RACE_MENU_CONTINUE, GDX_NET_RACE_BOX_WORDS, y);
+            continue;
+        }
+        texture = gdx_net_race_words_texture(word, &width, &height);
+        if (texture != NULL) {
+            gfx = func_8007E410(gfx, (TexturePtr) texture, NULL, G_IM_FMT_CI, 1, GDX_NET_RACE_BOX_WORDS, y, width,
+                                height, 2);
+        }
     }
     gDPPipeSync(gfx++);
+    gDPSetTextureLUT(gfx++, G_TT_NONE);
     gfx = func_8007DB28(gfx, 0);
-    gfx = Font_DrawScaledString(gfx, left + 5, top + 3 + (cursor * GDX_NET_RACE_BOX_PITCH) + 17, "\243\315", 1,
-                                FONT_SET_5, 0, 0.8f, 0.8f);
+    gfx = Font_DrawScaledString(gfx, GDX_NET_RACE_BOX_CURSOR, top + 3 + (cursor * GDX_NET_RACE_BOX_PITCH) + 17,
+                                "\243\315", 1, FONT_SET_5, 0, 0.8f, 0.8f);
     gDPPipeSync(gfx++);
     return gfx;
 }
@@ -6347,7 +6355,13 @@ Gfx* Menus_Draw(Gfx* gfx) {
 #endif
                 }
                 if (((gNumPlayers != 1) || (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE)) &&
-                    !(gRacers[i].stateFlags & RACER_STATE_FINISHED)) {
+                    !(gRacers[i].stateFlags & RACER_STATE_FINISHED)
+#ifdef PORT
+                    /* The quit box of a room's race is translucent and sits over the speed: the speed
+                       is not drawn while it is open, as under a pause. */
+                    && (gdx_net_race_box_rows() == 0)
+#endif
+                ) {
 #ifdef PORT
                     gdxRaceAnchor = GdxRaceSpeedAnchor(gNumPlayers, i, gdxWideHud, gdxWideSplitHud);
                     if (gdxRaceAnchor != 0) {
