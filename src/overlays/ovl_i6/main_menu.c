@@ -196,6 +196,8 @@ const s32 kMaxSubOptionLimits[] = { 3, 1, 0, 2, 0, 3, 0, 0 };
 extern int gdx_gp_resume_available(int* outDifficulty);
 extern int gdx_gp_resume_enabled(void);
 extern void gdx_gp_resume_request_continue(void);
+/* G-NET stays closed in a nightly build until a stable release carries it (port/gdx_update.h). */
+extern int gdx_build_is_nightly(void);
 extern Gfx* func_80078DB4(Gfx* gfx, unk_80077D50* arg1, s32 left, s32 top, TexturePtr texture, u32 arg5, s32 arg6,
                           s32 arg7, f32 arg8, f32 arg9);
 
@@ -293,9 +295,14 @@ static u64 sGdxGnetSignStorage[GDX_GNET_SIGN_WIDTH * GDX_GNET_SIGN_STORAGE_ROWS 
 static unk_80077D50 sGdxGnetSignTexInfo = { 17, sGdxGnetSignStorage, GDX_GNET_SIGN_WIDTH, GDX_GNET_SIGN_HEIGHT, 0 };
 static bool sGdxGnetSignReady = false;
 
-/* Cards the cursor may stop on: the stock rules for Versus, Course Edit and Create Machine. */
+/* Cards the cursor may stop on: the stock rules for Versus, Course Edit and Create Machine, and G-NET outside
+   a nightly build. */
 static unsigned gdx_main_menu_cards_available(void) {
     unsigned available = GDX_MAIN_MENU_GRID_ALL;
+
+    if (gdx_build_is_nightly()) {
+        available &= ~(1u << GDX_MAIN_MENU_GNET_CARD);
+    }
 
 #ifndef EXPANSION_KIT
 #ifndef VERSION_JP
@@ -348,12 +355,25 @@ static bool gdx_main_menu_build_gnet_sign(void) {
     return sGdxGnetSignReady;
 }
 
-/* Draws the G-NET card the way MainMenu_SignDraw draws a mode sign, sliding in with `counter`. */
+/* Draws the G-NET card the way MainMenu_SignDraw draws a mode sign, sliding in with `counter`. In a nightly build
+   the card is greyed, the cursor passes it by, and one line over its foot says why. */
 static Gfx* gdx_main_menu_gnet_draw(Gfx* gfx, s32 counter) {
+    static const char kClosed[] = "STABLE ONLY";
+    const s32 left = gdx_main_menu_grid_left(GDX_MAIN_MENU_GNET_CARD) - SQ(counter) * 2;
+    const s32 top = gdx_main_menu_grid_top(GDX_MAIN_MENU_GNET_CARD);
     s32 pulse;
 
     if (!gdx_main_menu_build_gnet_sign()) {
         return gfx;
+    }
+    if (gdx_build_is_nightly()) {
+        gDPSetPrimColor(gfx++, 0, 0, 70, 70, 70, 150);
+        gfx = func_80078DB4(gfx, &sGdxGnetSignTexInfo, left, top, (TexturePtr) sGdxGnetSignStorage, 4, 0, 0,
+                            GDX_MAIN_MENU_GRID_SCALE, GDX_MAIN_MENU_GRID_SCALE);
+        /* Centred on the card, over its foot, where the Japanese build writes a card's name. */
+        gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+        return Font_DrawString(gfx, left + 24 - (Font_GetStringWidth((s8*) kClosed, FONT_SET_4, 0) / 2), top + 52,
+                               (s8*) kClosed, 0, FONT_SET_4, 0);
     }
     if (gSelectedMode == GDX_MAIN_MENU_GNET_CARD) {
         if (D_800CD384 == 0) {
@@ -368,8 +388,7 @@ static Gfx* gdx_main_menu_gnet_draw(Gfx* gfx, s32 counter) {
     } else {
         gDPSetPrimColor(gfx++, 0, 0, 128, 128, 128, 180);
     }
-    return func_80078DB4(gfx, &sGdxGnetSignTexInfo, gdx_main_menu_grid_left(GDX_MAIN_MENU_GNET_CARD) - SQ(counter) * 2,
-                         gdx_main_menu_grid_top(GDX_MAIN_MENU_GNET_CARD), (TexturePtr) sGdxGnetSignStorage, 4, 0, 0,
+    return func_80078DB4(gfx, &sGdxGnetSignTexInfo, left, top, (TexturePtr) sGdxGnetSignStorage, 4, 0, 0,
                          GDX_MAIN_MENU_GRID_SCALE, GDX_MAIN_MENU_GRID_SCALE);
 }
 

@@ -6110,9 +6110,10 @@ static Gfx* Menus_DrawSplitGpRace(Gfx* gfx) {
    has is the quit box (port/gdx_net_race_box.h): START opens it while the race runs on behind it, and it
    comes up by itself a little after the copy's own machine is out. It stands where the stock Retry box
    does and is drawn like it: the same bevelled box, size, row pitch, cursor and sounds, and words drawn
-   as its words are (port/gdx_net_race_words.h). It opens as the stock one does too: a scissor 5 pixels
-   wider than the box on each side shrinks by the opening timer on each side, so the box grows from its
-   centre over 60 frames (Menus_DrawRetiredEndMenu), and it takes no press until it is fully open. */
+   as its words are (port/gdx_net_race_words.h). It opens as the stock boxes do: a scissor 5 pixels wider
+   than the box on each side shrinks by the opening timer on each side (Menus_DrawRetiredEndMenu), so the box
+   grows from its centre, at the stock pause box's 8 pixels a frame (Menus_DrawGeneralPause), and it takes
+   no press until it is fully open. */
 #include "../../../../port/gdx_net_race_words.h"
 extern int gdx_net_race_box_frame(int start, int accept, int back, int up, int down, int stickY);
 extern int gdx_net_race_box_rows(void);
