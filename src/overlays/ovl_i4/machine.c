@@ -665,6 +665,7 @@ extern int gdx_net_machine_select_active(void);
 extern int gdx_net_machine_select_should_leave(void);
 extern int gdx_net_machine_select_waiting(void);
 extern void gdx_net_machine_select_confirm(int character, int skin, float engine);
+extern int gdx_net_machine_select_engine_fixed(void);
 extern const char* gdx_net_machine_select_status_text(void);
 extern const char* gdx_net_machine_select_wait_text(void);
 #endif
@@ -948,10 +949,22 @@ s32 MachineSettings_Update(void) {
                             gPlayerEngine[i] = 1.0f;
                         }
                     }
+#ifdef PORT
+                    /* The room's rules fix the engine setting: the slider stays in the middle, and the racer's
+                       own last setting is kept for races outside the room. */
+                    if (gdx_net_machine_select_engine_fixed()) {
+                        gPlayerEngine[i] = 0.5f;
+                        temp_fa0 = 0.5f;
+                    }
+#endif
                     if ((s32) (temp_fa0 / 0.1f) != (s32) (gPlayerEngine[i] / 0.1f)) {
                         Audio_PlayerTriggerSEStart(i, NA_SE_22);
                     }
+#ifdef PORT
+                    if ((gNumPlayers == 1) && !gdx_net_machine_select_engine_fixed()) {
+#else
                     if (gNumPlayers == 1) {
+#endif
                         gCharacterLastEngine[gRacers[0].character] = gPlayerEngine[0];
                     }
                 }

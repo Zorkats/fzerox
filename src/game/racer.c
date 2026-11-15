@@ -765,6 +765,16 @@ extern int gdx_net_race_rule_ignore_track_settings(int own);
 extern int gdx_net_race_rule_lava_no_kill(int own);
 extern float gdx_net_race_rule_magnet_range(float own);
 extern float gdx_net_race_rule_magnet_strength(float own);
+/* The room's contact damage rule: 1, 0.5 or 0 in a room's race, 1 elsewhere. */
+extern float gdx_net_race_rule_contact_scale(void);
+/* The room's shield rule (port/gdx_net_shield.h). Each does nothing, or hands the damage back, while the
+   rule is off. kind is 0 for a hit and 1 for lava. */
+extern void gdx_net_shield_racer_init(int racer, float maxEnergy);
+extern float gdx_net_shield_racer_take(int racer, int lapOne, float energy, float damage, int kind);
+extern void gdx_net_shield_racer_pit(int racer, float energy, float maxEnergy, float energyIncrease, int boosting);
+extern void gdx_net_shield_racer_frame(int racer);
+/* 1 while Racer_ReceiveDamage is called for the lava strip's drain, which the shield lets through. */
+static s32 sGdxLavaDamage = 0;
 
 /* Split-screen Grand Prix (plan item MP2, port/gdx_split_gp.h). The rules live in the port module; this is
    the cup state they act on, kept next to the lives and race-end code that reads it. */
@@ -1974,6 +1984,9 @@ void Racer_InitRacer(Racer* racer) {
     racer->unk_234 = 1.7f;
 
     racer->energy = racer->maxEnergy = gBodyHealthValues[machine->machineStats[BODY_STAT]];
+#ifdef PORT
+    gdx_net_shield_racer_init(racer->id, racer->maxEnergy);
+#endif
     racer->boostEnergyUsage = racer->maxEnergy * 0.0015f;
     racer->unk_31C = racer->unk_1C4 - 1.0f;
     racer->unk_320 = (0.5f - racer->unk_1A8) * 0.5f;
@@ -2841,6 +2854,11 @@ void Racer_ReceiveDamage(Racer* racer, f32 damageStrength) {
             }
         }
     } else {
+#ifdef PORT
+        /* The room's shield takes its part first. Lap 1 is the state before the machine may boost. */
+        damageStrength = gdx_net_shield_racer_take(racer->id, !(racer->stateFlags & RACER_STATE_CAN_BOOST),
+                                                   racer->energy, damageStrength, sGdxLavaDamage);
+#endif
 #ifdef EXPANSION_KIT
         if (D_800CE780 != 0) {
 #endif
@@ -5455,6 +5473,9 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         }
     }
 
+#ifdef PORT
+    gdx_net_shield_racer_frame(racer->id);
+#endif
     if ((racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_AIRBORNE | RACER_STATE_SPINNING_OUT |
                               COURSE_EFFECT_MASK)) == COURSE_EFFECT_PIT) {
 #if defined(PORT) && defined(EXPANSION_KIT)
@@ -5464,6 +5485,11 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
         if (racer->maxEnergy < racer->energy) {
             racer->energy = racer->maxEnergy;
         }
+#ifdef PORT
+        /* The room's shield refills behind full energy, at half the rate, and not while boosting. */
+        gdx_net_shield_racer_pit(racer->id, racer->energy, racer->maxEnergy, racer->energyIncrease,
+                                 racer->boostTimer != 0);
+#endif
 
         if (racer->pitForceFieldSize < 1.0f) {
             racer->pitForceFieldSize += 0.1f;
@@ -5503,7 +5529,13 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
 #else
         if (D_800CE780 != 0) {
 #endif
+#ifdef PORT
+            sGdxLavaDamage = 1;
             Racer_ReceiveDamage(racer, racer->energyIncrease);
+            sGdxLavaDamage = 0;
+#else
+            Racer_ReceiveDamage(racer, racer->energyIncrease);
+#endif
         } else {
             racer->energy -= racer->energyIncrease;
             if (racer->energy < 0.1f) {
@@ -6302,6 +6334,13 @@ void Racer_Update(void) {
                             racer->bodyWhiteTimer = racer2->bodyWhiteTimer;
                         }
                         var_fs0 *= 1.1f;
+#ifdef PORT
+                        /* The room's contact damage rule scales the hit; at OFF neither machine takes damage
+                           and the push below is left as it is. A puppet takes none here anyway: its owner's
+                           copy does the damage. */
+                        var_fs0 *= gdx_net_race_rule_contact_scale();
+                        if (gdx_net_race_rule_contact_scale() > 0.0f) {
+#endif
                         if (racer->attackState == ATTACK_STATE_NONE) {
                             if (racer2->attackState == ATTACK_STATE_NONE) {
                                 Racer_ReceiveDamage(racer, var_fs1 * var_fs0);
@@ -6317,6 +6356,9 @@ void Racer_Update(void) {
                             Racer_ReceiveDamage(racer, var_fs1 * var_fs0);
                             Racer_ReceiveDamage(racer2, var_fs2 * var_fs0);
                         }
+#ifdef PORT
+                        }
+#endif
                         if (gEnableRaceSfx) {
                             Audio_PlayerTriggerSEStart(racer2->id, NA_SE_4);
                         }

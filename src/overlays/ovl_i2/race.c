@@ -1,6 +1,7 @@
 #include "global.h"
 #ifdef PORT
 extern s32 gSegmentChunkCount;
+#include "src/overlays/ovl_i2/transition.h"
 #endif
 #include "fzx_game.h"
 #include "fzx_course.h"
@@ -63,6 +64,26 @@ extern s32 gGameMode;
 extern s32 gCurrentGhostType;
 extern s32 gCourseIndex;
 
+#ifdef PORT
+extern GfxPool* gGfxPool;
+
+/* The pool the world last wrote its frame into (Race_Update). */
+static GfxPool* sGdxUpdatedPool;
+
+/* A G-NET grid waits on its first frame (port/gdx_net_race_bridge.c), and while it waits the world does not
+   update. The update is what writes the camera's matrices, the course's and the sky's vertices and the
+   countdown into the frame's pool, and the two pools take turns frame by frame. So every other held frame drew
+   from a pool this race never filled: the grid flickered with a dark frame showing the player's machine. A held
+   frame takes what the last update wrote, everything after the display list, which the draw writes itself. */
+static void Race_GdxHoldPool(void) {
+    size_t list = sizeof(gGfxPool->gfxBuffer);
+
+    if ((sGdxUpdatedPool != NULL) && (sGdxUpdatedPool != gGfxPool)) {
+        memcpy((u8*) gGfxPool + list, (u8*) sGdxUpdatedPool + list, sizeof(GfxPool) - list);
+    }
+}
+#endif
+
 void Race_Init(void) {
 #ifdef PORT
 #define RI_CK(n) { extern void gdx_ck(const char*); gdx_ck("[race] RI_" #n); }
@@ -72,6 +93,7 @@ void Race_Init(void) {
 #ifdef PORT
     /* GDX_DET_RACE_SEED determinism seam (port/gdx_det_layout.c); a no-op unless that variable is set. */
     { extern void gdx_det_race_init(void); gdx_det_race_init(); }
+    sGdxUpdatedPool = NULL;
 #endif
     D_800CCFE8 = D_i2_80106F10 = 3;
     gGamePaused = false;
@@ -138,9 +160,18 @@ s32 Race_Update(void) {
         s32 gdxNetFrame = gdx_net_race_frame();
 
         if (gdxNetFrame == 2) {
+            /* Out as the stock quit goes: the sound and the music fade, and the screen with them, over the
+               40 frames the course select's fade takes. */
+            Audio_LevelSEFadeout();
+            func_8007E0CC();
+#ifdef EXPANSION_KIT
+            Audio_RomBgmReady(BGM_SELECT);
+#endif
+            Transition_SetArgument(TRANSITION_TYPE_FADE, 40);
             return GAMEMODE_FLX_MAIN_MENU;
         }
         if (gdxNetFrame == 1) {
+            Race_GdxHoldPool();
             return gGameMode;
         }
     }
@@ -156,6 +187,7 @@ s32 Race_Update(void) {
     Course_Update();
     func_80074844();
 #ifdef PORT
+    sGdxUpdatedPool = gGfxPool;
     /* GDX_DET_LOG determinism probe (port/gdx_det_layout.c); a no-op unless that variable is set.
        Declared inline: gdiffuser_game compiles decomp/ without port/ include paths. */
     { extern void gdx_det_probe_frame(void); gdx_det_probe_frame(); }

@@ -133,8 +133,9 @@ extern s8 gUnlockableLevel;
 #include "../../../../port/gdx_net_machine_select.h"
 #include "../../../../port/gdx_net_track_choice.h"
 
-/* G-NET vote and pick (port/gdx_net_track_choice.h). A room races the 24 stock tracks whatever this save has
-   unlocked, so every cup is open while the course select is the room's. This file only reads the flag. */
+/* G-NET vote and pick (port/gdx_net_track_choice.h). A room races the 24 stock tracks and the 12 64DD ones
+   whatever this save has unlocked, so every cup is open while the course select is the room's. This file only
+   reads the flag. */
 #define gSettingEverythingUnlocked (gSettingEverythingUnlocked || gdx_net_track_choice_active())
 #endif
 
@@ -435,10 +436,10 @@ void CourseSelect_Init(void) {
         k = gLastRecordsCourseIndex;
     }
 #ifdef PORT
-    /* A room has no second row but the Edit Cup, and that only when it takes custom tracks: its course select
-       opens on the first cup in place of another. */
-    if (gdx_net_track_choice_active() && (k >= COURSE_EDIT_1) && (k < COURSE_X_1) &&
-        !(gdx_net_track_choice_custom_tracks() && (k < COURSE_EDIT_1 + 6))) {
+    /* A room's second row has the Edit Cup only when it takes custom tracks: its course select opens on the
+       first cup in place of it. */
+    if (gdx_net_track_choice_active() && (k >= COURSE_EDIT_1) && (k < COURSE_EDIT_1 + 6) &&
+        !gdx_net_track_choice_custom_tracks()) {
         k = 0;
     }
 #endif
@@ -512,12 +513,14 @@ void CourseSelect_Init(void) {
     Object_Init(OBJECT_COURSE_SELECT_MODEL, 0, 0, 8);
 #ifdef EXPANSION_KIT
 #ifdef PORT
-    /* A room races the stock tracks, and its racers' own Edit Cup tracks when it takes custom tracks: its second
-       row is the Edit Cup alone, or nothing. */
+    /* A room races the stock and 64DD tracks, and its racers' own Edit Cup tracks when it takes custom tracks:
+       its second row is the two 64DD cups, with the Edit Cup between them or a gap. */
     if (gdx_net_track_choice_active()) {
+        Object_Init(OBJECT_COURSE_SELECT_CUP_7, 128, 0, 6);
         if (gdx_net_track_choice_custom_tracks()) {
             Object_Init(OBJECT_COURSE_SELECT_CUP_5, 128, 0, 6);
         }
+        Object_Init(OBJECT_COURSE_SELECT_CUP_6, 128, 0, 6);
     } else
 #endif
     {
@@ -633,10 +636,10 @@ static void CourseSelect_GdxShowTrack(s32 track) {
     bool placeModel = (sCourseSelectState == COURSE_SELECT_CUP_SELECT);
 
 #ifdef EXPANSION_KIT
-    /* A track of this copy's Edit Cup, the second row's first cup. */
+    /* A track of the second row: this copy's Edit Cup (option 10) or a 64DD cup (11 and 12). */
     if (track >= COURSE_EDIT_1) {
-        option = GDX_NET_TRACK_CHOICE_EDIT_CUP;
-        cupType = EDIT_CUP;
+        option = cup + 6;
+        cupType = option - 5;
     }
 #endif
     if ((sCourseSelectCup != cup) || (gCupSelectOption != option)) {
@@ -729,6 +732,12 @@ s32 CourseSelect_Update(void) {
     } else {
         sp110 = false;
     }
+#ifdef PORT
+    /* A room always has the 64DD cups, with or without the Edit Cup between them. */
+    if (gdx_net_track_choice_active()) {
+        sp110 = true;
+    }
+#endif
 #endif
 
     Camera_Update();
@@ -818,9 +827,12 @@ s32 CourseSelect_Update(void) {
 #endif
             }
 #if defined(PORT) && defined(EXPANSION_KIT)
-            /* A room's second row is the Edit Cup alone: every way into the row, or along it, ends there. */
-            if (gdx_net_track_choice_active() && (gCupSelectOption > GDX_NET_TRACK_CHOICE_EDIT_CUP)) {
-                gCupSelectOption = GDX_NET_TRACK_CHOICE_EDIT_CUP;
+            /* A room without custom tracks has a gap for the Edit Cup: a move onto it goes on to the next cup,
+               the right one when RIGHT was pressed, else the left one. */
+            if (gdx_net_track_choice_active() && !gdx_net_track_choice_custom_tracks() &&
+                (gCupSelectOption == GDX_NET_TRACK_CHOICE_EDIT_CUP)) {
+                gCupSelectOption = (gInputPressed & BTN_RIGHT) ? GDX_NET_TRACK_CHOICE_DD_2_CUP
+                                                               : GDX_NET_TRACK_CHOICE_DD_1_CUP;
             }
 #endif
             if (gCupSelectOption >= 10) {

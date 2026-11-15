@@ -785,6 +785,8 @@ void func_800690FC(void) {
             { extern void gdx_transition_timer_begin(const char*);
               gdx_transition_timer_begin("mode_change_tick (GMI_A..GMI_F)"); }
             { extern void gdx_transition_step_begin(void); gdx_transition_step_begin(); }
+            /* A G-NET race that faded out is over for this copy only now (port/gdx_net_race_bridge.c). */
+            { extern void gdx_net_race_mode_change(void); gdx_net_race_mode_change(); }
 #endif
             Controller_Reset();
 #ifdef EXPANSION_KIT

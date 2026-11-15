@@ -14,6 +14,7 @@
 #include "segment_symbols.h"
 #ifdef PORT
 #include "../../../../port/gdx_split_gp.h"
+#include "../../../../port/gdx_net_shield.h"
 #endif
 
 /* Anchor Set/Clear for the split-screen HUD; expands to nothing in a non-PORT build. Macros
@@ -146,6 +147,33 @@ u32 sEnergyBarFillColors[] = {
     (GPACK_RGBA5551(0, 160, 50, 1) << 16 | GPACK_RGBA5551(0, 160, 50, 1)),
     (GPACK_RGBA5551(0, 135, 70, 1) << 16 | GPACK_RGBA5551(0, 135, 70, 1)),
 };
+
+#ifdef PORT
+#define GDX_SHIELD_FILL(r, g, b) (GPACK_RGBA5551(r, g, b, 1) << 16 | GPACK_RGBA5551(r, g, b, 1))
+/* The room's shield bar (port/gdx_net_shield.h): the blue, cyan and yellow rows, from GDX_NET_SHIELD_BAR_BLUE
+   on. Red and green are the stock rows above; these are shaded as the red rows are, dark at the edges and
+   bright in the middle. */
+static u32 sGdxShieldBarColors[3][5] = {
+    { GDX_SHIELD_FILL(12, 55, 155), GDX_SHIELD_FILL(17, 78, 220), GDX_SHIELD_FILL(20, 90, 255),
+      GDX_SHIELD_FILL(17, 78, 220), GDX_SHIELD_FILL(12, 55, 155) },
+    { GDX_SHIELD_FILL(0, 155, 155), GDX_SHIELD_FILL(0, 220, 220), GDX_SHIELD_FILL(0, 255, 255),
+      GDX_SHIELD_FILL(0, 220, 220), GDX_SHIELD_FILL(0, 155, 155) },
+    { GDX_SHIELD_FILL(155, 155, 0), GDX_SHIELD_FILL(220, 220, 0), GDX_SHIELD_FILL(255, 255, 0),
+      GDX_SHIELD_FILL(220, 220, 0), GDX_SHIELD_FILL(155, 155, 0) },
+};
+
+/* The fill of one row of a shield bar span. */
+static u32 Hud_GdxShieldFill(s32 colour, s32 row) {
+    if (colour == GDX_NET_SHIELD_BAR_RED) {
+        return sEnergyBarFillColors[row];
+    }
+    if (colour == GDX_NET_SHIELD_BAR_GREEN) {
+        return sEnergyBarFillColors[row + 5];
+    }
+    return sGdxShieldBarColors[colour - GDX_NET_SHIELD_BAR_BLUE][row];
+}
+#undef GDX_SHIELD_FILL
+#endif
 
 s32 sEnergyOutlinePositions[][4][2] = {
     { { 220, 20 }, { 0, 0 }, { 0, 0 }, { 0, 0 } },
@@ -697,6 +725,31 @@ Gfx* Hud_DrawEnergyBar(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     }
 
     energyWidth = Math_Round((gRacers[playerIndex].energy / gRacers[playerIndex].maxEnergy) * 68.0f * scale);
+
+#ifdef PORT
+    /* The room's shield rule: energy and shield share the bar, as spans of their own colours. */
+    if (gdx_net_shield_on()) {
+        int spans[6];
+        s32 count;
+        s32 j;
+
+        count = gdx_net_shield_racer_bar(gRacers[playerIndex].id,
+                                         !(gRacers[playerIndex].stateFlags & RACER_STATE_CAN_BOOST),
+                                         gRacers[playerIndex].energy, gRacers[playerIndex].maxEnergy,
+                                         Math_Round(68.0f * scale), spans);
+        gSPDisplayList(gfx++, D_80149A0);
+        for (i = 0; i < height; i++) {
+            for (j = 0; j < count; j++) {
+                gDPPipeSync(gfx++);
+                gDPSetFillColor(gfx++, Hud_GdxShieldFill(spans[j * 3 + 2], i));
+                gDPFillRectangle(gfx++, left + spans[j * 3], top + i, left + spans[j * 3 + 1] - 1, top + i);
+            }
+        }
+        gDPPipeSync(gfx++);
+        gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+        return gfx;
+    }
+#endif
 
     gSPDisplayList(gfx++, D_80149A0);
 
