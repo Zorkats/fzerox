@@ -4171,7 +4171,8 @@ s32 Racer_WindStrength(Racer* racer, s32* angle) {
     return strength;
 }
 
-// Pushes the racer with the wind, on the ground and in the air, CPUs too.
+// Pushes the racer with the wind, on the ground and in the air, CPUs too, from GO on: the grid waits for the
+// countdown untouched (gdx_wind_blows).
 static void Racer_ApplyWind(Racer* racer) {
     s32 angle;
     s32 strength;
@@ -4181,6 +4182,9 @@ static void Racer_ApplyWind(Racer* racer) {
     float push[3];
 
     if (racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FALLING_OFF_TRACK | RACER_STATE_RETIRED)) {
+        return;
+    }
+    if (!gdx_wind_blows(gRaceIntroTimer)) {
         return;
     }
     strength = Racer_WindStrength(racer, &angle);

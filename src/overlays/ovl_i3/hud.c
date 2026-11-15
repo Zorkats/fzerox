@@ -150,19 +150,23 @@ u32 sEnergyBarFillColors[] = {
 
 #ifdef PORT
 #define GDX_SHIELD_FILL(r, g, b) (GPACK_RGBA5551(r, g, b, 1) << 16 | GPACK_RGBA5551(r, g, b, 1))
-/* The room's shield bar (port/gdx_net_shield.h): the blue, cyan and yellow rows, from GDX_NET_SHIELD_BAR_BLUE
-   on. Red and green are the stock rows above; these are shaded as the red rows are, dark at the edges and
-   bright in the middle. */
-static u32 sGdxShieldBarColors[3][5] = {
+/* The room's shield bar (port/gdx_net_shield.h): the blue and yellow rows, from GDX_NET_SHIELD_BAR_BLUE on.
+   Red and green are the stock rows above; these are shaded as the red rows are, dark at the edges and bright
+   in the middle. */
+static u32 sGdxShieldBarColors[2][5] = {
     { GDX_SHIELD_FILL(12, 55, 155), GDX_SHIELD_FILL(17, 78, 220), GDX_SHIELD_FILL(20, 90, 255),
       GDX_SHIELD_FILL(17, 78, 220), GDX_SHIELD_FILL(12, 55, 155) },
-    { GDX_SHIELD_FILL(0, 155, 155), GDX_SHIELD_FILL(0, 220, 220), GDX_SHIELD_FILL(0, 255, 255),
-      GDX_SHIELD_FILL(0, 220, 220), GDX_SHIELD_FILL(0, 155, 155) },
     { GDX_SHIELD_FILL(155, 155, 0), GDX_SHIELD_FILL(220, 220, 0), GDX_SHIELD_FILL(255, 255, 0),
       GDX_SHIELD_FILL(220, 220, 0), GDX_SHIELD_FILL(155, 155, 0) },
 };
 
-/* The fill of one row of a shield bar span. */
+/* The shield bar sits under the health bar, after a row of the panel between them. It is 3 rows tall beside
+   the 5 of a full-size health bar, and 2 beside the 3 of a split-screen one; the panel grows to hold it. */
+#define GDX_SHIELD_GAP 1
+#define GDX_SHIELD_ROWS_FULL 3
+#define GDX_SHIELD_ROWS_SPLIT 2
+
+/* The fill of one row of a bar. */
 static u32 Hud_GdxShieldFill(s32 colour, s32 row) {
     if (colour == GDX_NET_SHIELD_BAR_RED) {
         return sEnergyBarFillColors[row];
@@ -727,27 +731,35 @@ Gfx* Hud_DrawEnergyBar(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     energyWidth = Math_Round((gRacers[playerIndex].energy / gRacers[playerIndex].maxEnergy) * 68.0f * scale);
 
 #ifdef PORT
-    /* The room's shield rule: energy and shield share the bar, as spans of their own colours. */
+    /* The room's shield rule: the stock health bar, and the shield bar under it. */
     if (gdx_net_shield_on()) {
-        int spans[6];
-        s32 count;
-        s32 j;
+        int bar[4];
+        s32 shieldRows = (height == 5) ? GDX_SHIELD_ROWS_FULL : GDX_SHIELD_ROWS_SPLIT;
+        s32 shieldTop = top + height + GDX_SHIELD_GAP;
+        /* The rows of the 5-row shade each shield row takes: dark, bright, dark at full size, and the two
+           mid rows split-screen (the third entry is unused there). */
+        static const s32 kShieldShade[2][3] = { { 0, 2, 4 }, { 1, 3, 0 } };
 
-        count = gdx_net_shield_racer_bar(gRacers[playerIndex].id,
-                                         !(gRacers[playerIndex].stateFlags & RACER_STATE_CAN_BOOST),
-                                         gRacers[playerIndex].energy, gRacers[playerIndex].maxEnergy,
-                                         Math_Round(68.0f * scale), spans);
-        gSPDisplayList(gfx++, D_80149A0);
-        for (i = 0; i < height; i++) {
-            for (j = 0; j < count; j++) {
+        if (gdx_net_shield_racer_bar(gRacers[playerIndex].id,
+                                     !(gRacers[playerIndex].stateFlags & RACER_STATE_CAN_BOOST),
+                                     gRacers[playerIndex].energy, gRacers[playerIndex].maxEnergy,
+                                     Math_Round(68.0f * scale), bar)) {
+            gSPDisplayList(gfx++, D_80149A0);
+            for (i = 0; (i < height) && (bar[0] > 0); i++) {
                 gDPPipeSync(gfx++);
-                gDPSetFillColor(gfx++, Hud_GdxShieldFill(spans[j * 3 + 2], i));
-                gDPFillRectangle(gfx++, left + spans[j * 3], top + i, left + spans[j * 3 + 1] - 1, top + i);
+                gDPSetFillColor(gfx++, Hud_GdxShieldFill(bar[1], i));
+                gDPFillRectangle(gfx++, left, top + i, left + bar[0] - 1, top + i);
             }
+            for (i = 0; (i < shieldRows) && (bar[2] > 0); i++) {
+                gDPPipeSync(gfx++);
+                gDPSetFillColor(gfx++,
+                                Hud_GdxShieldFill(bar[3], kShieldShade[shieldRows == GDX_SHIELD_ROWS_FULL ? 0 : 1][i]));
+                gDPFillRectangle(gfx++, left, shieldTop + i, left + bar[2] - 1, shieldTop + i);
+            }
+            gDPPipeSync(gfx++);
+            gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+            return gfx;
         }
-        gDPPipeSync(gfx++);
-        gDPSetCycleType(gfx++, G_CYC_1CYCLE);
-        return gfx;
     }
 #endif
 
@@ -801,6 +813,19 @@ Gfx* Hud_DrawEnergyOutlineRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerInd
             height = 16.0f * scale;
             break;
     }
+
+#ifdef PORT
+    /* The room's shield bar hangs under the health bar: the panel grows by the bar and the row above it, and
+       its texture rows are spread over the taller panel, so it shades as the stock one does. */
+    if (gdx_net_shield_on()) {
+        s32 grow = GDX_SHIELD_GAP + ((scale == 1.0f) ? GDX_SHIELD_ROWS_FULL : GDX_SHIELD_ROWS_SPLIT);
+        s32 texelRows = height * ((1 << 10) / scale); /* the rows the stock panel samples, in 1/1024 */
+
+        gSPTextureRectangle(gfx++, left << 2, top << 2, (left + width) << 2, (top + height + grow) << 2, 0, 0, 0,
+                            (s32) ((1 << 12) / scale), texelRows / (height + grow));
+        return gfx;
+    }
+#endif
 
     gSPTextureRectangle(gfx++, left << 2, top << 2, (left + width) << 2, (top + height) << 2, 0, 0, 0,
                         (s32) ((1 << 12) / scale), (s32) ((1 << 10) / scale));

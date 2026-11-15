@@ -6121,6 +6121,12 @@ extern int gdx_net_race_box_cursor(void);
 extern int gdx_net_race_box_opening(void);
 extern int gdx_net_race_box_word(int row);
 extern float gdx_get_widescreen_geometry_xscale(void);
+/* WATCH (port/gdx_net_spectate.h): L and R go round the humans still driving, Z swaps the race camera and
+   the trackside cinematic. The buttons work and the label shows only while the quit box is shut. */
+extern int gdx_net_spectate_on(void);
+extern void gdx_net_spectate_frame(int prev, int next, int toggle);
+extern void gdx_net_spectate_label(char* out, int size);
+extern const char* gdx_net_spectate_hint(void);
 
 #define GDX_NET_RACE_BOX_LEFT 210   /* the edges of the stock Retry box, which is as wide as its words */
 #define GDX_NET_RACE_BOX_RIGHT 300
@@ -6129,6 +6135,44 @@ extern float gdx_get_widescreen_geometry_xscale(void);
 #define GDX_NET_RACE_BOX_WORDS 230  /* the left edge of the words, as in the stock box */
 #define GDX_NET_RACE_BOX_CURSOR 215 /* the cursor's left edge, as in the stock box */
 #define GDX_NET_RACE_BOX_REVEAL 5   /* the stock scissor stands this far outside the box when it is open */
+#define GDX_NET_SPECTATE_LABEL_Y 200 /* the baseline of WATCHING and the name; FONT_SET_4 draws 8 above it */
+#define GDX_NET_SPECTATE_HINT_Y 212  /* the baseline of the button hint under it */
+#define GDX_NET_SPECTATE_LABEL_MAX 296
+
+/* One line of the small stock font centred on the screen, with the one-pixel black shadow the stock
+   captions have (Menus_DrawCourseCreator). Too wide a line is not drawn. */
+static Gfx* gdx_net_spectate_line(Gfx* gfx, const char* text, s32 top) {
+    s32 width = Font_GetStringWidth(text, FONT_SET_4, 0);
+    s32 left = 160 - (width / 2);
+
+    if ((width <= 0) || (width > GDX_NET_SPECTATE_LABEL_MAX)) {
+        return gfx;
+    }
+    gDPPipeSync(gfx++);
+    gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
+    gfx = Font_DrawString(gfx, left + 1, top + 1, text, 0, FONT_SET_4, 0);
+    gDPPipeSync(gfx++);
+    gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
+    gfx = Font_DrawString(gfx, left, top, text, 0, FONT_SET_4, 0);
+    return gfx;
+}
+
+/* WATCHING and the watched human's name, and the buttons under it, near the bottom of the screen. */
+static Gfx* gdx_net_spectate_draw(Gfx* gfx) {
+    char label[48];
+
+    if (!gdx_net_spectate_on()) {
+        return gfx;
+    }
+    gdx_net_spectate_label(label, (int) sizeof(label));
+    gDPPipeSync(gfx++);
+    gDPSetTextureLUT(gfx++, G_TT_NONE);
+    gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
+    gfx = gdx_net_spectate_line(gfx, label, GDX_NET_SPECTATE_LABEL_Y);
+    gfx = gdx_net_spectate_line(gfx, gdx_net_spectate_hint(), GDX_NET_SPECTATE_HINT_Y);
+    gDPPipeSync(gfx++);
+    return gfx;
+}
 
 static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
     Controller* pad = &gControllers[gPlayerControlPorts[0]];
@@ -6172,9 +6216,14 @@ static Gfx* gdx_net_race_box_draw(Gfx* gfx) {
             break;
     }
     rows = gdx_net_race_box_rows();
+    /* Every frame of the race, so the camera moves on when the watched machine is done; the buttons only
+       count while the box is shut, since the box has the pad while it is open. */
     if (rows == 0) {
-        return gfx;
+        gdx_net_spectate_frame((pad->buttonPressed & BTN_L) != 0, (pad->buttonPressed & BTN_R) != 0,
+                               (pad->buttonPressed & BTN_Z) != 0);
+        return gdx_net_spectate_draw(gfx);
     }
+    gdx_net_spectate_frame(0, 0, 0);
     cursor = gdx_net_race_box_cursor();
     /* The stock box is 137 to 221 for five rows: 3 above its first row and 21 below the top of its last. */
     top = GDX_NET_RACE_BOX_BOTTOM - 21 - ((rows - 1) * GDX_NET_RACE_BOX_PITCH) - 3;

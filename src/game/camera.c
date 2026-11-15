@@ -9,6 +9,16 @@
 
 #ifdef PORT
 extern int gdx_death_race_show_loser(void); // port/gdx_death_race.c
+/* WATCH in a G-NET room's race (port/gdx_net_spectate.h): camera 0 may follow another human. The racer a
+   camera shows is Camera_GdxRacerId; the camera's own id still picks its controller, its HUD and its slots in
+   the arrays below. The call returns camera->id whenever nobody is watched, which is always offline. */
+extern int gdx_net_spectate_on(void);
+extern int gdx_net_spectate_racer(int cameraId);
+extern int gdx_net_spectate_cinematic(void);
+extern unsigned gdx_net_spectate_generation(void);
+#define Camera_GdxRacerId(camera) gdx_net_spectate_racer((camera)->id)
+#else
+#define Camera_GdxRacerId(camera) ((camera)->id)
 #endif
 #define ENDING_CHARACTER_FIREWORKS (1 << 0)
 #define ENDING_SHOW_PODIUM_SEQUENCE (1 << 1)
@@ -565,7 +575,7 @@ void Camera_SettingsUpdateFollowSmooth(CameraSettings* cameraSettings, Camera* c
     f32 spA4;
     Vec3f sp98;
     Vec3f sp8C;
-    Racer* racer = &gRacers[camera->id];
+    Racer* racer = &gRacers[Camera_GdxRacerId(camera)];
     Vec3f sp7C;
     Vec3f sp70;
     f32 temp_fv0;
@@ -2406,7 +2416,7 @@ void Camera_InitMode(Camera* camera, CameraSettings* cameraSettings, CameraScrip
             cameraSettings->parameters.targetFov = cameraSettings->parameters.fov = raceSettingInfo->fov;
 
             Math_Round(DEG_TO_FZXANG2(cameraSettings->followSmooth.pitch));
-            racer = &gRacers[camera->id];
+            racer = &gRacers[Camera_GdxRacerId(camera)];
             cameraSettings->followSmooth.anchorPoint.x =
                 racer->focusPos.x - (raceSettingInfo->distance * racer->trueBasis.x.x);
             cameraSettings->followSmooth.anchorPoint.y =
@@ -2436,13 +2446,13 @@ void Camera_InitMode(Camera* camera, CameraSettings* cameraSettings, CameraScrip
                 cameraSettings->parameters.frustrumCenterY = cameraSettings->parameters.targetFrustrumCenterY = -30.0f;
             }
 
-            racer = &gRacers[camera->id];
+            racer = &gRacers[Camera_GdxRacerId(camera)];
             Camera_SetupFinishedSuccessFollowRacer(
                 &sFinishedSuccessFollowRacerEye[camera->id], racer->segmentPositionInfo.courseSegment,
                 racer->segmentPositionInfo.segmentTValue, &gFinishedSuccessScript[0]);
             break;
         case CAMERA_MODE_FINISHED_SPECTATE:
-            racer = &gRacers[camera->id];
+            racer = &gRacers[Camera_GdxRacerId(camera)];
 
             Camera_SettingsSetOrbitWithParameters(cameraSettings, CAMERA_TYPE_ORBIT_AT, &D_800D4CF8);
             if (gNumPlayers == 2) {
@@ -2638,12 +2648,39 @@ void Camera_Update(void) {
 
 extern GfxPool* gGfxPool;
 
+#ifdef PORT
+/* WATCH turned on, went to another racer or changed camera (port/gdx_net_spectate.h): camera 0 starts the
+   chosen mode over on the watched racer, as a hard cut. The race camera keeps the player's distance setting. */
+static void Camera_GdxSpectateChange(Camera* camera, CameraSettings* cameraSettings, CameraScriptManager* scriptMgr) {
+    static unsigned sSeenGeneration = 0;
+    unsigned generation;
+
+    if (camera->id != 0) {
+        return;
+    }
+    generation = gdx_net_spectate_generation();
+    if (generation == sSeenGeneration) {
+        return;
+    }
+    sSeenGeneration = generation;
+    if (!gdx_net_spectate_on()) {
+        return;
+    }
+    camera->mode = gdx_net_spectate_cinematic() ? CAMERA_MODE_FINISHED_SUCCESS : CAMERA_MODE_RACE;
+    Camera_InitMode(camera, cameraSettings, scriptMgr);
+    { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+}
+#endif
+
 void Camera_UpdateMode(Camera* camera, CameraSettings* cameraSettings, CameraScriptManager* scriptMgr) {
     f32 diff;
     bool cameraReadyForRace;
     u32 startMode;
     u32 mode;
 
+#ifdef PORT
+    Camera_GdxSpectateChange(camera, cameraSettings, scriptMgr);
+#endif
     do {
         startMode = mode = camera->mode;
         switch (mode) {
@@ -3187,7 +3224,11 @@ void Camera_UpdateRace(Camera* camera, CameraSettings* cameraSettings, CameraScr
     Controller* controller;
 
     playerIndex = camera->id;
+#ifdef PORT
+    racer = &gRacers[Camera_GdxRacerId(camera)]; /* the controller below stays the camera's own */
+#else
     racer = &gRacers[playerIndex];
+#endif
     if (!gGamePaused) {
         if (racer->stateFlags & RACER_STATE_FALLING_OFF_TRACK) {
             camera->mode = CAMERA_MODE_FALLING_OFF_TRACK;
@@ -3327,9 +3368,9 @@ void Camera_UpdateFallingOffTrack(Camera* camera, CameraSettings* cameraSettings
     CameraTypeAtEye* atEye = &cameraSettings->atEye;
 
 #ifndef EXPANSION_KIT
-    atEye->targetAt = gRacers[camera->id].segmentPositionInfo.pos;
+    atEye->targetAt = gRacers[Camera_GdxRacerId(camera)].segmentPositionInfo.pos;
 #else
-    atEye->targetAt = gRacers[camera->id].focusPos;
+    atEye->targetAt = gRacers[Camera_GdxRacerId(camera)].focusPos;
 #endif
 }
 
@@ -3339,7 +3380,7 @@ void Camera_UpdateFinishedSuccess(Camera* camera, CameraSettings* cameraSettings
     FinishedSuccessScript* finishedSuccessScript = &gFinishedSuccessScript[camera->state];
     CameraParameters* params = &cameraSettings->parameters;
     s16 lastType = finishedSuccessScript->type;
-    Racer* racer = &gRacers[camera->id];
+    Racer* racer = &gRacers[Camera_GdxRacerId(camera)];
     CameraTypeLocalAnchor* localAnchor = &cameraSettings->localAnchor;
     CameraTypeAtEye* atEye = &cameraSettings->atEye;
     LerpLocalAtEyeInfo* lerpLocalAtEyeInfo;
@@ -3404,6 +3445,14 @@ void Camera_UpdateFinishedSuccess(Camera* camera, CameraSettings* cameraSettings
     if (camera->timer >= finishedSuccessScript->time) {
         camera->timer = 0;
         if (++camera->state >= CAMERA_FINISHED_SUCCESS_STATE_COUNT) {
+#ifdef PORT
+            /* WATCH's trackside cinematic starts over on the watched machine instead of orbiting it. */
+            if ((camera->id == 0) && gdx_net_spectate_cinematic()) {
+                Camera_InitMode(camera, cameraSettings, scriptMgr);
+                { extern void gdx_interp_mark_cut(void); gdx_interp_mark_cut(); }
+                return;
+            }
+#endif
             camera->mode = CAMERA_MODE_FINISHED_SPECTATE;
             Camera_InitMode(camera, cameraSettings, scriptMgr);
             return;
@@ -3499,7 +3548,7 @@ void Camera_UpdateFinishedLoser(Camera* camera, CameraSettings* cameraSettings, 
     CameraTypeAtEye* atEye = &cameraSettings->atEye;
 
     if (camera->timer <= 60) {
-        atEye->targetAt = gRacers[camera->id].segmentPositionInfo.pos;
+        atEye->targetAt = gRacers[Camera_GdxRacerId(camera)].segmentPositionInfo.pos;
         camera->timer++;
     }
 }
@@ -3508,7 +3557,7 @@ void Camera_UpdateFinishedSpectate(Camera* camera, CameraSettings* cameraSetting
     s32 pad;
     f32 temp;
     CameraTypeOrbit* orbit = &cameraSettings->orbit;
-    Racer* racer = &gRacers[camera->id];
+    Racer* racer = &gRacers[Camera_GdxRacerId(camera)];
     CameraParameters* params = &cameraSettings->parameters;
 
     if (racer->stateFlags & RACER_STATE_FALLING_OFF_TRACK) {
