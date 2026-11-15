@@ -176,6 +176,12 @@ static u32 Hud_GdxShieldFill(s32 colour, s32 row) {
     }
     return sGdxShieldBarColors[colour - GDX_NET_SHIELD_BAR_BLUE][row];
 }
+
+/* How far the one-player time moves down. Under the room's shield rule the energy panel above it grows by the
+   shield bar, so the time label and digits drop as far and keep the stock gap below the panel. */
+static s32 Hud_GdxTimeDrop(s32 numPlayersIndex) {
+    return ((numPlayersIndex == 0) && gdx_net_shield_on()) ? (GDX_SHIELD_GAP + GDX_SHIELD_ROWS_FULL) : 0;
+}
 #undef GDX_SHIELD_FILL
 #endif
 
@@ -493,6 +499,9 @@ Gfx* Hud_DrawPlayerTimer(Gfx* gfx, s32 time, s32 numPlayersIndex, s32 playerInde
 
     left = sPlayerTimerPositions[numPlayersIndex][playerIndex][0];
     top = sPlayerTimerPositions[numPlayersIndex][playerIndex][1];
+#ifdef PORT
+    top += Hud_GdxTimeDrop(numPlayersIndex);
+#endif
 
     switch (numPlayersIndex) {
         case 0:
@@ -584,6 +593,9 @@ Gfx* Hud_DrawTimeRectangle(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
 
     left = sPlayerTimePositions[numPlayersIndex][playerIndex][0];
     right = sPlayerTimePositions[numPlayersIndex][playerIndex][1];
+#ifdef PORT
+    right += Hud_GdxTimeDrop(numPlayersIndex);
+#endif
 
     gSPDisplayList(gfx++, D_80149D0);
     gSPTextureRectangle(gfx++, left << 2, right << 2, (left + 23) << 2, (right + 15) << 2, 0, 0, 0, 1 << 12, 1 << 10);
