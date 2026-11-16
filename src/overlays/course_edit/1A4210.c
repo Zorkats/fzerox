@@ -726,8 +726,8 @@ static char sGdxSplitHelpText[] = "Fork the track into two paths";
 static char sGdxLinkHelpText[] = "Join a fork path to a point";
 /* The same for the port-only TRACK row of the MOVE menu. */
 static char sGdxMoveTrackHelpText[] = "Z: grab track. Hold Z: up or down";
-/* The same for the port-only HORIZON row of the Create menu. */
-static char sGdxHorizonHelpText[] = "Choose the images on the horizon";
+/* The same for the port-only SKYLINE row of the Create menu. */
+static char sGdxHorizonHelpText[] = "Choose the images on the skyline";
 
 /* Top-strip help for the Point, Move, Design and Parts screens. The mouse wording follows the mouse mode setting, the
  * same gate as help screens 25 to 28, so it does not flicker back to the stock Z text when the cursor leaves the game

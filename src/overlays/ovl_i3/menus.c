@@ -6437,8 +6437,14 @@ Gfx* Menus_Draw(Gfx* gfx) {
                     }
 #endif
                 }
-                if (((gNumPlayers != 1) || (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE)) &&
-                    !(gRacers[i].stateFlags & RACER_STATE_FINISHED)
+                if (((((gNumPlayers != 1) || (sPlayerGameoverState[i] == PLAYER_GAMEOVER_NONE)) &&
+                      !(gRacers[i].stateFlags & RACER_STATE_FINISHED))
+#ifdef PORT
+                     /* WATCH: the panel shows the watched machine's speed (Hud_GdxSpeedRacer), though this
+                        copy's own machine has finished or is out. */
+                     || ((i == 0) && gdx_net_spectate_on())
+#endif
+                         )
 #ifdef PORT
                     /* The quit box of a room's race is translucent and sits over the speed: the speed
                        is not drawn while it is open, as under a pause. */

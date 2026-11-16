@@ -1856,7 +1856,7 @@ static bool CourseEdit_ComposeHorizonLabel(const char* text, u8* label) {
 }
 
 static void CourseEdit_InitHorizonArt(void) {
-    static const char* const kLabels[GDX_HORIZON_LABEL_COUNT] = { "HORIZON", "SLOT",  "EDIT", "ADD",
+    static const char* const kLabels[GDX_HORIZON_LABEL_COUNT] = { "SKYLINE", "SLOT",  "EDIT", "ADD",
                                                                   "IMAGE",   "ANGLE", "COPY" };
     s32 i;
 

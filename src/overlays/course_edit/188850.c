@@ -2346,6 +2346,9 @@ void func_xk2_800DBEE4(void) {
         case CREATE_OPTION_PARTS:
         case CREATE_OPTION_BACKGROUND:
         case CREATE_OPTION_BGM:
+#ifdef PORT
+        case CREATE_OPTION_HORIZON: // the cursor moves under HORIZON as under the other menus
+#endif
             func_xk2_800DEB04();
             break;
         default:

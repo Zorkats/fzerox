@@ -183,6 +183,15 @@ static s32 Hud_GdxTimeDrop(s32 numPlayersIndex) {
     return ((numPlayersIndex == 0) && gdx_net_shield_on()) ? (GDX_SHIELD_GAP + GDX_SHIELD_ROWS_FULL) : 0;
 }
 #undef GDX_SHIELD_FILL
+
+extern int gdx_net_spectate_on(void);              // port/gdx_net_spectate.h
+extern int gdx_net_spectate_racer(int cameraId); // port/gdx_net_spectate.h
+
+/* The machine whose speed a player's panel shows: the watched one while player 1 WATCHes another human of a
+   G-NET room's race (menus.c draws the panel then), else the player's own. */
+static s32 Hud_GdxSpeedRacer(s32 playerIndex) {
+    return ((playerIndex == 0) && gdx_net_spectate_on()) ? gdx_net_spectate_racer(0) : playerIndex;
+}
 #endif
 
 s32 sEnergyOutlinePositions[][4][2] = {
@@ -874,7 +883,11 @@ Gfx* Hud_DrawPlayerSpeed(Gfx* gfx, s32 numPlayersIndex, s32 playerIndex) {
     }
 
     digitMask = 1000;
+#ifdef PORT
+    speedRemainder = speed = Math_Round(gRacers[Hud_GdxSpeedRacer(playerIndex)].speed * 21.6f);
+#else
     speedRemainder = speed = Math_Round(gRacers[playerIndex].speed * 21.6f);
+#endif
     left = sSpeedPositions[numPlayersIndex][playerIndex][0];
     top = sSpeedPositions[numPlayersIndex][playerIndex][1];
 
