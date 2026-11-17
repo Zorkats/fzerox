@@ -6720,6 +6720,8 @@ extern void gdx_course_music_arm_for_course(const char* courseId, int bgmId);
 extern int gdx_course_skybox_resolve(const char* courseId);
 extern int gdx_net_room_course_active(void);
 extern int gdx_net_room_course_skybox(void);
+extern const char* gdx_net_room_course_song(void);
+extern void gdx_course_music_arm_file(const char* path, int bgmId);
 
 /* 7A/9D: the course file id ("NAME.EXT") of the course about to start: the editor test run, or one of the
    six disk Edit Cup slots. Returns 1 when out holds the id. Every other course has no course file, and
@@ -6772,8 +6774,14 @@ int gdx_racer_last_ghost(unsigned int* raceTime, unsigned int* lapTimes, unsigne
 
 static void gdx_racer_arm_course_music(void) {
     char courseId[26]; /* GDX_COURSE_FILE_ID_MAX + 1 */
-    s32 haveId = gdx_racer_course_file_id(courseId, sizeof(courseId));
+    s32 haveId;
 
+    /* A G-NET room's custom track has no course file here: its song is the one the room sent, if held whole. */
+    if (gdx_net_room_course_active()) {
+        gdx_course_music_arm_file(gdx_net_room_course_song(), Course_GetBgm());
+        return;
+    }
+    haveId = gdx_racer_course_file_id(courseId, sizeof(courseId));
     gdx_course_music_arm_for_course(haveId ? courseId : NULL, Course_GetBgm());
 }
 

@@ -4230,21 +4230,50 @@ Gfx* Menus_DrawCourseName(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
 }
 
 #if defined(PORT) && defined(EXPANSION_KIT)
-// The creator of a custom track, under its name during the course intro (port/gdx_course_meta_view.h).
-// It slides in with the name box and is cut by a scissor that closes with the same padding, so both
-// leave together. Nothing is drawn when the track has no author.
-static Gfx* Menus_DrawCourseCreator(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
-    char caption[48];
+// The creators of a custom track, under its name during the course intro (port/gdx_course_meta_view.h):
+// "BY: X", and "EDITED BY: Y" on the line below when someone else edited it. Each line slides in with the
+// name box and is cut by a scissor that closes with the same padding, so they leave together. Nothing is
+// drawn when the track has no author.
+#define GDX_CREATOR_LINE_SPACING 11
+// FONT_SET_4 has no colon glyph (that slot draws an A), so the colon after "BY" is two periods, one above the
+// other.
+#define GDX_CREATOR_COLON_WIDTH 4
+#define GDX_CREATOR_COLON_RISE 4
+
+static char sGdxCreatorPeriod[] = ".";
+
+// Draws "label:name" from its left edge, the colon built from periods.
+static Gfx* Menus_DrawCourseCreatorText(Gfx* gfx, s32 x, s32 top, char* label, char* name) {
+    if (label != NULL) {
+        gfx = Font_DrawString(gfx, x, top, label, 0, FONT_SET_4, 0);
+        x += Font_GetStringWidth(label, FONT_SET_4, 0);
+        gfx = Font_DrawString(gfx, x, top, sGdxCreatorPeriod, 0, FONT_SET_4, 0);
+        gfx = Font_DrawString(gfx, x, top - GDX_CREATOR_COLON_RISE, sGdxCreatorPeriod, 0, FONT_SET_4, 0);
+        x += GDX_CREATOR_COLON_WIDTH;
+    }
+    return Font_DrawString(gfx, x, top, name, 0, FONT_SET_4, 0);
+}
+
+static Gfx* Menus_DrawCourseCreatorLine(Gfx* gfx, char* text, s32 left, s32 top, s32 paddingSize) {
+    char* label = NULL;
+    char* name = text;
+    char* colon;
     s32 width;
     s32 ulx;
     s32 uly;
     s32 lrx;
     s32 lry;
 
-    if (gdx_meta_view_race_caption(caption, sizeof(caption)) <= 0) {
-        return gfx;
+    colon = strchr(text, ':');
+    if (colon != NULL) {
+        *colon = '\0';
+        label = text;
+        name = colon + 1;
     }
-    width = Font_GetStringWidth(caption, FONT_SET_4, 0);
+    width = Font_GetStringWidth(name, FONT_SET_4, 0);
+    if (label != NULL) {
+        width += Font_GetStringWidth(label, FONT_SET_4, 0) + GDX_CREATOR_COLON_WIDTH;
+    }
     if (width > 280) {
         return gfx;
     }
@@ -4270,13 +4299,36 @@ static Gfx* Menus_DrawCourseCreator(Gfx* gfx, s32 left, s32 top, s32 paddingSize
     gDPPipeSync(gfx++);
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, ulx, uly, lrx, lry);
     gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
-    gfx = Font_DrawString(gfx, (left - (width / 2)) + 1, top + 1, caption, 0, FONT_SET_4, 0);
+    gfx = Menus_DrawCourseCreatorText(gfx, (left - (width / 2)) + 1, top + 1, label, name);
     gDPPipeSync(gfx++);
     gDPSetPrimColor(gfx++, 0, 0, 255, 255, 255, 255);
-    gfx = Font_DrawString(gfx, left - (width / 2), top, caption, 0, FONT_SET_4, 0);
+    gfx = Menus_DrawCourseCreatorText(gfx, left - (width / 2), top, label, name);
     gDPPipeSync(gfx++);
     gDPSetScissor(gfx++, G_SC_NON_INTERLACE, 12, 16, 308, 224);
     return gfx;
+}
+
+static Gfx* Menus_DrawCourseCreator(Gfx* gfx, s32 left, s32 top, s32 paddingSize) {
+    char caption[48];
+
+    if (gdx_meta_view_race_caption(GDX_META_RACE_LINE_AUTHOR, caption, sizeof(caption)) <= 0) {
+        return gfx;
+    }
+    gfx = Menus_DrawCourseCreatorLine(gfx, caption, left, top, paddingSize);
+    if (gdx_meta_view_race_caption(GDX_META_RACE_LINE_EDITOR, caption, sizeof(caption)) > 0) {
+        gfx = Menus_DrawCourseCreatorLine(gfx, caption, left, top + GDX_CREATOR_LINE_SPACING, paddingSize);
+    }
+    return gfx;
+}
+
+// How far the Time Attack best time box moves down to clear the Edited by line. 0, the stock place, when the
+// track has no editor.
+static s32 Menus_CourseCreatorDrop(void) {
+    char caption[48];
+
+    return (gdx_meta_view_race_caption(GDX_META_RACE_LINE_EDITOR, caption, sizeof(caption)) > 0)
+               ? GDX_CREATOR_LINE_SPACING
+               : 0;
 }
 #endif
 
@@ -6655,7 +6707,8 @@ Gfx* Menus_Draw(Gfx* gfx) {
                         }
                         gfx = Menus_DrawCourseName(gfx, i, 120, j);
 #if defined(PORT) && defined(EXPANSION_KIT)
-                        // Between the name box (bottom at 123) and the best time box (top at 141).
+                        // Under the name box (bottom at 123): "BY:" at 137 and "EDITED BY:" at 148. In Time Attack the
+                        // best time box (top at 141) moves down to clear the second line.
                         gfx = Menus_DrawCourseCreator(gfx, i, 137, j);
 #endif
                     }
@@ -6684,6 +6737,11 @@ Gfx* Menus_Draw(Gfx* gfx) {
                             if (i < 160) {
                                 i = 160;
                             }
+#if defined(PORT) && defined(EXPANSION_KIT)
+                            if (i < 160 + Menus_CourseCreatorDrop()) {
+                                i = 160 + Menus_CourseCreatorDrop();
+                            }
+#endif
                             gfx = Menus_DrawTimeAttackIntroBestTimeDisplay(gfx, 160, i, j);
                         }
                     }
