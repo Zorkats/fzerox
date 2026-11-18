@@ -520,16 +520,20 @@ void ExpansionKit_NameEntryUpdate(s32* arg0, s32* arg1) {
     }
 #ifdef PORT
     gdx_name_entry_process_queued_keys();
-    if (D_800D6CA0.unk_08 != 2) {
-        return;
-    }
-    if (gCourseEditCursorXPos >= 80 && gCourseEditCursorXPos < 240 &&
-        gCourseEditCursorYPos >= 80 && gCourseEditCursorYPos < 160) {
-        s32 mx = (gCourseEditCursorXPos - 80) / 16;
-        s32 my = (gCourseEditCursorYPos - 80) / 16;
-        if (my < 4 || mx >= 6) {
-            sNameEntryCursorXPos = mx;
-            sNameEntryCursorYPos = my;
+    /* D_800D6CA0 and the mouse cursor belong to Course Edit. Machine Create runs this same name entry with
+       neither, so the check must not drop its stick and button input. */
+    if (gGameMode == GAMEMODE_COURSE_EDIT) {
+        if (D_800D6CA0.unk_08 != 2) {
+            return;
+        }
+        if (gCourseEditCursorXPos >= 80 && gCourseEditCursorXPos < 240 &&
+            gCourseEditCursorYPos >= 80 && gCourseEditCursorYPos < 160) {
+            s32 mx = (gCourseEditCursorXPos - 80) / 16;
+            s32 my = (gCourseEditCursorYPos - 80) / 16;
+            if (my < 4 || mx >= 6) {
+                sNameEntryCursorXPos = mx;
+                sNameEntryCursorYPos = my;
+            }
         }
     }
 #endif

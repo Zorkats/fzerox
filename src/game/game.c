@@ -64,6 +64,7 @@ extern s16 gPlayerLives[];
 extern s16 gPlayerCharacters[];
 extern s16 gPlayerMachineSkins[];
 extern f32 gCharacterLastEngine[];
+extern s16 gRacerPositionsById[];
 extern Racer gRacers[];
 extern s32 gRandSeed1;
 extern u32 gRandMask1;
@@ -126,6 +127,9 @@ static void gdx_gp_resume_restore(const GdxGpResumeState* s) {
         gRacers[i].machineSkinIndex = (s16) s->racers[i].skin;
         gCharacterLastEngine[i] = s->engine[i];
     }
+    /* The next TOTAL RANKING draws its arrows against the ranking of the boundary, which a fresh boot leaves at
+       zero: every racer would show an arrow down by its own place. */
+    gdx_gp_resume_previous_ranks(s, gRacerPositionsById);
     /* Same RNG words that Course_GenerateRandomCourse will draw from for the next X Cup course. */
     Math_Rand1Init(s->randSeed1, (s32) s->randMask1);
     Math_Rand2Init(s->randSeed2, (s32) s->randMask2);
@@ -211,6 +215,28 @@ void gdx_gp_resume_on_race_start(void) {
 void gdx_gp_resume_on_game_over(void) {
     if (gSelectedMode == MODE_GP_RACE) {
         gdx_gp_resume_clear();
+    }
+}
+
+/* Called right after a life is paid in a race (a crash, a retry). Writes the lower count into this cup's
+ * record, so Continue Cup does not hand the life back (gdx_gp_resume_keep_lost_lives). */
+void gdx_gp_resume_on_life_lost(void) {
+    GdxGpResumeState s;
+
+    if ((gGameMode != GAMEMODE_GP_RACE) || (gTitleDemoState != TITLE_DEMO_INACTIVE) || (gNumPlayers != 1) ||
+        !gdx_gp_resume_enabled()) {
+        return;
+    }
+    /* The first race of a fresh cup cleared any record (gdx_gp_resume_on_race_start), so a record that
+     * loads here is this cup's. */
+    if (gdx_gp_resume_load(&s) != GDX_GP_RESUME_OK) {
+        return;
+    }
+    if ((s.cup != gCupType) || (s.difficulty != gDifficulty)) {
+        return;
+    }
+    if (gdx_gp_resume_keep_lost_lives(&s, gPlayerLives)) {
+        gdx_gp_resume_save(&s);
     }
 }
 #endif /* PORT */

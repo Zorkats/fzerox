@@ -968,6 +968,12 @@ void Racer_DecreaseLife(s32 playerIndex) {
         Audio_TriggerSystemSE(NA_SE_44);
     }
     D_800F80C4 = 0;
+#ifdef PORT
+    {
+        extern void gdx_gp_resume_on_life_lost(void); // decomp/src/game/game.c
+        gdx_gp_resume_on_life_lost();
+    }
+#endif
 }
 
 void Racer_RetireRacer(Racer* racer) {

@@ -1134,6 +1134,14 @@ Gfx* Menu_DrawGpResultsCharacterPortraits(Gfx* gfx) {
 
     index = 0;
     for (i = 0; i < 6; i++) {
+#ifdef PORT
+        /* A Single Race or a G-NET room can field fewer than six racers. Racer_UpdateRacePositions only fills
+           gRacersByPosition up to gTotalRacers, so the slots past it hold an older race's racers, or NULL after
+           boot: the labels above already stop here. */
+        if (i == gTotalRacers) {
+            break;
+        }
+#endif
         scale = 1.0f;
         top = 136;
         left = (i * 40 + 45);
@@ -3906,6 +3914,8 @@ static void Menus_PayGpRestartLife(void) {
         return;
     }
     if ((gGameMode == GAMEMODE_GP_RACE) && (gRacers[0].id < gNumPlayers)) {
+        extern void gdx_gp_resume_on_life_lost(void); // decomp/src/game/game.c
+
         gPlayerLives[gRacers[0].id]--;
         if (gPlayerLives[gRacers[0].id] >= 0) {
             Hud_TriggerLivesDecrease();
@@ -3913,6 +3923,7 @@ static void Menus_PayGpRestartLife(void) {
         if (gTitleDemoState == TITLE_DEMO_INACTIVE) {
             Audio_TriggerSystemSE(NA_SE_44);
         }
+        gdx_gp_resume_on_life_lost();
     }
 }
 #endif
