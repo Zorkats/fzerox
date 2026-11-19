@@ -940,8 +940,15 @@ Gfx* Hud_DrawRacePositionExtras(Gfx* gfx, s32 left, s32 top) {
     if (gGameMode == GAMEMODE_DEATH_RACE) {
         gDPPipeSync(gfx++);
 
+#ifdef PORT
+        /* Stock puts LEFT 88 pixels back, over the lap counter's total once a Death Race lap limit reaches two
+           digits (x 86-118 against lap digits at 66-106). It now sits where a race draws the place suffix:
+           right after the remaining count, bottom aligned with its digits, clear of the energy bar at 220. */
+        top += 16;
+#else
         left -= 88;
         top += 16;
+#endif
 
         gDPLoadTextureBlock(gfx++, aRacersLeftTex, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 16, 0, G_TX_NOMIRROR | G_TX_WRAP,
                             G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);

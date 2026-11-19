@@ -558,6 +558,46 @@ extern unk_80128C94 D_6000000;
 extern u32 gGameFrameCount;
 extern s32 gGameMode;
 
+#ifdef PORT
+#include "fzx_font.h"
+
+extern int gdx_meta_view_editor_has_author(void); // port/gdx_course_meta_view.h
+
+/* A Course Edit save stamps the active profile as the track's author. With no profile the track saves with no
+   author, so the course select and the race intro show no creator for it. Two lines in the stock font above the
+   panel say so while the name is typed, in characters FONT_SET_4 draws. Machine Create shares this screen and
+   saves no author, so it is left alone. */
+static Gfx* gdx_name_entry_draw_profile_warning(Gfx* gfx) {
+    static char sNoProfileLines[2][48] = {
+        "NO PROFILE - THIS TRACK SAVES WITH NO AUTHOR",
+        "CREATE ONE IN ONLINE - PROFILE FIRST",
+    };
+    s32 i;
+    s32 left;
+    s32 top;
+
+    if ((gGameMode != GAMEMODE_COURSE_EDIT) || gdx_meta_view_editor_has_author()) {
+        return gfx;
+    }
+    for (i = 0; i < 2; i++) {
+        s8* line = (s8*) sNoProfileLines[i];
+
+        /* FONT_SET_4 glyphs are 8 tall and drawn from top - 8: the lines cover y 56-64 and 66-74, clear of the
+           panel border at 78. A black copy one pixel down and right keeps them readable over the editor. */
+        left = 160 - (Font_GetStringWidth(line, FONT_SET_4, 0) / 2);
+        top = 64 + (i * 10);
+        gDPPipeSync(gfx++);
+        gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
+        gfx = Font_DrawString(gfx, left + 1, top + 1, line, 0, FONT_SET_4, 0);
+        gDPPipeSync(gfx++);
+        gDPSetPrimColor(gfx++, 0, 0, 250, 250, 0, 255);
+        gfx = Font_DrawString(gfx, left, top, line, 0, FONT_SET_4, 0);
+    }
+    gDPPipeSync(gfx++);
+    return gfx;
+}
+#endif
+
 Gfx* ExpansionKit_NameEntryDraw(Gfx* gfx, s32* arg1, s32* arg2) {
     Gfx* var_v0;
     s32 xPos;
@@ -717,6 +757,9 @@ Gfx* ExpansionKit_NameEntryDraw(Gfx* gfx, s32* arg1, s32* arg2) {
     gSPTextureRectangle(gfx++, 208 << 2, 144 << 2, 240 << 2, 164 << 2, 0, 128 << 5, 64 << 5, 1 << 10, 1 << 10);
     gDPPipeSync(gfx++);
     gDPSetTextureLUT(gfx++, G_TT_NONE);
+#ifdef PORT
+    gfx = gdx_name_entry_draw_profile_warning(gfx);
+#endif
     return gfx;
 }
 

@@ -6813,6 +6813,117 @@ void gdx_racer_resolve_course_skybox(void) {
 extern GfxPool D_1000000;
 
 #ifdef NON_MATCHING
+#ifdef PORT
+#include "fzx_font.h"
+
+extern int gdx_net_race_name_tag(int racer, char* out, int size, unsigned* colour); // port/gdx_net_race_bridge.c
+
+#define GDX_NAME_TAG_RACERS 30
+
+/* How far above its projected point each racer's place or RIVAL marker reaches in this Racer_Draw, 0 for none.
+   A name tag sits on top of it. */
+static s8 sGdxNameTagMarkerHeight[GDX_NAME_TAG_RACERS];
+
+static void gdx_racer_name_tags_reset(void) {
+    s32 i;
+
+    for (i = 0; i < GDX_NAME_TAG_RACERS; i++) {
+        sGdxNameTagMarkerHeight[i] = 0;
+    }
+}
+
+static void gdx_racer_name_tag_over_marker(s32 racerId, s32 height) {
+    if ((racerId >= 0) && (racerId < GDX_NAME_TAG_RACERS) && (sGdxNameTagMarkerHeight[racerId] < height)) {
+        sGdxNameTagMarkerHeight[racerId] = height;
+    }
+}
+
+/* A G-NET room's race: the other humans' names over their machines, in the small stock font and the colour of
+   their profiles. Each is projected from the point 20 units above the machine that the place markers use, so
+   split screen and the widescreen camera move it the same way, and sits on top of the racer's marker when it has
+   one. Like the markers' 2D layer a tag is not hidden by the track; a machine the game culled (machineLod 0) or
+   one behind the camera gets none. */
+static Gfx* gdx_racer_draw_name_tags(Gfx* gfx, Camera* camera, s32 playerIndex) {
+    char name[24];
+    unsigned colour;
+    Racer* racer;
+    f32 x;
+    f32 y;
+    f32 z;
+    f32 w;
+    f32 clipX;
+    f32 clipY;
+    s32 i;
+    s32 centre;
+    s32 bottom;
+    s32 left;
+    s32 width;
+    s32 red;
+    s32 green;
+    s32 blue;
+
+    if (!gdx_net_race_online()) {
+        return gfx;
+    }
+    for (i = 0; i < gTotalRacers; i++) {
+        racer = &gRacers[i];
+        if ((racer->id == playerIndex) || (racer->machineLod == 0) ||
+            (racer->stateFlags & (RACER_STATE_CRASHED | RACER_STATE_FINISHED | RACER_STATE_RETIRED))) {
+            continue;
+        }
+        if (!gdx_net_race_name_tag(racer->id, name, sizeof(name), &colour)) {
+            continue;
+        }
+        x = racer->segmentPositionInfo.pos.x + (20.0f * racer->trueBasis.y.x);
+        y = racer->segmentPositionInfo.pos.y + (20.0f * racer->trueBasis.y.y);
+        z = racer->segmentPositionInfo.pos.z + (20.0f * racer->trueBasis.y.z);
+        w = (camera->projectionViewMtx.m[0][3] * x) + (camera->projectionViewMtx.m[1][3] * y) +
+            (camera->projectionViewMtx.m[2][3] * z) + camera->projectionViewMtx.m[3][3];
+        if (w < 1.0f) {
+            continue;
+        }
+        clipX = ((camera->projectionViewMtx.m[0][0] * x) + (camera->projectionViewMtx.m[1][0] * y) +
+                 (camera->projectionViewMtx.m[2][0] * z) + camera->projectionViewMtx.m[3][0]) /
+                w;
+        clipY = ((camera->projectionViewMtx.m[0][1] * x) + (camera->projectionViewMtx.m[1][1] * y) +
+                 (camera->projectionViewMtx.m[2][1] * z) + camera->projectionViewMtx.m[3][1]) /
+                w;
+        centre = (s32) ((camera->currentVpScaleX * clipX) + camera->currentVpTransX + 0.5f);
+        bottom = (s32) ((-camera->currentVpScaleY * clipY) + camera->currentVpTransY + 0.5f);
+        if (racer->id < GDX_NAME_TAG_RACERS) {
+            bottom -= sGdxNameTagMarkerHeight[racer->id];
+        }
+        bottom -= 2;
+        width = Font_GetStringWidth((s8*) name, FONT_SET_4, 0);
+        left = centre - (width / 2);
+        /* FONT_SET_4 draws its 8 rows from bottom - 8. A tag outside this player's view is left out. */
+        if (((left + width) <= camera->currentScissorLeft) || (left >= camera->currentScissorRight) ||
+            ((bottom - 8) < camera->currentScissorTop) || (bottom > camera->currentScissorBottom)) {
+            continue;
+        }
+        /* A colour the room did not know draws white. A dark one is lifted so the name reads on a dark track;
+           the black copy one pixel down and right keeps a light one readable. */
+        if (colour == 0) {
+            red = green = blue = 255;
+        } else {
+            red = 64 + ((((colour >> 16) & 0xFF) * 191) / 255);
+            green = 64 + ((((colour >> 8) & 0xFF) * 191) / 255);
+            blue = 64 + (((colour & 0xFF) * 191) / 255);
+        }
+        gDPPipeSync(gfx++);
+        gDPSetTextureLUT(gfx++, G_TT_NONE);
+        gDPSetRenderMode(gfx++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
+        gDPSetPrimColor(gfx++, 0, 0, 0, 0, 0, 255);
+        gfx = Font_DrawString(gfx, left + 1, bottom + 1, (s8*) name, 0, FONT_SET_4, 0);
+        gDPPipeSync(gfx++);
+        gDPSetPrimColor(gfx++, 0, 0, red, green, blue, 255);
+        gfx = Font_DrawString(gfx, left, bottom, (s8*) name, 0, FONT_SET_4, 0);
+    }
+    gDPPipeSync(gfx++);
+    return gfx;
+}
+#endif
+
 Gfx* Racer_Draw(Gfx* gfx, s32 playerIndex) {
     s32 var_s3; // sp5CC
     s32 var_s4; // sp5C8
@@ -8241,6 +8352,9 @@ block_115:
                (gGameMode != GAMEMODE_GP_END_CS)) {
         gSPDisplayList(gfx++, D_4007EA8);
 #ifdef PORT
+        gdx_racer_name_tags_reset();
+#endif
+#ifdef PORT
 #ifndef EXPANSION_KIT
         /* Single Race shows the position markers, as GP does. */
         if (gdx_single_race_active() || ((gGameMode != GAMEMODE_PRACTICE) && (gGameMode != GAMEMODE_DEATH_RACE))) {
@@ -8281,6 +8395,9 @@ block_115:
                 if ((sRacerPairInfo[var_s7].trailToLeadDistance < 800.0f)) {
                     continue;
                 }
+#ifdef PORT
+                gdx_racer_name_tag_over_marker(racer->id, (gNumPlayers < 2) ? 30 : 16);
+#endif
 
                 temp_fs4 = racer->segmentPositionInfo.pos.x + (20.0f * racer->trueBasis.y.x);
                 temp_fs5 = racer->segmentPositionInfo.pos.y + (20.0f * racer->trueBasis.y.y);
@@ -8344,6 +8461,9 @@ block_115:
                 temp_fs4 = sRivalRacer->segmentPositionInfo.pos.x + (20.0f * sRivalRacer->trueBasis.y.x);
                 temp_fs5 = sRivalRacer->segmentPositionInfo.pos.y + (20.0f * sRivalRacer->trueBasis.y.y);
                 sp54C = sRivalRacer->segmentPositionInfo.pos.z + (20.0f * sRivalRacer->trueBasis.y.z);
+#ifdef PORT
+                gdx_racer_name_tag_over_marker(sRivalRacer->id, 16);
+#endif
                 sp574 = 1.0f / (((camera->projectionViewMtx.m[0][3] * temp_fs4) +
                                  (camera->projectionViewMtx.m[1][3] * temp_fs5) +
                                  (camera->projectionViewMtx.m[2][3] * sp54C)) +
@@ -8469,6 +8589,9 @@ block_115:
                 }
             } while (false);
         }
+#ifdef PORT
+        gfx = gdx_racer_draw_name_tags(gfx, camera, playerIndex);
+#endif
     }
 
     return gfx;
