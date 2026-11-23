@@ -19,6 +19,7 @@ extern int CVarGetInteger(const char* name, int defaultValue); // libultraship c
 extern float CVarGetFloat(const char* name, float defaultValue); // libultraship consolevariablebridge.h
 extern float gdx_steering_curve_for_port(int port, float steering);
 #include "../../../port/gdx_course_settings_view.h"
+#include "../../../port/gdx_cpu_speed.h"
 #include "../../../port/gdx_dash_pad.h"
 #include "../../../port/gdx_wind.h"
 #include "../../../port/gdx_test_drive.h"
@@ -5057,6 +5058,12 @@ void Racer_UpdateFromControls(Racer* racer, Controller* controller) {
                 }
             }
         }
+#ifdef PORT
+        /* CPU speed (%): scale the CPU's drive force, which raises its acceleration and top speed. */
+        if (racer->stateFlags & RACER_STATE_CPU_CONTROLLED) {
+            var_fv1 *= gdx_cpu_speed_scale();
+        }
+#endif
         var_fv1 -= ((directionChange * 0.5f) + (racer->driftAttackForce * 0.16f));
         if (var_fv1 < 0.0f) {
             racer->accelerationForce = 0.0f;
