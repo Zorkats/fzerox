@@ -5,6 +5,7 @@
 #include "fzx_course.h"
 #ifdef PORT
 #include "../../../../port/gdx_course_settings_view.h"
+#include "../../../../port/gdx_cpu_speed.h"
 extern s32 gdx_course_branch_settings_point(const CourseSegment* segment);
 #endif
 #ifdef PORT
@@ -825,6 +826,18 @@ void func_i3_80116974(void) {
 #if defined(PORT) && defined(EXPANSION_KIT)
     gdx_splits_view_pace_begin(gdxCreatorPaced, gDifficulty);
 #endif
+#ifdef PORT
+    /* CPU speed (%): the CPUs pace against this race time from lap 2, so a faster machine alone only
+       makes them ease off sooner. Shorten the target in step with the speed option. */
+    {
+        const f32 cpuSpeedScale = gdx_cpu_speed_scale();
+        gdx_cpu_speed_log_race(gCourseIndex, CPU_TUNING_COURSE(), gDifficulty, D_i3_80141990);
+        if ((cpuSpeedScale != 1.0f) && (D_i3_80141990 < MAX_TIMER)) {
+            const f32 scaled = D_i3_80141990 / cpuSpeedScale;
+            D_i3_80141990 = (scaled < (f32) (MAX_TIMER - 1)) ? (s32) scaled : (MAX_TIMER - 1);
+        }
+    }
+#endif
     D_i3_80141994 = D_i3_80141990;
 }
 
@@ -926,6 +939,9 @@ void Cpu_InitRacer(Racer* racer) {
                 D_i3_8013DBE8[i + 1] = 0;
             }
         }
+#ifdef PORT
+        gdx_cpu_speed_log_caps(D_i3_8013DBE8, 64);
+#endif
 
         if (gGameMode == GAMEMODE_RECORDS) {
             racer->unk_1A8 = 0.5f;
@@ -1045,6 +1061,10 @@ void Cpu_InitRacer(Racer* racer) {
             if (gTotalRacers >= racer->unk_368) {
                 racer->unk_39C = D_i3_8013E4A8[CPU_TUNING_COURSE() * 4 + gDifficulty] +
                                  D_i3_8013E628[CPU_TUNING_COURSE() * 4 + gDifficulty] * (racer->unk_368 - 1);
+#ifdef PORT
+                // CPU speed (%): the first-lap pace target, shortened like the race target.
+                racer->unk_39C = (s32) (racer->unk_39C / gdx_cpu_speed_scale());
+#endif
             }
         }
         if ((sPlayerRacer->position == racer->position - 4) || (sPlayerRacer->position == (racer->position + 4)) ||
@@ -1527,7 +1547,16 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
                     func_i3_80116A50(racer);
                 }
             }
-        } else if ((racer->lap >= 2) || (gTitleDemoState == TITLE_DEMO_ACTIVE)) {
+        }
+#ifdef PORT
+        /* CPU speed (%) above stock on a course with no reference race time: the pace below would
+           chase a one-hour finish and coast, so drive at the course's own CPU top-speed target. */
+        else if ((racer->lap >= 2) && (D_i3_80141990 >= MAX_TIMER) && (gdx_cpu_speed_scale() > 1.0f)) {
+            racer->unk_1EC = func_i3_801179DC(racer);
+            racer->unk_1E8 = func_i3_80117A1C(racer);
+        }
+#endif
+        else if ((racer->lap >= 2) || (gTitleDemoState == TITLE_DEMO_ACTIVE)) {
             if ((racer->unk_398 == 0) || ((u32) (racer->id + gGameFrameCount) % 64) < 4) {
                 func_i3_80116A50(racer);
             }
@@ -1587,9 +1616,25 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
         var_a3 += 2;
     }
 
+#ifdef PORT
+    const f32 gdxPreCapTarget = racer->unk_1EC;
+    {
+        /* A ROM hack's course reuses the stock course's per-segment CPU speed table, which ends at the
+           stock course's segment count. Past it the table reads 0, and a 0 cap stops the CPU from
+           accelerating, so it coasts. Use the game's own no-table value (69) there instead. */
+        s16 gdxCap = D_i3_8013DBE8[var_a3];
+        if ((gdxCap <= 0) && gdx_cpu_speed_hack_active()) {
+            gdxCap = 69;
+        }
+        if (gdxCap < racer->unk_1EC) {
+            racer->unk_1EC = gdxCap;
+        }
+    }
+#else
     if (D_i3_8013DBE8[var_a3] < racer->unk_1EC) {
         racer->unk_1EC = D_i3_8013DBE8[var_a3];
     }
+#endif
     if (((D_80141900 > 20) || (gPlayerReverseTimer[0] > 30)) && (gNumPlayers == 1) && (racer->id != 0) &&
         (racer->raceTime > 10000) && !(sPlayerRacer->stateFlags & RACER_STATE_CRASHED) &&
         (func_i3_fabsf(sPlayerRacer->unk_33C - sp94) < 138.0f)) {
@@ -1621,6 +1666,17 @@ void Cpu_GenerateInputs(Racer* racer, Controller* controller) {
             racer->unk_1E8 = 1.0f;
         }
     }
+#ifdef PORT
+    /* CPU speed (%): the commanded speed, corner caps included, so the faster drive force in
+       racer.c is not cut back to the stock pace. */
+    racer->unk_1EC *= gdx_cpu_speed_scale();
+    // Inputs run every 4th frame per racer (the id & 3 gate above), so sample on that cadence.
+    if ((racer->id == gNumPlayers || racer->position == 1) && (((gGameFrameCount >> 2) % 150) == 0)) {
+        gdx_cpu_speed_log_sample(racer->id, racer->lap, racer->position, racer->speed, sPlayerRacer->speed,
+                                 gdxPreCapTarget, D_i3_8013DBE8[var_a3], racer->unk_1EC, racer->unk_1E8,
+                                 racer->accelerationForce, racer->unk_398, racer->raceTime);
+    }
+#endif
     controller->buttonCurrent |= BTN_A;
     if (racer->unk_340 < racer->unk_20C) {
         controller->buttonPressed |= BTN_A;
